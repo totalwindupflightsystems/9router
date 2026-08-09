@@ -95,3 +95,191 @@ tasks:
   status: complete
   created_at: '2026-08-08T19:28:11.820113+00:00'
   completed_at: '2026-08-08T19:28:16.452750+00:00'
+- id: fed-011
+  title: 'FED-011: central /v1 auth falls back to X-9r-Client-Authorization when Authorization
+    is the federation token'
+  criteria:
+  - src/lib/federation/clientAuth.js exists and exports getRelayedClientApiKey that
+    resolves the client key only when Authorization Bearer equals FEDERATION_TOKEN
+    (constant-time compare) and X-9r-Client-Authorization is present
+  - src/sse/services/auth.js extractApiKey calls getRelayedClientApiKey first, returning
+    the relayed client key before the normal Authorization/x-api-key paths
+  - src/dashboardGuard.js extractApiKey also calls getRelayedClientApiKey first (middleware
+    layer for public LLM API paths)
+  - 'Standalone zero-drift: getRelayedClientApiKey returns null when FEDERATION_TOKEN
+    is unset; a normal client key in Authorization never triggers the relay path'
+  - 'tests/federation/client-auth.test.js covers: relay resolution, token mismatch,
+    absent relay header (never leaks fed token as client key), raw non-Bearer relay,
+    node:http plain headers, standalone no-op, missing headers'
+  - tests/federation/proxy.test.js has an edge->central HTTP integration test proving
+    an authenticated /v1 request through a LINKED edge arrives at central with client
+    key sk-client-key resolved (Authorization=Bearer fed-token, X-9r-Client-Authorization=Bearer
+    sk-client-key)
+  status: complete
+  created_at: '2026-08-08T20:45:13.360449+00:00'
+  completed_at: '2026-08-08T20:45:22.744612+00:00'
+- id: fed-013
+  title: 'FED-013: replication + failover loops start from a real entry point, gated
+    on FEDERATION_MODE=edge'
+  criteria:
+  - custom-server.js starts the federation loops on server listening when FEDERATION_MODE=edge
+    via a lazy fail-open loader (startFederationLoopsFromCustomServer calling src/lib/federation/startLoops.js
+    startFederationLoops); standalone/central start nothing (zero drift)
+  - src/lib/federation/startLoops.js is mode-gated (isEdge), double-start-guarded,
+    fail-open on import/start failure (never throws, never crashes a listening server);
+    edgeClient.start and failover.start are both invoked with injectable options
+  - src/instrumentation.js (if changed) starts the loops under FEDERATION_MODE=edge
+    with dynamic import + fail-open, and npm run build still passes
+  - 'tests/federation/custom-server-loops.test.js proves: edge mode starts both loops
+    (fake timers/injectable starts); standalone/non-edge starts nothing; import/start
+    failure never throws; integration-lite: mock central + migrated temp edge DB converges
+    the replica (lastAppliedRevision advances / apiKeys+providerConnections>0) within
+    a few poll cycles, and after mock-central restart the edge recovers to LINKED
+    and drains a queued pendingWrite'
+  - full suite shows no NEW failures vs the 88-fail known baseline (verify-no-regression
+    clean), and git status shows no stray artifacts
+  status: complete
+  created_at: '2026-08-08T22:27:40.210788+00:00'
+  completed_at: '2026-08-08T22:27:46.687810+00:00'
+- id: fed-014
+  title: 'FED-014: README production path (npm run build && npm run start) boots the
+    federation-aware custom-server.js wrapper'
+  criteria:
+  - "package.json start script is 'node custom-server.js' (not 'next start') \u2014\
+    \ grep package.json | start: node custom-server.js"
+  - custom-server.js exports resolveStandaloneServerPath that resolves server.js in
+    BOTH the Docker layout (server.js next to custom-server.js) and the repo layout
+    (.next/standalone/server.js), and the require.main branch exits 1 with a FATAL
+    message naming 'npm run build' when neither exists
+  - src/instrumentation.js register() emits a LOUD console.error mentioning custom-server.js
+    and npm start when FEDERATION_MODE=edge and globalThis.__9ROUTER_CUSTOM_SERVER__
+    is absent, never throws, and keeps calling startFederationLoops in edge mode
+  - README.md Production mode section states npm run start boots the standalone server
+    through custom-server.js and points edges to FEDERATION_MODE=edge / docs/FEDERATION.md
+  - tests/federation/custom-server-boot.test.js exists and covers resolveStandaloneServerPath
+    (both layouts + null), the spawn smoke (Docker layout requires stub server.js;
+    neither layout exits 1 with FATAL), and instrumentation edge-without-wrapper loud
+    warning
+  - 'full vitest suite regression gate passes: verify-no-regression.mjs reports no
+    new failures (known-fails 88 baseline unchanged)'
+  status: complete
+  created_at: '2026-08-08T23:24:04.906775+00:00'
+  completed_at: '2026-08-08T23:24:07.876552+00:00'
+- id: fed-017
+  title: 'FED-017: convert @/lib imports to relative in the custom-server.js plain-node
+    runtime graph'
+  criteria:
+  - "src/lib/db/paths.js imports DATA_DIR via relative ../dataDir.js \u2014 grep 'paths.js'\
+    \ must show zero '@/lib' occurrences"
+  - "All modules in the custom-server.js runtime graph (paths, driver, federation/failover,\
+    \ edgeClient, queue, proxy, state, headers, startLoops) import cleanly under plain\
+    \ node without the @/lib alias \u2014 spawning node with --input-type=module to\
+    \ import each file exits 0 with no 'Cannot find package @/lib' error"
+  - tests/federation/custom-server-boot.test.js contains a plain-node spawn test asserting
+    the runtime graph imports without the alias, and it passes under vitest
+  - 'Repo-layout edge (node custom-server.js = npm start, FEDERATION_MODE=edge, no
+    node_modules/@ symlink) converges its replica against a live central: local-status
+    shows lastAppliedRevision > 0 and revisionLag 0, and apiKeys/providerConnections
+    counts > 0'
+  - 'After killing central, the repo-layout edge flips DEGRADED and serves /v1 locally
+    (HTTP 200, not 502 FED_UPSTREAM_ERROR), with X-Federation-State: degraded on dashboard
+    API reads'
+  status: complete
+  created_at: '2026-08-09T00:03:55.970589+00:00'
+  completed_at: '2026-08-09T00:04:00.239345+00:00'
+- id: fed-015
+  title: 'FED-015: standalone Docker image ships federation runtime; edge boot guard'
+  criteria:
+  - The standalone Dockerfile (docker-compose.yml image) copies src/lib/federation,
+    src/lib/db, and src/lib/dataDir.js so FEDERATION_MODE=edge has the runtime modules
+    (Next file tracing does not follow custom-server.js dynamic imports).
+  - 'custom-server.js refuses to boot when FEDERATION_MODE=edge and the federation
+    runtime modules are missing: missingFederationRuntimeModules({dir,mode}) returns
+    the missing paths, assertFederationRuntimePresent logs a loud FATAL and exits
+    1 (never silent inert).'
+  - 'Standalone/central boots are zero-drift: missingFederationRuntimeModules returns
+    [] when FEDERATION_MODE is unset/central/standalone, and the boot guard does not
+    fire.'
+  - 'tests/federation/custom-server-boot.test.js covers the guard: unit tests for
+    missingFederationRuntimeModules (edge missing -> 4 paths, edge present -> [],
+    central/standalone -> []) and spawn smoke tests (Docker layout + edge without
+    src exits 1 with FATAL and never requires server.js; Docker layout + central boots
+    normally).'
+  - 'LIVE VERIFIED: docker build -f Dockerfile produces an image containing all 15
+    src/lib/federation modules plus src/lib/db/driver.js and src/lib/dataDir.js (docker
+    cp from created container); an identical-layout edge boot runs replication+failover
+    loops, serves /v1 200, zero FATAL; full suite regression gate 88=88 known.'
+  status: complete
+  created_at: '2026-08-09T00:45:09.020546+00:00'
+  completed_at: '2026-08-09T00:45:17.723136+00:00'
+- id: fed-016
+  title: 'Status surface honesty: uninitialized edges + edge-only lag semantics'
+  criteria:
+  - "src/lib/federation/server.js buildLocalStatusPayload reports last_state 'uninitialized'\
+    \ (not the getEdgeState LINKED default) for an edge whose migration-seeded federation_meta\
+    \ row has no lifecycle fields written (role/last_state/lastAppliedRevision all\
+    \ NULL), and reports lastAppliedRevision as null (not 0) \u2014 grep buildLocalStatusPayload\
+    \ in src/lib/federation/server.js for 'uninitialized'"
+  - "central/standalone status payloads report revisionLag 0 plus a revisionLagNote\
+    \ explaining the metric is edge-only (no misleading self-lag) \u2014 grep src/lib/federation/server.js\
+    \ for revisionLagNote"
+  - "an edge that HAS lifecycle activity (row written by edgeClient/failover) still\
+    \ reports the real failover state linked/degraded/recovering from getEdgeState\
+    \ \u2014 tests/federation/local-status.test.js asserts degraded/recovering after\
+    \ setEdgeState and linked for a role-only row"
+  - "docs/FEDERATION.md section 4.1 documents the status-surface semantics (uninitialized\
+    \ meaning, lastAppliedRevision null vs 0, edge-only revisionLag) \u2014 grep docs/FEDERATION.md\
+    \ for '4.1 Status surface semantics'"
+  - 'regression gate clean: node tests/__baseline__/verify-no-regression.mjs reports
+    no new failures vs the 88 known-fails baseline'
+  status: complete
+  created_at: '2026-08-09T01:53:49.936150+00:00'
+  completed_at: '2026-08-09T01:53:54.664266+00:00'
+- id: fed-pr-001
+  title: Open clean federation PR upstream (decolua/9router:master)
+  criteria:
+  - 'A pull request exists on decolua/9router against base master with head totalwindupflightsystems:federation-pr
+    (verify: gh pr view 3173 -R decolua/9router --json state,headRefName,baseRefName
+    returns state OPEN, headRefName federation-pr, baseRefName master)'
+  - 'The PR diff contains exactly the 88 federation feature files and ZERO .coding-hermes/
+    or .gitreins/ paths (verify: gh pr diff 3173 -R decolua/9router --name-only |
+    wc -l equals 88 AND grep -cE ''^\.coding-hermes|^\.gitreins'' returns 0)'
+  - 'The PR mergeability is MERGEABLE (verify: gh pr view 3173 --json mergeable)'
+  - "The federation feature suite passes with no regression on the PR head code (verify:\
+    \ bash scripts/gitreins-guard-tests.sh exits 0 \u2014 regression gate 88=88 known\
+    \ baseline, no new failures)"
+  status: complete
+  created_at: '2026-08-09T02:58:29.689515+00:00'
+  completed_at: '2026-08-09T02:58:41.682182+00:00'
+- id: fed-018
+  title: "FED-018 \u2014 edge dev-mode proxy gap: FATAL exit on next dev"
+  criteria:
+  - 'instrumentation.js register() exits process with code 1 (process.exit(1)) when
+    FEDERATION_MODE=edge and NODE_ENV=development, BEFORE starting federation loops
+    (verify: src/instrumentation.js contains the FATAL branch and the file''s register()
+    calls process.exit(1) when both conditions hold)'
+  - 'The FATAL message is a clear remediation: it mentions the edge proxy lives only
+    in custom-server.js, names next dev, and tells the operator to use ''npm run build
+    && npm start'' or docker compose federation (verify: message text present in src/instrumentation.js)'
+  - "Standalone and central dev boots are unaffected \u2014 zero drift (verify: tests/federation/custom-server-boot.test.js\
+    \ contains dev-mode tests asserting central/standalone under NODE_ENV=development\
+    \ produce no console.error, no process.exit, no loop start)"
+  - 'The production edge path is unchanged: NODE_ENV unset (production boot) still
+    logs the FED-014 wrapper warning and starts loops, never FATAL (verify: tests/federation/custom-server-boot.test.js
+    asserts the production-path edge test exits are not called and loops start once)'
+  - 'Tests pass: federation suite green (verify: cd tests && npx vitest run federation/custom-server-boot.test.js
+    passes, including the new FED-018 dev-mode FATAL cases)'
+  status: complete
+  created_at: '2026-08-09T09:33:51.433343+00:00'
+  completed_at: '2026-08-09T09:33:57.199716+00:00'
+- id: fed-019
+  title: 'FED-019: root-level npm test script + vitest cwd note'
+  criteria:
+  - Root package.json has a "test" script that runs the vitest suite from tests/ (cd
+    tests && npx vitest run)
+  - npm test from repo root runs ~1983 tests with <=88 fail / 59 skip (no false-red
+    249-fail suite from root cwd)
+  - AGENTS.md documents the tests/ cwd requirement
+  status: complete
+  created_at: '2026-08-09T10:06:03.211496+00:00'
+  completed_at: '2026-08-09T10:06:06.978918+00:00'

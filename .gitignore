@@ -90,3 +90,9 @@ graphify-out/*
 .codegraph/
 .PR/
 .next-analyze/*
+
+# Local tooling DBs / caches (never commit)
+dagger.db
+.vfs/
+.coding-hermes/board/board.db
+.gitreins/history/
