@@ -235,6 +235,7 @@ of a false green "Federation linked".
 | Symptom | Cause / fix |
 |---|---|
 | Edge reports `"last_state": "uninitialized"` (never-started) | Federation loops never started: `FEDERATION_MODE=edge` missing at boot, the custom-server wrapper didn't boot, or the federation modules are absent from the image. Check logs for `[federation] replication + failover loops started`; an edge that is actually running flips to `linked`/`degraded` within seconds. |
+| `npm run dev` / `next dev` with `FEDERATION_MODE=edge` exits FATAL | **Expected (FED-018).** The edge proxy + DEGRADED intercept live only in `custom-server.js`, which the Next.js dev server never loads — a dev-mode edge would silently serve zero federation behavior. Use the production path: `npm run build && npm start` (or `docker compose -f docker-compose.federation.yml up`). Central/standalone dev is unaffected. |
 | Edge stays LINKED but `/v1` 502s | `FEDERATION_CENTRAL_URL` unreachable from the edge (firewall, DNS, TLS). Check `curl https://central/api/federation/verify` with the token. |
 | Federation API calls 401 | `FEDERATION_TOKEN` mismatch. Regenerate once and set identically everywhere. |
 | Dashboard sessions break across instances | `JWT_SECRET` mismatch. |

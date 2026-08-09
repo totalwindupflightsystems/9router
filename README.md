@@ -128,6 +128,14 @@ npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
+> ⚠️ Dev mode (`npm run dev` / `next dev`) does **not** support
+> `FEDERATION_MODE=edge`: the edge proxy + DEGRADED intercept live only in
+> `custom-server.js`, which the Next.js dev server never loads, so an edge
+> dev boot exits FATAL with a clear message. Use the production path
+> (`npm run build && npm start`) or `docker compose -f
+> docker-compose.federation.yml up` to run an edge. Central/standalone dev
+> is unaffected.
+
 Production mode:
 
 ```bash

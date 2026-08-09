@@ -315,3 +315,97 @@ describe("instrumentation register() — wrapper-absent edge warning", () => {
     expect(startFederationLoops).not.toHaveBeenCalled();
   });
 });
+
+// ─── Unit: instrumentation.js dev-mode edge FATAL (FED-018) ──────────────
+//
+// `next dev` can NEVER load the custom-server.js http wrapper — the edge
+// proxy / DEGRADED intercept live only there. An edge booted under dev mode
+// would silently serve zero federation proxy behavior (loops start, proxy
+// does not). register() must exit(1) FATAL with a clear remediation message
+// BEFORE starting loops; standalone/central in dev mode stay silent.
+describe("instrumentation register() — dev-mode edge FATAL (FED-018)", () => {
+  let savedRuntime;
+  let savedMode;
+  let savedNodeEnv;
+  let errorSpy;
+  let exitSpy;
+
+  beforeEach(() => {
+    savedRuntime = process.env.NEXT_RUNTIME;
+    savedMode = process.env.FEDERATION_MODE;
+    savedNodeEnv = process.env.NODE_ENV;
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.FEDERATION_MODE;
+    delete globalThis.__9ROUTER_CUSTOM_SERVER__;
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {});
+    startFederationLoops.mockClear();
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+    if (savedRuntime === undefined) delete process.env.NEXT_RUNTIME;
+    else process.env.NEXT_RUNTIME = savedRuntime;
+    if (savedMode === undefined) delete process.env.FEDERATION_MODE;
+    else process.env.FEDERATION_MODE = savedMode;
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedNodeEnv;
+    if (globalThis.__9ROUTER_CUSTOM_SERVER__ !== undefined)
+      delete globalThis.__9ROUTER_CUSTOM_SERVER__;
+  });
+
+  it("edge mode under dev (NODE_ENV=development): FATAL exit(1) BEFORE loops start, clear remediation message", async () => {
+    process.env.FEDERATION_MODE = "edge";
+    process.env.NODE_ENV = "development";
+    await expect(register()).resolves.toBeUndefined();
+    const fatals = errorSpy.mock.calls.filter((args) =>
+      String(args[0]).includes("[federation] FATAL")
+    );
+    expect(fatals).toHaveLength(1);
+    expect(String(fatals[0][0])).toMatch(/cannot run under `next dev`/);
+    expect(String(fatals[0][0])).toMatch(/npm run build && npm start/);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    // The proxy cannot exist in dev mode — loops must NOT start (a broken
+    // edge that looks healthy is exactly the failure FED-018 prevents).
+    expect(startFederationLoops).not.toHaveBeenCalled();
+  });
+
+  it("edge mode under dev WITH the wrapper marker: still FATAL (marker cannot be present in dev, but guard is marker-independent)", async () => {
+    process.env.FEDERATION_MODE = "edge";
+    process.env.NODE_ENV = "development";
+    globalThis.__9ROUTER_CUSTOM_SERVER__ = true;
+    await expect(register()).resolves.toBeUndefined();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(startFederationLoops).not.toHaveBeenCalled();
+  });
+
+  it("central mode under dev: completely silent, no exit, no loop start (zero drift)", async () => {
+    process.env.FEDERATION_MODE = "central";
+    process.env.NODE_ENV = "development";
+    await expect(register()).resolves.toBeUndefined();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(startFederationLoops).not.toHaveBeenCalled();
+  });
+
+  it("standalone (mode unset) under dev: completely silent, no exit, no loop start (zero drift)", async () => {
+    process.env.NODE_ENV = "development";
+    await expect(register()).resolves.toBeUndefined();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(startFederationLoops).not.toHaveBeenCalled();
+  });
+
+  it("edge mode under production (NODE_ENV unset/undefined): NOT FATAL — warning + loops still start (unchanged prod path)", async () => {
+    process.env.FEDERATION_MODE = "edge";
+    delete process.env.NODE_ENV;
+    await expect(register()).resolves.toBeUndefined();
+    expect(exitSpy).not.toHaveBeenCalled();
+    const warnings = errorSpy.mock.calls.filter((args) =>
+      String(args[0]).includes("custom-server.js wrapper is NOT active")
+    );
+    expect(warnings).toHaveLength(1);
+    expect(startFederationLoops).toHaveBeenCalledTimes(1);
+  });
+});
