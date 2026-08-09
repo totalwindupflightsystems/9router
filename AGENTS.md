@@ -33,7 +33,7 @@ npm run build && PORT=20128 HOSTNAME=0.0.0.0 npm run start            # producti
 npm run cli:pack                                                      # CLI launcher package (cli/)
 # Tests (independent ESM package in tests/):
 npm install && cd tests && npm install && cd ..
-npx vitest run                                                        # from tests/ (auto-discovers vitest.config.js)
+npm test                                                              # from repo root (cds into tests/; vitest MUST run from tests/ — root cwd breaks @/ alias resolution)
 node tests/__baseline__/verify-no-regression.mjs <vitest-json-results>  # regression gate (known-fails baseline)
 npx eslint .                                                          # lint
 ```
