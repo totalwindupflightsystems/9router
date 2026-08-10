@@ -1,0 +1,37 @@
+# 9Router — AI Code Tool Integrations
+
+9Router exposes an OpenAI-compatible `/v1` API (plus an Anthropic-compatible
+`/v1/messages`) on the gateway's base URL, so any AI coding tool that supports
+custom API endpoints can be pointed at it.
+
+**Default endpoint (local install):** `http://localhost:20128/v1`
+
+The dashboard also ships a **CLI Tools** page (`/dashboard/cli-tools`) that
+writes the configuration for many tools automatically — open it first, then use
+the per-tool guides below for anything the page doesn't cover.
+
+## Before you start
+
+1. Start 9Router (see [README](../../README.md) — dev, production, or Docker).
+2. Create an **API key**: Dashboard → **Endpoint** page → **API Keys** →
+   create a new key and copy it. Keys are also usable as `x-api-key` or a
+   `Bearer` token (see [API Reference](../api-reference.md#authentication)).
+3. Pick a model id from the dashboard's **Providers** page, or list them via
+   `GET /v1/models`. Model ids use the form `<provider>/<model>`, e.g.
+   `kr/claude-sonnet-4.5`.
+
+## Guides
+
+| Tool | Guide |
+|---|---|
+| Claude Code | [claude-code.md](claude-code.md) |
+| Cursor | [cursor.md](cursor.md) |
+
+## Supported tools
+
+The dashboard CLI Tools page configures: **Claude Code, Codex, Cline, GitHub
+Copilot, OpenClaw, OpenCode, Kilo, Droid, Hermes, Jcode, Grok Build, Cowork,
+DeepSeek TUI, Antigravity**, plus a local **MITM server** for tools that cannot
+be pointed at a custom endpoint. If your tool is not listed, use the manual
+pattern from the guides — nearly every tool supports `base URL + API key`
+configuration.

@@ -107,7 +107,8 @@ docker rm -f 9router
 ## Build image locally (test)
 
 ```bash
-cd app && docker build -t 9router .
+# The Dockerfile lives at the repo root — build from here (no app/ subdirectory)
+docker build -t 9router .
 
 docker run --rm -p 20128:20128 \
   -v "$HOME/.9router:/app/data" \

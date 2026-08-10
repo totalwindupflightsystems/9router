@@ -118,6 +118,10 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
 
 **That's it!** Start coding with FREE AI models.
 
+> Per-tool setup guides (Claude Code, Cursor, and more):
+> [docs/integrations/](docs/integrations/README.md) · API reference:
+> [docs/api-reference.md](docs/api-reference.md)
+
 **Alternative: run from source (this repository):**
 
 This repository package is private (`9router-app`), so source/Docker execution is the expected local development path.
@@ -1294,7 +1298,7 @@ docker run -d \
 
 ```bash
 git clone https://github.com/decolua/9router.git
-cd 9router/app
+cd 9router
 docker build -t 9router .
 docker run -d --name 9router -p 20128:20128 \
   -v "$HOME/.9router:/app/data" -e DATA_DIR=/app/data 9router

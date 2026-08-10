@@ -55,6 +55,7 @@ docs/*
 !docs/specs/
 !docs/*.md
 !docs/dogfood/
+!docs/integrations/
 test/*
 open-sse/test/*
 RM.vn.md
