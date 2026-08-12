@@ -389,7 +389,16 @@ export async function applyReplayMutation(db, { method, path, body = null } = {}
       const { createApiKey } = await import("../db/repos/apiKeysRepo.js");
       const name = body?.name;
       if (!name) return { ok: false, status: 400, error: "name is required" };
-      await createApiKey(name, body?.machineId || null);
+      // Replayed edge writes carry only the client's original body — derive
+      // the machine id server-side like the direct /api/keys route does
+      // (edge queued payloads never include one; binding to the edge's id
+      // would differ from the linked-proxy path, which uses central's).
+      let machineId = body?.machineId || null;
+      if (!machineId) {
+        const { getConsistentMachineId } = await import("../../shared/utils/machineId.js");
+        machineId = await getConsistentMachineId();
+      }
+      await createApiKey(name, machineId);
       return { ok: true };
     }
     const keysId = p.match(/^\/api\/keys\/([^/]+)$/);

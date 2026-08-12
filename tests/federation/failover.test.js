@@ -591,6 +591,34 @@ describe("failover — fencing (acceptance 3)", () => {
     const { handleReplay, HttpError } = await import("@/lib/federation/server.js");
     await expect(handleReplay({ json: async () => ({}) })).rejects.toMatchObject({ status: 403 });
   });
+
+  it("replays POST /api/keys without machineId — derives it server-side (L3 dogfood regression)", async () => {
+    process.env.FEDERATION_MODE = "central";
+    process.env.FEDERATION_TOKEN = "fed-secret";
+    vi.resetModules();
+
+    const db = await createMigratedDb();
+    pointDriverAt(db);
+    const { handleVerify, handleReplay } = await import("@/lib/federation/server.js");
+
+    const v1 = await handleVerify({ headers: { get: () => "edge-1" } });
+    const req = {
+      json: async () => ({
+        idempotency_key: "k-key-1",
+        method: "POST",
+        path: "/api/keys",
+        // Edge queued payloads carry only the client's original body — no machineId.
+        body: { name: "replayed-key" },
+        fencing_token: v1.fencing_token,
+      }),
+    };
+    const applied = await handleReplay(req);
+    expect(applied.applied).toBe(true);
+    const row = db.get(`SELECT key, name, machineId FROM apiKeys WHERE name = 'replayed-key'`);
+    expect(row).toBeTruthy();
+    expect(row.key).toMatch(/^sk-/);
+    expect(row.machineId).toBeTruthy();
+  });
 });
 
 // ─── Edge client auth ────────────────────────────────────────────────────

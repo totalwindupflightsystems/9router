@@ -79,6 +79,13 @@ started via the documented Docker/README path converges its replica within ~15s,
 authenticated `/v1` completion through the proxy, flips DEGRADED on central death, still
 serves from the replica, queues writes, and recovers + reconciles when central returns.
 
+**Status (2026-08-12): re-verified PASS — see
+`docs/dogfood/2026-08-12-federation-l3-reverify.md`.** All four acceptance checks (A: converge,
+B: authenticated proxying, C: Bearer-only API, D: kill/restart lifecycle with drain) now pass
+against the current `federation` branch. The re-run surfaced and fixed one new integration bug
+(queued `POST /api/keys` replays failed with `machineId is required` — server.js now derives
+machineId like the direct route).
+
 ## 6. Why the e2e harness missed all of this
 
 `tests/federation/e2e.mjs` + `e2e-child.mjs` build a **framework-free** node:http server
