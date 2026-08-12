@@ -1,3 +1,10 @@
+# Standalone deployment. The image reads its secrets from `.env` — copy
+# .env.example to .env first (`cp .env.example .env`) and set real values
+# for INITIAL_PASSWORD / JWT_SECRET / API_KEY_SECRET (see README).
+# `.env` is intentionally OPTIONAL at config time (required: false) so a
+# fresh clone validates with `docker compose config`; without it the
+# container falls back to insecure image defaults. Requires Docker Compose
+# v2.24+ for the optional env_file syntax.
 services:
   9router:
     image: decolua/9router:latest
@@ -8,7 +15,8 @@ services:
     volumes:
       - 9router-data:/app/data
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       DATA_DIR: /app/data
       PORT: "20128"

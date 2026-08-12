@@ -152,6 +152,24 @@ federation-aware wrapper). Edge nodes additionally set `FEDERATION_MODE=edge`
 (plus `FEDERATION_TOKEN` / `FEDERATION_CENTRAL_URL` — see
 [docs/FEDERATION.md](docs/FEDERATION.md)).
 
+**Docker (docker compose):**
+
+```bash
+cp .env.example .env   # REQUIRED before first up — the container reads its
+                       # secrets (INITIAL_PASSWORD, JWT_SECRET, API_KEY_SECRET)
+                       # from this file; without it the image falls back to
+                       # insecure defaults
+docker compose up -d
+```
+
+> `docker-compose.yml` treats `.env` as optional at config time (so
+> `docker compose config` validates on a fresh clone), but you still need it
+> for a real deployment — set `INITIAL_PASSWORD` / `JWT_SECRET` /
+> `API_KEY_SECRET` before exposing the instance. The optional `env_file`
+> syntax requires Docker Compose v2.24+.
+> Federation deployments use `docker compose -f docker-compose.federation.yml up`
+> instead (see [docs/FEDERATION.md](docs/FEDERATION.md)).
+
 Default URLs:
 
 - Dashboard: `http://localhost:20128/dashboard`
