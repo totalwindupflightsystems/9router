@@ -412,7 +412,29 @@ function assertFederationRuntimePresent() {
   process.exit(1);
 }
 
-module.exports = { resolveStandaloneServerPath, missingFederationRuntimeModules };
+// NR-GAP-019 placeholder-secret guard: docker-compose.federation.yml ships
+// change-me-* example secrets. Warn loudly at boot so a copy-paste deployment
+// is never silently exposed beyond localhost. Warning-only (localhost
+// quickstarts still boot); exported so spawned-child unit tests can exercise
+// it with arbitrary env objects (importing this file into vitest would leak
+// the http.createServer monkeypatch above).
+function checkPlaceholderSecrets(env = process.env) {
+  const PLACEHOLDER_PREFIXES = [
+    ["FEDERATION_TOKEN", "change-me"],
+    ["JWT_SECRET", "change-me"],
+    ["API_KEY_SECRET", "change-me"],
+    ["INITIAL_PASSWORD", "change-me"],
+  ];
+  return PLACEHOLDER_PREFIXES.filter(([name, prefix]) =>
+    String(env[name] || "").startsWith(prefix)
+  ).map(([name]) => name);
+}
+
+module.exports = {
+  resolveStandaloneServerPath,
+  missingFederationRuntimeModules,
+  checkPlaceholderSecrets,
+};
 
 if (require.main === module) {
   const serverPath = resolveStandaloneServerPath();
@@ -425,5 +447,18 @@ if (require.main === module) {
     process.exit(1);
   }
   assertFederationRuntimePresent();
+
+  const placeholderSecrets = checkPlaceholderSecrets();
+  if (placeholderSecrets.length > 0) {
+    console.error(
+      "[security] WARNING: placeholder secrets still in use (" +
+        placeholderSecrets.join(", ") +
+        " are set to the docker-compose.federation.yml example values). " +
+        "Fine for localhost-only testing, but this instance is NOT safe to " +
+        "expose beyond localhost. Replace them before any real deployment " +
+        "— see docs/FEDERATION.md §6.1."
+    );
+  }
+
   require(serverPath);
 }

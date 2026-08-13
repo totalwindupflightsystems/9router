@@ -252,8 +252,25 @@ of a false green "Federation linked".
 
 ### 6.1 Docker (example compose)
 
+> **Change the secrets first.** `docker-compose.federation.yml` ships with
+> placeholder secrets (`FEDERATION_TOKEN`, `JWT_SECRET`, `API_KEY_SECRET`,
+> `INITIAL_PASSWORD` all start with `change-me`). Booting with them works for
+> localhost-only testing and prints a prominent warning, but an instance
+> reachable beyond localhost is trivially compromised — replace them before
+> any real deployment:
+
 ```bash
-# Build + start central + 2 edges (see docker-compose.federation.yml):
+# 1. Replace the placeholder secrets in docker-compose.federation.yml (or
+#    override them via the environment). All four must be long, random values;
+#    FEDERATION_TOKEN must be identical on every instance:
+#      FEDERATION_TOKEN:  <long random token, shared edge↔central>
+#      JWT_SECRET:        <long random string>
+#      API_KEY_SECRET:    <long random string>
+#      INITIAL_PASSWORD:  <dashboard login password>
+sed -i 's/change-me-to-a-long-random-federation-token/YOUR-LONG-RANDOM-TOKEN/' docker-compose.federation.yml
+#    ...and edit the remaining three change-me-* values by hand.
+
+# 2. Build + start central + 2 edges:
 docker compose -f docker-compose.federation.yml up -d --build
 
 # Check status:

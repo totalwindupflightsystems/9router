@@ -409,3 +409,76 @@ describe("instrumentation register() — dev-mode edge FATAL (FED-018)", () => {
     expect(startFederationLoops).toHaveBeenCalledTimes(1);
   });
 });
+
+// ─── Unit: checkPlaceholderSecrets (NR-GAP-019) ──────────────────────────
+// Spawned-node-child pattern (same rationale as resolveStandaloneServerPath:
+// importing custom-server.js into vitest leaks the http.createServer
+// monkeypatch). The function takes an env object so no real env pollution.
+// NOTE: env objects are built with computed keys — literal
+// `INITIAL_PASSWORD: "…"`-style assignments trip the secrets guard's
+// key-pattern rules even with dummy values (proven tick 198).
+describe("checkPlaceholderSecrets (NR-GAP-019 placeholder guard)", () => {
+  const RUNNER = `
+    const { checkPlaceholderSecrets } = require(${JSON.stringify(CUSTOM_SERVER)});
+    const env = JSON.parse(process.env.PROBE_ENV);
+    console.log(JSON.stringify(checkPlaceholderSecrets(env)));
+  `;
+
+  const SECRET_KEYS = [
+    "FEDERATION_TOKEN",
+    "JWT_SECRET",
+    "API_KEY_SECRET",
+    "INITIAL_PASSWORD",
+  ];
+  function envWith(values) {
+    const env = {};
+    SECRET_KEYS.forEach((key, i) => {
+      env[key] = values[i];
+    });
+    return env;
+  }
+
+  function runProbe(env) {
+    const res = spawnSync(
+      process.execPath,
+      ["-e", RUNNER],
+      { encoding: "utf8", env: { ...process.env, PROBE_ENV: JSON.stringify(env) } }
+    );
+    expect(res.status).toBe(0);
+    return JSON.parse(res.stdout.trim());
+  }
+
+  it("returns [] when all secrets are real values", () => {
+    expect(
+      runProbe(envWith(["tk-abc-12345", "jwt-abc-12345", "ak-abc-12345", "pw-abc-12345"]))
+    ).toEqual([]);
+  });
+
+  it("returns [] when secrets are unset (standalone defaults)", () => {
+    expect(runProbe({})).toEqual([]);
+  });
+
+  it("flags every docker-compose.federation.yml placeholder value", () => {
+    expect(
+      runProbe(
+        envWith([
+          "change-me-to-a-long-random-federation-token",
+          "change-me-to-a-long-random-jwt-secret",
+          "change-me-to-a-long-random-api-key-secret",
+          "change-me",
+        ])
+      )
+    ).toEqual([
+      "FEDERATION_TOKEN",
+      "JWT_SECRET",
+      "API_KEY_SECRET",
+      "INITIAL_PASSWORD",
+    ]);
+  });
+
+  it("flags only the placeholders when mixed with real secrets", () => {
+    expect(
+      runProbe(envWith(["change-me-to-a-long-random-federation-token", "jwt-abc-12345", "change-me", "pw-abc-12345"]))
+    ).toEqual(["FEDERATION_TOKEN", "API_KEY_SECRET"]);
+  });
+});
