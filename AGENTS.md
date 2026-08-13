@@ -57,8 +57,10 @@ credentials — skip them.
   `src/lib/db/migrations/`. Tables: `settings`, `providerConnections`,
   `providerNodes`, `proxyPools`, `apiKeys`, `modelAliases`, `combos`,
   `pricing`, usage tables. WAL mode.
-- **Usage tracking** (separate): `usage.json` + `log.txt` under `~/.9router`
-  (does NOT follow `DATA_DIR`).
+- **Usage tracking**: SQLite-backed in the main DB (`usageHistory`/`usageDaily`
+  tables via `src/lib/db/repos/usageRepo.js`; `src/lib/usageDb.js` is a compat
+  shim re-exporting it). Follows `DATA_DIR` like all other state — no separate
+  `usage.json`/`log.txt` files remain.
 - **Existing cloud sync** (optional, external service, code NOT in repo):
   `src/lib/initCloudSync.js`, `src/shared/services/cloudSyncScheduler.js`,
   `/api/sync/cloud` (enable/sync/disable), `POST /sync/{machineId}`,
@@ -89,7 +91,7 @@ credentials — skip them.
   tick counters/cooldown). `fixtures.jsonl` = perpetual tasks
   (NEVER-DONE, E2E-001, GITREINS-JUDGE). Schema: `.coding-hermes/board/schema.sql`.
 - Task IDs: `FED-00N` (federation feature phases). Specs: `docs/federation-spec.md`
-  + `docs/specs/` per phase.
+  (authoritative; per-phase breakdown in §5) + `docs/specs/` (per-phase index).
 
 ## DuckBrain
 
