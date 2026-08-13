@@ -56,8 +56,8 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
-        UDB[(usage.json + log.txt)]
+        DB[(SQLite main DB)]
+        UDB[(SQLite usage tables\nusageHistory/usageDaily)]
     end
 
     subgraph Upstreams[Upstream Providers]
@@ -143,9 +143,8 @@ Primary state DB:
 
 Usage DB:
 
-- `src/lib/usageDb.js`
-- files: `~/.9router/usage.json`, `~/.9router/log.txt`
-- note: currently independent from `DATA_DIR`
+- `src/lib/usageDb.js` (compat shim re-exporting `src/lib/db/repos/usageRepo.js`)
+- tables: `usageHistory`, `usageDaily` in the main SQLite DB (follows `DATA_DIR`)
 
 ## 4) Auth + Security Surfaces
 
@@ -377,9 +376,9 @@ erDiagram
 
 Physical storage files:
 
-- main state: `${DATA_DIR}/db.json` (or `~/.9router/db.json`)
-- usage stats: `~/.9router/usage.json`
-- request log lines: `~/.9router/log.txt`
+- main state: SQLite DB at `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite`)
+- usage stats: SQLite `usageHistory`/`usageDaily` tables in the main DB
+- request log lines: `usageHistory` rows (surfaced via `getRecentLogs`; the legacy `appendRequestLog` is a no-op compat stub)
 - optional translator/request debug sessions: `<repo>/logs/...`
 
 ## Deployment Topology
@@ -394,8 +393,8 @@ flowchart LR
     subgraph ContainerOrProcess[9Router Runtime]
         Next[Next.js Server\nPORT=20128]
         Core[SSE Core + Executors]
-        MainDB[(db.json)]
-        UsageDB[(usage.json/log.txt)]
+        MainDB[(SQLite main DB)]
+        UsageDB[(SQLite usage tables\nusageHistory/usageDaily)]
     end
 
     subgraph External[External Services]
@@ -515,8 +514,8 @@ Translations are selected dynamically based on source payload shape and provider
 Runtime visibility sources:
 
 - console logs from `src/sse/utils/logger.js`
-- per-request usage aggregates in `usage.json`
-- textual request status log in `log.txt`
+- per-request usage aggregates in the SQLite `usageHistory` table
+- request status history in `usageHistory` rows (`getRecentLogs`; no `log.txt` writer remains)
 - optional deep request/translation logs under `logs/` when `ENABLE_REQUEST_LOGS=true`
 - dashboard usage endpoints (`/api/usage/*`) for UI consumption
 
