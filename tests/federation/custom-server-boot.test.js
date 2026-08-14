@@ -482,3 +482,97 @@ describe("checkPlaceholderSecrets (NR-GAP-019 placeholder guard)", () => {
     ).toEqual(["FEDERATION_TOKEN", "API_KEY_SECRET"]);
   });
 });
+
+// ─── NR-GAP-019 boot gate (2nd reopen): FATAL in federation mode ─────────
+// The first fix shipped a warning-only gate; a `docker compose up -d`
+// deployer never sees container logs before exposure. TIGHTENED: a
+// federation-mode boot (FEDERATION_MODE=central|edge, i.e. the compose
+// services) with placeholder secrets REFUSES to boot (exit 1, loud FATAL,
+// server.js never required). Standalone (FEDERATION_MODE unset) keeps the
+// warning-only path — zero drift for localhost quickstarts (hard gate).
+// Env objects use computed keys (tick-198 pitfall: literal secret-key
+// assignments trip the secrets guard even with dummy values).
+
+describe("NR-GAP-019 — placeholder boot gate (spawn smoke)", () => {
+  const PLACEHOLDER_VALUES = [
+    "change-me-to-a-long-random-federation-token",
+    "change-me-to-a-long-random-jwt-secret",
+    "change-me-to-a-long-random-api-key-secret",
+    "change-me",
+  ];
+  const REAL_VALUES = ["tk-abc-12345", "jwt-abc-12345", "ak-abc-12345", "pw-abc-12345"];
+
+  function bootEnv(mode, values) {
+    const SECRET_KEYS = [
+      "FEDERATION_TOKEN",
+      "JWT_SECRET",
+      "API_KEY_SECRET",
+      "INITIAL_PASSWORD",
+    ];
+    const env = { ...process.env };
+    SECRET_KEYS.forEach((key, i) => {
+      env[key] = values[i];
+    });
+    if (mode) env.FEDERATION_MODE = mode;
+    return env;
+  }
+
+  function boot(mode, values) {
+    fs.copyFileSync(CUSTOM_SERVER, path.join(tempDir, "custom-server.js"));
+    const marker = path.join(tempDir, "required.marker");
+    fs.writeFileSync(
+      path.join(tempDir, "server.js"),
+      `require("fs").writeFileSync(process.env.MARKER_PATH, "required");\n`
+    );
+    const res = spawnSync(process.execPath, ["custom-server.js"], {
+      cwd: tempDir,
+      env: { ...bootEnv(mode, values), MARKER_PATH: marker },
+      encoding: "utf8",
+      timeout: 15000,
+    });
+    return { res, marker };
+  }
+
+  it("central + placeholder secrets: exit 1 with FATAL, server.js never required", () => {
+    const { res, marker } = boot("central", PLACEHOLDER_VALUES);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/\[security\] FATAL: placeholder secrets still in use/);
+    expect(res.stderr).toMatch(/refusing to boot in FEDERATION_MODE=central/);
+    expect(res.stderr).toMatch(/docs\/FEDERATION\.md §6\.1/);
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it("edge + placeholder secrets: exit 1 (same gate, any federation mode)", () => {
+    // Edge needs the federation runtime present (FED-015 gate) to reach the
+    // placeholder check — stub the four modules like the FED-015 unit test.
+    for (const rel of [
+      "src/lib/federation/proxy.js",
+      "src/lib/federation/startLoops.js",
+      "src/lib/db/driver.js",
+      "src/lib/dataDir.js",
+    ]) {
+      const p = path.join(tempDir, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, "// stub\n");
+    }
+    const { res, marker } = boot("edge", PLACEHOLDER_VALUES);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/refusing to boot in FEDERATION_MODE=edge/);
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it("standalone (mode unset) + placeholder secrets: WARNING, still boots (zero drift)", () => {
+    const { res, marker } = boot(null, PLACEHOLDER_VALUES);
+    expect(res.status).toBe(0);
+    expect(res.stderr).toMatch(/\[security\] WARNING: placeholder secrets still in use/);
+    expect(res.stderr).not.toMatch(/FATAL/);
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  it("central + real secrets: boots normally (no false refusal)", () => {
+    const { res, marker } = boot("central", REAL_VALUES);
+    expect(res.status).toBe(0);
+    expect(res.stderr).not.toMatch(/\[security\]/);
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+});

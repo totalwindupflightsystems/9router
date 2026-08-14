@@ -254,10 +254,12 @@ of a false green "Federation linked".
 
 > **Change the secrets first.** `docker-compose.federation.yml` ships with
 > placeholder secrets (`FEDERATION_TOKEN`, `JWT_SECRET`, `API_KEY_SECRET`,
-> `INITIAL_PASSWORD` all start with `change-me`). Booting with them works for
-> localhost-only testing and prints a prominent warning, but an instance
-> reachable beyond localhost is trivially compromised — replace them before
-> any real deployment:
+> `INITIAL_PASSWORD` all start with `change-me`). A federation-mode boot
+> (the `central`/`edge` services) with placeholders still in place REFUSES
+> to start with a loud `[security] FATAL` error and exit code 1 — replace
+> them before any real deployment, or the instance is trivially compromised
+> beyond localhost. (Standalone quickstarts, `FEDERATION_MODE` unset, still
+> boot with a prominent warning — localhost-only testing only.)
 
 ```bash
 # 1. Replace the placeholder secrets in docker-compose.federation.yml (or

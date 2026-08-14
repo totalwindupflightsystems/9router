@@ -450,6 +450,24 @@ if (require.main === module) {
 
   const placeholderSecrets = checkPlaceholderSecrets();
   if (placeholderSecrets.length > 0) {
+    const federationMode = process.env.FEDERATION_MODE;
+    if (federationMode) {
+      // NR-GAP-019 (2nd reopen): a federation instance (compose central/edge)
+      // with the example placeholder secrets is trivially compromised if
+      // reachable beyond localhost — refuse to boot instead of warning
+      // (container logs are invisible to a `docker compose up -d` deployer).
+      // Standalone (FEDERATION_MODE unset) keeps the warning-only path below.
+      console.error(
+        "[security] FATAL: placeholder secrets still in use (" +
+          placeholderSecrets.join(", ") +
+          " are set to the docker-compose.federation.yml example values) — " +
+          "refusing to boot in FEDERATION_MODE=" +
+          federationMode +
+          ". Replace them with real secrets first (docs/FEDERATION.md §6.1); " +
+          "an instance with known secrets is trivially compromised beyond localhost."
+      );
+      process.exit(1);
+    }
     console.error(
       "[security] WARNING: placeholder secrets still in use (" +
         placeholderSecrets.join(", ") +
