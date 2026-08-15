@@ -283,3 +283,13 @@ tasks:
   status: complete
   created_at: '2026-08-09T10:06:03.211496+00:00'
   completed_at: '2026-08-09T10:06:06.978918+00:00'
+- id: nr-gap-026
+  title: 'PORT env no-op for dev: package.json dev hardcodes --port 20128'
+  criteria:
+  - package.json dev script uses next dev --port ${PORT:-20128} (or equivalent) so
+    PORT env overrides the default
+  - PORT=2999 npm run dev binds 2999 (next startup log / ss -tlnp)
+  - default dev port remains 20128 when PORT unset
+  status: complete
+  created_at: '2026-08-15T22:48:03.658885+00:00'
+  completed_at: '2026-08-15T22:49:17.076376+00:00'
