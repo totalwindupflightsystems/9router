@@ -177,6 +177,40 @@ Default URLs:
 
 ---
 
+## 🧪 Testing
+
+**The suite is NOT all-green by design** — don't chase a red run as a regression.
+The baseline is ~1841 pass / ~88 fail / ~59 skip (1988 total), with every
+known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
+Some failures are live-network tests (`real/*.real.test.js`, `mimo-free.live.*`)
+that need real credentials and are expected to fail locally — skip them.
+
+```bash
+npm test                          # full vitest suite (runs from tests/, its own npm package)
+node tests/__baseline__/verify-no-regression.mjs <vitest-results.json>
+```
+
+Run the suite with a JSON reporter to feed the regression gate:
+
+```bash
+cd tests && npx vitest run --reporter=json --outputFile=/tmp/vitest-results.json && cd ..
+node tests/__baseline__/verify-no-regression.mjs /tmp/vitest-results.json
+```
+
+**Judge regressions with `verify-no-regression.mjs`, never a raw run.** The gate
+fails only when a test that PASSED in the baseline now FAILS — new tests are
+allowed, new failures are not. A raw `npm test` exit code is meaningless here
+because the known-fails baseline means the suite legitimately ends red.
+
+Notes:
+
+- `tests/` is its own npm package — vitest must run from `tests/` (the root
+  `npm test` script does this for you); running vitest from the repo root breaks
+  the `@/` alias resolution.
+- Lint with `npx eslint .` from the repo root.
+
+---
+
 ## Video Guides
 
 <div align="center">
