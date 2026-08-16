@@ -97,3 +97,4 @@ dagger.db
 .vfs/
 .coding-hermes/board/board.db
 .gitreins/history/
+.gitreins/usage.jsonl

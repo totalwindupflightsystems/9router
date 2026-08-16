@@ -302,3 +302,12 @@ tasks:
   status: complete
   created_at: '2026-08-15T23:58:11.703852+00:00'
   completed_at: '2026-08-15T23:58:53.570778+00:00'
+- id: NR-GAP-025
+  title: README quickstart npm install -g installs upstream-only package
+  criteria:
+  - README quickstart distinguishes upstream npm vs fork install AND grep -c 'npm
+    install -g 9router' README.md == 0 or that line carries an explicit upstream-only
+    caveat
+  status: complete
+  created_at: '2026-08-16T01:36:05.584089+00:00'
+  completed_at: '2026-08-16T01:42:46.496532+00:00'
