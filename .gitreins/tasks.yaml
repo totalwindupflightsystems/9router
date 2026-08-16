@@ -349,5 +349,6 @@ tasks:
   - 'Full suite + regression gate: no new pass->fail (all fails in known-fails baseline)'
   - 'npm run build PASS on merged head; PR #3173 still MERGEABLE with federation-pr
     head 60bac842 unchanged'
-  status: in_progress
+  status: complete
   created_at: '2026-08-16T05:23:52.974402+00:00'
+  completed_at: '2026-08-16T05:25:36.820472+00:00'
