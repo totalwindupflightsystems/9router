@@ -26,6 +26,13 @@ the per-tool guides below for anything the page doesn't cover.
 |---|---|
 | Claude Code | [claude-code.md](claude-code.md) |
 | Cursor | [cursor.md](cursor.md) |
+| Antigravity | [antigravity.md](antigravity.md) |
+| GitHub Copilot | [copilot.md](copilot.md) |
+| Codex | [codex.md](codex.md) |
+| Gemini CLI | [gemini.md](gemini.md) |
+| OpenCode | [opencode.md](opencode.md) |
+| Cline | [cline.md](cline.md) |
+| OpenClaw | [openclaw.md](openclaw.md) |
 
 ## Supported tools
 
