@@ -311,3 +311,19 @@ tasks:
   status: complete
   created_at: '2026-08-16T01:36:05.584089+00:00'
   completed_at: '2026-08-16T01:42:46.496532+00:00'
+- id: NR-GAP-024
+  title: Per-tool integration guides for all advertised AI code tools
+  criteria:
+  - "docs/integrations/ has a guide (own .md file) per tool advertised in README headline\
+    \ (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline,\
+    \ OpenClaw) \u2014 9 files total"
+  - 'Each new guide follows claude-code.md/cursor.md pattern: setup steps pointing
+    the tool at http://localhost:20128/v1 (or /v1/messages for Anthropic-style), API
+    key creation, model id format <provider>/<model>, Verify step'
+  - docs/integrations/README.md Guides table lists all 9 tools with links; README.md
+    link stays valid
+  - 'Docs-only change: zero src/ modifications; regression gate clean (88 known fails,
+    no new)'
+  status: complete
+  created_at: '2026-08-16T02:52:27.203922+00:00'
+  completed_at: '2026-08-16T02:56:38.003706+00:00'
