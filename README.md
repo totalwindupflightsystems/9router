@@ -94,12 +94,18 @@ Result: Never stop coding, minimal cost + 20-40% token savings via RTK
 
 ## ⚡ Quick Start
 
-**1. Install globally:**
+**1. Install globally — upstream build only (no federation):**
 
 ```bash
 npm install -g 9router
 9router
 ```
+
+> ⚠️ **Upstream-only:** `npm install -g 9router` installs the published npm
+> package — the **upstream** build, which does **not** include this fork's
+> federation feature. For federation (edge → central proxying, SQLite
+> replication, failover), install this fork from source — see **Run from
+> source (this fork)** below.
 
 🎉 Dashboard opens at `http://localhost:20128`
 
@@ -122,11 +128,17 @@ Claude Code/Codex/OpenClaw/Cursor/Cline Settings:
 > [docs/integrations/](docs/integrations/README.md) · API reference:
 > [docs/api-reference.md](docs/api-reference.md)
 
-**Alternative: run from source (this repository):**
+**Run from source (this fork — federation included):**
 
-This repository package is private (`9router-app`), so source/Docker execution is the expected local development path.
+This fork's package is private (`9router-app`), so source/Docker execution is
+the way to run it — and the only way to get the federation feature (the npm
+package is upstream-only). The federation work lives on the `federation`
+branch (default `master` mirrors upstream):
 
 ```bash
+git clone https://github.com/totalwindupflightsystems/9router.git
+cd 9router
+git checkout federation
 cp .env.example .env
 npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
