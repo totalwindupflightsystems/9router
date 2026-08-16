@@ -293,3 +293,12 @@ tasks:
   status: complete
   created_at: '2026-08-15T22:48:03.658885+00:00'
   completed_at: '2026-08-15T22:49:17.076376+00:00'
+- id: nr-gap-023
+  title: 'NR-GAP-023: README documents test baseline + regression gate'
+  criteria:
+  - README.md has a Testing section mentioning known-fails.txt
+  - README.md explains verify-no-regression.mjs as the regression gate
+  - grep -c known-fails README.md is >= 1
+  status: complete
+  created_at: '2026-08-15T23:58:11.703852+00:00'
+  completed_at: '2026-08-15T23:58:53.570778+00:00'
