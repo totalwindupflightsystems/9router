@@ -339,3 +339,15 @@ tasks:
   status: complete
   created_at: '2026-08-16T04:06:16.964201+00:00'
   completed_at: '2026-08-16T04:13:21.865533+00:00'
+- id: FED-PR-003
+  title: Merge federation-pr into federation (v0.5.55 branch convergence)
+  criteria:
+  - federation branch contains upstream v0.5.55 (commit 60bac842 is ancestor of federation
+    HEAD)
+  - 'Foreman state files preserved: .coding-hermes/board/* and .gitreins/* keep federation
+    versions'
+  - 'Full suite + regression gate: no new pass->fail (all fails in known-fails baseline)'
+  - 'npm run build PASS on merged head; PR #3173 still MERGEABLE with federation-pr
+    head 60bac842 unchanged'
+  status: in_progress
+  created_at: '2026-08-16T05:23:52.974402+00:00'
