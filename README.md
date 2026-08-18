@@ -140,7 +140,7 @@ git clone https://github.com/totalwindupflightsystems/9router.git
 cd 9router
 git checkout federation
 cp .env.example .env
-npm install
+npm ci   # reproducible install from the tracked package-lock.json (`npm install` also works)
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
