@@ -361,3 +361,11 @@ tasks:
   status: complete
   created_at: '2026-08-18T22:54:34.530221+00:00'
   completed_at: '2026-08-18T22:57:20.588463+00:00'
+- id: NR-GAP-028
+  title: zh-CN README dedupe + federation section
+  criteria:
+  - git ls-files | grep -ciE 'README.*zh' == 1 (only i18n/README.zh-CN.md tracked)
+    AND grep -ci federation i18n/README.zh-CN.md >= 1
+  status: complete
+  created_at: '2026-08-19T00:13:05.795820+00:00'
+  completed_at: '2026-08-19T00:13:08.419720+00:00'
