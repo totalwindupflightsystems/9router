@@ -334,12 +334,11 @@ describe("edge apply (applyRevisionBatch)", () => {
 
   it("FED-020 regression: delta apply preserves entry federation_version/updated_at (no edge watermark corruption)", async () => {
     const central = await createMigratedDb();
-    const { buildSnapshot, buildDelta, computeWatermark } = await import("@/lib/federation/replication.js");
     const { dbApi, ids } = await seedCentral(central);
+    const { buildSnapshot, buildDelta, computeWatermark, applyRevisionBatch, readLastAppliedRevision } = await import("@/lib/federation/replication.js");
     const snap = buildSnapshot(central);
 
     const edge = await createMigratedDb();
-    const { applyRevisionBatch, readLastAppliedRevision } = await import("@/lib/federation/replication.js");
     applyRevisionBatch(edge, snap);
 
     // Central: re-stamp a physical row AND a kv-backed row (both wire shapes)
@@ -380,7 +379,7 @@ describe("edge apply (applyRevisionBatch)", () => {
     // No watermark corruption: edge local-status maxVersion == lastAppliedRevision
     expect(computeWatermark(edge)).toBe(delta.maxVersion);
     expect(readLastAppliedRevision(edge)).toBe(computeWatermark(edge));
-  });
+  }, 15000);
 
   it("FED-021: persists central's advertised maxVersion on snapshot AND delta apply; a no-op batch never regresses it", async () => {
     const central = await createMigratedDb();

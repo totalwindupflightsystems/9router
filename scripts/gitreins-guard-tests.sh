@@ -24,7 +24,8 @@ if [ ! -d tests/node_modules/vitest ]; then
 fi
 
 RESULT="/tmp/9router-vitest-results-$$.json"
-(cd tests && npx vitest run --reporter=json --outputFile="$RESULT" >/dev/null 2>&1)
+LOG="/tmp/9router-vitest-$$.log"
+(cd tests && npx vitest run --reporter=json --outputFile="$RESULT" >"$LOG" 2>&1)
 RC=$?
 if [ ! -s "$RESULT" ]; then
   echo "WARN: vitest produced no results file (exit $RC) — treating as no regression."
@@ -35,3 +36,11 @@ if [ ! -s "$RESULT" ]; then
   exit 0
 fi
 node tests/__baseline__/verify-no-regression.mjs "$RESULT"
+GATE_RC=$?
+if [ "$GATE_RC" -ne 0 ]; then
+  echo "ERROR: regression gate failed (exit $GATE_RC) — vitest failure excerpt from $LOG:" >&2
+  if ! grep -E "FAIL|✗|×|AssertionError|timed out|Error:" "$LOG" | tail -40; then
+    tail -40 "$LOG"
+  fi
+  exit 1
+fi
