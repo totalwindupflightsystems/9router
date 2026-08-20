@@ -276,9 +276,13 @@ export function applyRevisionBatch(db, payload, { meta = null } = {}) {
         }
       }
     } else {
-      // Delta: upsert changed rows, apply tombstones.
-      for (const { table, row } of rows) {
-        upsertLogicalRow(db, table, row);
+      // Delta: upsert changed rows, apply tombstones. Pass the FULL wire
+      // entry — federation_version/updated_at/deleted live at entry level,
+      // not inside entry.row (FED-020: destructuring { table, row } here
+      // dropped the version metadata, landing replica rows at v0/NULL and
+      // corrupting the edge's local watermark).
+      for (const entry of rows) {
+        upsertLogicalRow(db, entry.table, entry);
       }
       for (const { table, key } of tombstones) {
         tombstoneLogicalRow(db, table, key);

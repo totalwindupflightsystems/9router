@@ -330,6 +330,56 @@ describe("edge apply (applyRevisionBatch)", () => {
     expect(edge.get(`SELECT deleted FROM combos WHERE id=?`, [extra.id]).deleted).toBe(0);
   });
 
+  it("FED-020 regression: delta apply preserves entry federation_version/updated_at (no edge watermark corruption)", async () => {
+    const central = await createMigratedDb();
+    const { buildSnapshot, buildDelta, computeWatermark } = await import("@/lib/federation/replication.js");
+    const { dbApi, ids } = await seedCentral(central);
+    const snap = buildSnapshot(central);
+
+    const edge = await createMigratedDb();
+    const { applyRevisionBatch, readLastAppliedRevision } = await import("@/lib/federation/replication.js");
+    applyRevisionBatch(edge, snap);
+
+    // Central: re-stamp a physical row AND a kv-backed row (both wire shapes)
+    await dbApi.updateProviderConnection(ids.conn, { name: "renamed" });
+    await dbApi.setModelAlias("alias1", "real-model-2");
+
+    const delta = buildDelta(central, snap.maxVersion);
+    expect(delta.rows).toHaveLength(2);
+    const connEntry = delta.rows.find((r) => r.table === "providerConnections");
+    const aliasEntry = delta.rows.find((r) => r.table === "modelAliases");
+    expect(connEntry).toBeTruthy();
+    expect(aliasEntry).toBeTruthy();
+    expect(connEntry.federation_version).toBeGreaterThan(snap.maxVersion);
+    expect(typeof connEntry.updated_at).toBe("string");
+
+    const res = applyRevisionBatch(edge, delta);
+    expect(res.applied).toBe(true);
+    expect(res.lastAppliedRevision).toBe(delta.maxVersion);
+
+    // The delta-applied rows keep the ENTRY's version metadata. On the old
+    // destructure ({ table, row }) these landed as federation_version=0 and
+    // updated_at=NULL — every assertion below fails on that code.
+    const eConn = edge.get(`SELECT federation_version, updated_at, deleted FROM providerConnections WHERE id = ?`, [ids.conn]);
+    expect(eConn.federation_version).toBe(connEntry.federation_version);
+    expect(eConn.federation_version).toBeGreaterThan(0);
+    expect(eConn.updated_at).toBe(connEntry.updated_at);
+    expect(eConn.updated_at).not.toBeNull();
+    expect(eConn.deleted).toBe(0);
+
+    // Edge replica row matches central exactly (physical + kv paths)
+    const cConn = central.get(`SELECT federation_version, updated_at FROM providerConnections WHERE id = ?`, [ids.conn]);
+    expect({ federation_version: eConn.federation_version, updated_at: eConn.updated_at }).toEqual(cConn);
+    const cAlias = central.get(`SELECT value, federation_version, updated_at FROM kv WHERE scope='modelAliases' AND key='alias1'`);
+    const eAlias = edge.get(`SELECT value, federation_version, updated_at FROM kv WHERE scope='modelAliases' AND key='alias1'`);
+    expect(eAlias).toEqual(cAlias);
+    expect(eAlias.federation_version).toBe(aliasEntry.federation_version);
+
+    // No watermark corruption: edge local-status maxVersion == lastAppliedRevision
+    expect(computeWatermark(edge)).toBe(delta.maxVersion);
+    expect(readLastAppliedRevision(edge)).toBe(computeWatermark(edge));
+  });
+
   it("is transactional: a failing batch leaves the edge untouched", async () => {
     const central = await createMigratedDb();
     const { buildSnapshot } = await import("@/lib/federation/replication.js");
