@@ -379,3 +379,24 @@ tasks:
   status: complete
   created_at: '2026-08-20T10:37:31.542681+00:00'
   completed_at: '2026-08-20T10:37:36.773252+00:00'
+- id: FED-021
+  title: revisionLag measured against central's advertised watermark
+  criteria:
+  - revisionLag computed from CENTRAL's last-advertised maxVersion (stored from snapshot/delta
+    payloads), not the edge's local watermark; regression test proves edge at rev
+    N with central at N+2 reports revisionLag == 2; stale edge (sync paused) reports
+    revisionLag > 0; federation vitest suites pass with zero new failures vs baseline
+  status: complete
+  created_at: '2026-08-20T10:58:03.846587+00:00'
+  completed_at: '2026-08-20T11:18:08.189406+00:00'
+- id: FED-022
+  title: settings table delta replication (boot seed stamping)
+  criteria:
+  - settings row from migrate.js boot seed carries federation_version (stamped, not
+    NULL) so the delta query (federation_version > ?) includes it; a central-side
+    settings update propagates to an edge replica via delta with correct federation_version/updated_at;
+    federation vitest suites pass with zero new failures vs baseline; docs/constants
+    consistent with the chosen approach
+  status: complete
+  created_at: '2026-08-20T11:39:47.351225+00:00'
+  completed_at: '2026-08-20T11:49:01.810802+00:00'
