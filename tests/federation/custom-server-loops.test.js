@@ -76,10 +76,12 @@ async function createMigratedDb() {
   const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
   const { default: m003 } = await import("@/lib/db/migrations/003-federation-state.js");
   const { default: m004 } = await import("@/lib/db/migrations/004-federation-fencing.js");
+  const { default: m005 } = await import("@/lib/db/migrations/005-federation-central-watermark.js");
   m001.up(db);
   m002.up(db);
   m003.up(db);
   m004.up(db);
+  m005.up(db);
   return db;
 }
 

@@ -65,6 +65,17 @@
   handlers (`/api/federation/*`) now require the `FEDERATION_TOKEN` Bearer
   header in non-standalone modes. Standalone mode is unchanged (no-op).
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
+
+## Fixes
+- **Federation (revisionLag metric)**: the edge `revisionLag` status metric
+  (dashboard "behind N revisions" banner) is now measured against the
+  central instance's advertised watermark — persisted as
+  `federation_meta.centralMaxVersion` on every applied snapshot/delta
+  (migration 005) — instead of the edge's own replica watermark, which by
+  construction equals `lastAppliedRevision` and made a genuinely stale edge
+  report `revisionLag` 0. The local status payload also carries the
+  advertised value as `centralMaxVersion` (edge only). Standalone and
+  central modes are unchanged (`revisionLag` 0 + edge-only note).
 # v0.5.55 (2026-08-14)
 
 ## Features

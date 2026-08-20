@@ -289,6 +289,12 @@ export function applyRevisionBatch(db, payload, { meta = null } = {}) {
       }
     }
     writeLastAppliedRevision(db, batchMax, meta);
+    // FED-021: persist the central-ADVERTISED watermark alongside the
+    // applied revision (both snapshot and delta paths flow through here).
+    // revisionLag is measured against this stored value — the edge's local
+    // watermark can never exceed what was last applied, so a local-watermark
+    // lag is structurally always 0 on a stale edge.
+    writeCentralMaxVersion(db, batchMax, meta);
   });
 
   return { applied: true, lastAppliedRevision: batchMax };
@@ -316,6 +322,33 @@ export function writeLastAppliedRevision(db, revision, meta = null) {
     `INSERT INTO federation_meta(id, lastAppliedRevision) VALUES(1, ?)
      ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision`,
     [rev]
+  );
+}
+
+// FED-021: the central-ADVERTISED watermark (payload.maxVersion) as last
+// persisted by an applied batch. NULL when no batch was ever applied (never
+// synced / pre-005 DB) — readCentralMaxVersion returns null (not 0) so the
+// status surface can distinguish "no baseline" from "advertised watermark
+// 0". meta is the same optional accessor as for the revision helpers.
+export function readCentralMaxVersion(db, meta = null) {
+  if (meta?.get) {
+    const v = meta.get("centralMaxVersion");
+    return v == null ? null : Number(v);
+  }
+  const row = db.get(`SELECT centralMaxVersion FROM federation_meta WHERE id = 1`);
+  return row?.centralMaxVersion == null ? null : Number(row.centralMaxVersion);
+}
+
+export function writeCentralMaxVersion(db, version, meta = null) {
+  const v = Number(version) || 0;
+  if (meta?.set) {
+    meta.set("centralMaxVersion", v);
+    return;
+  }
+  db.run(
+    `INSERT INTO federation_meta(id, centralMaxVersion) VALUES(1, ?)
+     ON CONFLICT(id) DO UPDATE SET centralMaxVersion = excluded.centralMaxVersion`,
+    [v]
   );
 }
 

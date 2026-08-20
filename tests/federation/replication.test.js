@@ -101,10 +101,12 @@ async function createMigratedDb(factoryName = "better-sqlite3") {
   const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
   const { default: m003 } = await import("@/lib/db/migrations/003-federation-state.js");
   const { default: m004 } = await import("@/lib/db/migrations/004-federation-fencing.js");
+  const { default: m005 } = await import("@/lib/db/migrations/005-federation-central-watermark.js");
   m001.up(db);
   m002.up(db);
   m003.up(db);
   m004.up(db);
+  m005.up(db);
   return db;
 }
 
@@ -380,6 +382,36 @@ describe("edge apply (applyRevisionBatch)", () => {
     expect(readLastAppliedRevision(edge)).toBe(computeWatermark(edge));
   });
 
+  it("FED-021: persists central's advertised maxVersion on snapshot AND delta apply; a no-op batch never regresses it", async () => {
+    const central = await createMigratedDb();
+    const { buildSnapshot, buildDelta } = await import("@/lib/federation/replication.js");
+    const { dbApi, ids } = await seedCentral(central);
+    const snap = buildSnapshot(central);
+
+    const edge = await createMigratedDb();
+    const { applyRevisionBatch, readCentralMaxVersion } = await import("@/lib/federation/replication.js");
+
+    // Never applied → NULL (distinguishes "no baseline" from watermark 0).
+    expect(readCentralMaxVersion(edge)).toBe(null);
+
+    // Snapshot path records the advertised watermark.
+    applyRevisionBatch(edge, snap);
+    expect(readCentralMaxVersion(edge)).toBe(snap.maxVersion);
+
+    // Delta path records the newer advertised watermark.
+    await dbApi.updateProviderConnection(ids.conn, { name: "renamed" });
+    const delta = buildDelta(central, snap.maxVersion);
+    expect(delta.maxVersion).toBeGreaterThan(snap.maxVersion);
+    applyRevisionBatch(edge, delta);
+    expect(readCentralMaxVersion(edge)).toBe(delta.maxVersion);
+
+    // A no-op re-apply (batch watermark <= applied revision) never regresses
+    // the stored advertised watermark.
+    const noop = applyRevisionBatch(edge, delta);
+    expect(noop.applied).toBe(false);
+    expect(readCentralMaxVersion(edge)).toBe(delta.maxVersion);
+  });
+
   it("is transactional: a failing batch leaves the edge untouched", async () => {
     const central = await createMigratedDb();
     const { buildSnapshot } = await import("@/lib/federation/replication.js");
@@ -443,8 +475,12 @@ describe("edge apply (applyRevisionBatch)", () => {
       const edge = await factory.create(file);
       const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
       const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
+      const { default: m005 } = await import("@/lib/db/migrations/005-federation-central-watermark.js");
       m001.up(edge);
       m002.up(edge);
+      // FED-021: applyRevisionBatch persists centralMaxVersion — the edge
+      // needs the 005 column (003/004 columns are not touched by apply).
+      m005.up(edge);
 
       const first = applyRevisionBatch(edge, snap);
       expect(first.applied).toBe(true);

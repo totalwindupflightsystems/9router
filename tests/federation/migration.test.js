@@ -203,6 +203,70 @@ describe("migration 003 idempotency (last_state)", () => {
   });
 });
 
+describe("migration 005 idempotency (centralMaxVersion)", () => {
+  it("adds centralMaxVersion to federation_meta and re-applies cleanly on every adapter", async () => {
+    const factories = await loadAdapterFactories();
+    expect(factories.length).toBeGreaterThan(0);
+    const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
+    const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
+    const { default: m005 } = await import("@/lib/db/migrations/005-federation-central-watermark.js");
+
+    for (const factory of factories) {
+      const file = path.join(tempDir, `m005-${factory.name.replace(":", "-")}.sqlite`);
+      const db = await factory.create(file);
+
+      m001.up(db);
+      m002.up(db);
+
+      // First apply
+      expect(() => m005.up(db)).not.toThrow();
+      const cols = columnNames(db, "federation_meta");
+      expect(cols).toContain("centralMaxVersion");
+
+      // Second apply must be a no-op success (guarded ADD COLUMN)
+      expect(() => m005.up(db)).not.toThrow();
+
+      // Seed row survives; centralMaxVersion defaults to NULL (no baseline —
+      // FED-021: never-applied is distinct from an advertised watermark of 0)
+      const meta = db.get(`SELECT centralMaxVersion FROM federation_meta WHERE id = 1`);
+      expect(meta.centralMaxVersion).toBeNull();
+
+      // centralMaxVersion is writable (the apply path owns writes)
+      db.run(`UPDATE federation_meta SET centralMaxVersion = 7 WHERE id = 1`);
+      expect(db.get(`SELECT centralMaxVersion FROM federation_meta WHERE id = 1`).centralMaxVersion).toBe(7);
+
+      db.close?.();
+    }
+  });
+
+  it("full chain 001 → 002 → 003 → 004 → 005 produces the complete federation schema", async () => {
+    const factories = await loadAdapterFactories();
+    const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
+    const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
+    const { default: m003 } = await import("@/lib/db/migrations/003-federation-state.js");
+    const { default: m004 } = await import("@/lib/db/migrations/004-federation-fencing.js");
+    const { default: m005 } = await import("@/lib/db/migrations/005-federation-central-watermark.js");
+
+    for (const factory of factories) {
+      const file = path.join(tempDir, `chain5-${factory.name.replace(":", "-")}.sqlite`);
+      const db = await factory.create(file);
+
+      expect(() => m001.up(db)).not.toThrow();
+      expect(() => m002.up(db)).not.toThrow();
+      expect(() => m003.up(db)).not.toThrow();
+      expect(() => m004.up(db)).not.toThrow();
+      expect(() => m005.up(db)).not.toThrow();
+
+      const cols = columnNames(db, "federation_meta");
+      expect(cols).toContain("last_state");
+      expect(cols).toContain("fencing_token");
+      expect(cols).toContain("centralMaxVersion");
+
+      db.close?.();
+    }
+  });
+});
+
 describe("getEdgeState (FED-003 state reader)", () => {
   it("defaults to LINKED when last_state is NULL/missing", async () => {
     const factories = await loadAdapterFactories();

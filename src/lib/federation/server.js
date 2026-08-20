@@ -132,10 +132,10 @@ export async function handleVerify(request) {
 // it only ever said 'central'/'standalone'), and the payload carries
 // last_state (LINKED/DEGRADED/RECOVERING from federation_meta — or
 // 'uninitialized' when no federation_meta row exists, i.e. the loops never
-// started) + revisionLag (maxVersion - lastAppliedRevision, clamped ≥ 0;
-// edge-only — central/standalone report 0 + a revisionLagNote) so the
-// dashboard banner can render state + lag from one call. See
-// buildLocalStatusPayload for the FED-016 semantics.
+// started) + revisionLag (central-advertised maxVersion - lastAppliedRevision,
+// clamped ≥ 0 — FED-021; edge-only — central/standalone report 0 + a
+// revisionLagNote) so the dashboard banner can render state + lag from one
+// call. See buildLocalStatusPayload for the FED-016/FED-021 semantics.
 export async function handleStatus() {
   // Preserve the pre-FED-005 behavior: the guarded diagnostics endpoint
   // initializes the DB adapter if needed (a fresh boot may not have touched
@@ -177,10 +177,27 @@ export async function handleStatus() {
 //     revisionLagNote instead of a misleading "self-lag" number
 //     (previously central reported revisionLag = maxVersion because its
 //     lastAppliedRevision is never set).
+//
+// FED-021 (lag measured against CENTRAL's advertised watermark):
+//   - revisionLag is computed from federation_meta.centralMaxVersion — the
+//     maxVersion central last advertised in an applied snapshot/delta —
+//     NOT from the edge's local computeWatermark(). After FED-020 the local
+//     watermark equals lastAppliedRevision by construction, so a
+//     local-watermark lag is structurally always 0 and a genuinely stale
+//     edge reported healthy.
+//   - maxVersion stays in the payload as-is (the edge's LOCAL watermark —
+//     used elsewhere/tests); the advertised value rides along as
+//     centralMaxVersion so the payload stays honest about both numbers.
+//   - Fallback: centralMaxVersion is NULL when no batch was ever applied
+//     (never synced / pre-005 DB). Reporting a positive lag there would be
+//     noise — an edge that never started has no baseline — and reporting
+//     lag against the local watermark would re-introduce the FED-020
+//     blind spot, so lag is 0; the uninitialized state (initialized:false,
+//     lastAppliedRevision:null) already signals "never started".
 export function buildLocalStatusPayload() {
   const db = getAdapterSyncSafe();
   const meta = db
-    ? db.get(`SELECT role, edgeId, lastAppliedRevision, last_state, schemaVersion FROM federation_meta WHERE id = 1`)
+    ? db.get(`SELECT role, edgeId, lastAppliedRevision, last_state, schemaVersion, centralMaxVersion FROM federation_meta WHERE id = 1`)
     : null;
   const maxVersion = db ? computeWatermark(db) : 0;
   const lastAppliedRevision = meta?.lastAppliedRevision ?? null;
@@ -202,7 +219,9 @@ export function buildLocalStatusPayload() {
       (meta.role != null || meta.last_state != null || meta.lastAppliedRevision != null);
     payload.initialized = initialized;
     payload.last_state = initialized ? getEdgeState(db) : "uninitialized";
-    payload.revisionLag = Math.max(0, maxVersion - (lastAppliedRevision ?? 0));
+    const centralMaxVersion = meta?.centralMaxVersion ?? null;
+    payload.centralMaxVersion = centralMaxVersion;
+    payload.revisionLag = Math.max(0, (centralMaxVersion ?? 0) - (lastAppliedRevision ?? 0));
   } else {
     payload.revisionLag = 0;
     payload.revisionLagNote = "edge-only metric — central/standalone instances have no replica to lag";

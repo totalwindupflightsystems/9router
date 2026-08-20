@@ -2,8 +2,9 @@
 //
 // Covers (gitreins fed-005 criteria):
 //  - local status payload: last_state present + correct per state,
-//    revisionLag = maxVersion - lastAppliedRevision (clamped ≥ 0),
-//    role reports 'edge' in edge mode
+//    revisionLag = centralMaxVersion - lastAppliedRevision (clamped ≥ 0;
+//    FED-021 — measured against central's ADVERTISED watermark, not the
+//    edge's local one), role reports 'edge' in edge mode
 //  - auth: the local-status endpoint is reachable WITHOUT a token from an
 //    edge dashboard (the route is deliberately unguarded); central/
 //    standalone behavior correct
@@ -88,17 +89,19 @@ async function createMigratedDb() {
   const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
   const { default: m003 } = await import("@/lib/db/migrations/003-federation-state.js");
   const { default: m004 } = await import("@/lib/db/migrations/004-federation-fencing.js");
+  const { default: m005 } = await import("@/lib/db/migrations/005-federation-central-watermark.js");
   m001.up(db);
   m002.up(db);
   m003.up(db);
   m004.up(db);
+  m005.up(db);
   return db;
 }
 
 // ─── Local status payload ────────────────────────────────────────────────
 
 describe("local status payload (acceptance 1)", () => {
-  it("edge mode: role 'edge', last_state from federation_meta, revisionLag = maxVersion - lastAppliedRevision", async () => {
+  it("edge mode: role 'edge', last_state from federation_meta, revisionLag = centralMaxVersion - lastAppliedRevision (FED-021)", async () => {
     process.env.FEDERATION_MODE = "edge";
     process.env.FEDERATION_TOKEN = "fed-secret";
     process.env.FEDERATION_EDGE_ID = "edge-1";
@@ -122,6 +125,7 @@ describe("local status payload (acceptance 1)", () => {
     expect(fresh.edgeId).toBe("edge-1");
     expect(fresh.revisionLag).toBe(0);
     expect(fresh.maxVersion).toBe(0);
+    expect(fresh.centralMaxVersion).toBe(null); // no batch ever applied → no baseline
     expect(fresh.lastAppliedRevision).toBe(null);
 
     // DEGRADED state is reflected (setEdgeState writes the row → the edge is
@@ -136,11 +140,16 @@ describe("local status payload (acceptance 1)", () => {
     const recovering = await handleLocalStatus();
     expect(recovering.last_state).toBe("recovering");
 
-    // Revision lag: stamp a row so the watermark advances past the applied
-    // revision, then verify lag = maxVersion - lastAppliedRevision.
+    // Revision lag (FED-021): measured against the central-ADVERTISED
+    // watermark (federation_meta.centralMaxVersion), NOT the edge's local
+    // one. Record lastApplied=3 + centralMax=7, and stamp a local row at v7
+    // so the LOCAL watermark is also 7 — lag = 7 - 3 = 4 comes from the
+    // advertised value either way here; the dedicated FED-021 describe below
+    // isolates the stale-edge case where the two watermarks diverge.
     db.run(
-      `INSERT INTO federation_meta(id, lastAppliedRevision) VALUES(1, 3)
-       ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision`
+      `INSERT INTO federation_meta(id, lastAppliedRevision, centralMaxVersion) VALUES(1, 3, 7)
+       ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision,
+         centralMaxVersion = excluded.centralMaxVersion`
     );
     db.run(
       `INSERT INTO settings(id, data, federation_version, updated_at, deleted)
@@ -148,7 +157,8 @@ describe("local status payload (acceptance 1)", () => {
       [new Date().toISOString()]
     );
     const lagged = await handleLocalStatus();
-    expect(lagged.maxVersion).toBe(7);
+    expect(lagged.maxVersion).toBe(7); // local watermark — reported as-is
+    expect(lagged.centralMaxVersion).toBe(7); // central-advertised watermark
     expect(lagged.lastAppliedRevision).toBe(3);
     expect(lagged.revisionLag).toBe(4);
     expect(lagged.initialized).toBe(true);
@@ -183,12 +193,16 @@ describe("local status payload (acceptance 1)", () => {
     const db = await createMigratedDb();
     pointDriverAt(db);
     const { handleLocalStatus } = await import("@/lib/federation/server.js");
+    // Applied AHEAD of the central-advertised watermark (out-of-order
+    // bookkeeping) → clamps to 0, never negative.
     db.run(
-      `INSERT INTO federation_meta(id, lastAppliedRevision) VALUES(1, 99)
-       ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision`
+      `INSERT INTO federation_meta(id, lastAppliedRevision, centralMaxVersion) VALUES(1, 99, 50)
+       ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision,
+         centralMaxVersion = excluded.centralMaxVersion`
     );
     const payload = await handleLocalStatus();
     expect(payload.maxVersion).toBe(0);
+    expect(payload.centralMaxVersion).toBe(50);
     expect(payload.lastAppliedRevision).toBe(99);
     expect(payload.revisionLag).toBe(0);
     expect(payload.initialized).toBe(true);
@@ -213,6 +227,9 @@ describe("local status payload (acceptance 1)", () => {
     expect(payload.revisionLagNote).toContain("edge-only");
     expect(payload.lastAppliedRevision).toBe(null);
     expect(payload.initialized).toBeUndefined();
+    // centralMaxVersion is an edge-only field (only an edge receives
+    // advertised watermarks) — absent on central.
+    expect(payload.centralMaxVersion).toBeUndefined();
   });
 
   it("standalone mode: role 'standalone', no last_state, zero drift, edge-only lag note", async () => {
@@ -228,6 +245,7 @@ describe("local status payload (acceptance 1)", () => {
     expect(payload.revisionLagNote).toContain("edge-only");
     expect(payload.lastAppliedRevision).toBe(null);
     expect(payload.initialized).toBeUndefined();
+    expect(payload.centralMaxVersion).toBeUndefined();
   });
 
   it("handleStatus (guarded route) reports the same local payload — role 'edge' in edge mode, 'uninitialized' before the loops write a row", async () => {
@@ -240,6 +258,78 @@ describe("local status payload (acceptance 1)", () => {
     const { handleStatus } = await import("@/lib/federation/server.js");
     const payload = await handleStatus();
     expect(payload.role).toBe("edge");
+    expect(payload.last_state).toBe("uninitialized");
+  });
+});
+
+// ─── FED-021: revisionLag vs central-advertised watermark ──────────────
+
+describe("FED-021 — revisionLag measured against central's advertised watermark", () => {
+  it("edge at rev N, central advertises N+2 → revisionLag 2 (NOT 0), even with the local watermark at N", async () => {
+    process.env.FEDERATION_MODE = "edge";
+    process.env.FEDERATION_TOKEN = "fed-secret";
+    process.env.FEDERATION_EDGE_ID = "edge-1";
+    vi.resetModules();
+
+    const db = await createMigratedDb();
+    pointDriverAt(db);
+    const { handleLocalStatus } = await import("@/lib/federation/server.js");
+
+    // Stale edge: applied up to rev 5, and its local replica rows sit at v5
+    // (local watermark == lastAppliedRevision — the FED-020 invariant).
+    // Central has since advertised maxVersion 7 (persisted in
+    // federation_meta.centralMaxVersion by the apply path).
+    db.run(
+      `INSERT INTO settings(id, data, federation_version, updated_at, deleted)
+       VALUES(1, '{"cloudEnabled":true}', 5, ?, 0)`,
+      [new Date().toISOString()]
+    );
+    db.run(
+      `INSERT INTO federation_meta(id, role, lastAppliedRevision, centralMaxVersion) VALUES(1, 'edge', 5, 7)
+       ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision,
+         centralMaxVersion = excluded.centralMaxVersion`
+    );
+
+    const payload = await handleLocalStatus();
+    expect(payload.maxVersion).toBe(5); // local watermark — reported as-is
+    expect(payload.lastAppliedRevision).toBe(5);
+    expect(payload.centralMaxVersion).toBe(7); // central-advertised watermark
+    // The pre-FED-021 blind spot: a LOCAL-watermark lag is max(0, 5-5) = 0 —
+    // a stale edge looks healthy. The metric must report the divergence.
+    expect(payload.revisionLag).toBe(2);
+    expect(payload.initialized).toBe(true);
+  });
+
+  it("caught-up edge (centralMaxVersion == lastAppliedRevision) reports lag 0", async () => {
+    process.env.FEDERATION_MODE = "edge";
+    vi.resetModules();
+
+    const db = await createMigratedDb();
+    pointDriverAt(db);
+    const { handleLocalStatus } = await import("@/lib/federation/server.js");
+    db.run(
+      `INSERT INTO federation_meta(id, role, lastAppliedRevision, centralMaxVersion) VALUES(1, 'edge', 7, 7)
+       ON CONFLICT(id) DO UPDATE SET lastAppliedRevision = excluded.lastAppliedRevision,
+         centralMaxVersion = excluded.centralMaxVersion`
+    );
+    const payload = await handleLocalStatus();
+    expect(payload.centralMaxVersion).toBe(7);
+    expect(payload.lastAppliedRevision).toBe(7);
+    expect(payload.revisionLag).toBe(0);
+  });
+
+  it("never synced (no batch ever applied): centralMaxVersion null + lag 0 — uninitialized already signals 'never started'", async () => {
+    process.env.FEDERATION_MODE = "edge";
+    vi.resetModules();
+
+    const db = await createMigratedDb();
+    pointDriverAt(db);
+    const { handleLocalStatus } = await import("@/lib/federation/server.js");
+    const payload = await handleLocalStatus();
+    expect(payload.centralMaxVersion).toBe(null);
+    expect(payload.lastAppliedRevision).toBe(null);
+    expect(payload.revisionLag).toBe(0);
+    expect(payload.initialized).toBe(false);
     expect(payload.last_state).toBe("uninitialized");
   });
 });
