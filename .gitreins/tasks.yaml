@@ -400,3 +400,13 @@ tasks:
   status: complete
   created_at: '2026-08-20T11:39:47.351225+00:00'
   completed_at: '2026-08-20T11:49:01.810802+00:00'
+- id: INT-CI-001
+  title: 'CI regression gate red (flaky): FED-020 delta-apply test fails intermittently
+    on board-only commits'
+  criteria:
+  - 3 consecutive green CI runs on board-only commits; vitest output retained in CI
+    logs on regression; replication.test.js FED-020 test deterministic in isolation
+    and full suite (no pass to fail)
+  status: complete
+  created_at: '2026-08-20T12:16:55.286350+00:00'
+  completed_at: '2026-08-20T12:41:32.815359+00:00'
