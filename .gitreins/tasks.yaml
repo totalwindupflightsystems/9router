@@ -369,3 +369,13 @@ tasks:
   status: complete
   created_at: '2026-08-19T00:13:05.795820+00:00'
   completed_at: '2026-08-19T00:13:08.419720+00:00'
+- id: FED-020
+  title: Edge replica rows lose federation_version/updated_at on the DELTA apply path
+  criteria:
+  - Delta-applied edge rows keep the wire entry's federation_version + updated_at
+    (not 0/NULL); edge local-status maxVersion == lastAppliedRevision after delta
+    apply; regression test proves delta path carries version metadata; full federation
+    suite passes with zero new failures vs baseline (known 89).
+  status: complete
+  created_at: '2026-08-20T10:37:31.542681+00:00'
+  completed_at: '2026-08-20T10:37:36.773252+00:00'
