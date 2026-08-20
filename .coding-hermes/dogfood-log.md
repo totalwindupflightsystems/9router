@@ -1,5 +1,48 @@
 # Dogfood Log
 
+## 2026-08-20 — 9router (federation fork) — re-test after FED-011..016
+
+- **Verdict:** 🟡 PROMISING-BUT-ROUGH (federation now WORKS end-to-end; one P1
+  replica-integrity bug + two P2 gaps remain). 2026-08-08 🔴 verdict resolved in
+  practice.
+- **Promise:** "Edges proxy /v1 to central, replicate central's SQLite, keep serving
+  from a local replica during a central outage (writes queued, reconciled later)."
+- **Method:** Real deployment, not tests: fresh `npm run build` at HEAD 10bb05d3,
+  central + edge via the documented repo-root production path (`node custom-server.js`
+  = `npm run start`), real dashboard API seeding (login, API key, ollama provider),
+  real /v1 traffic against a mock Ollama upstream, SIGKILL of central, degraded
+  writes, central restart. Re-ran the 2026-08-08 acceptance checks A–D verbatim.
+- **Top findings:**
+  1. **A–D ALL PASS**: replication converges (<10s, apiKeys/providerConnections in
+     replica), authenticated /v1 through the edge (200, not "Invalid API key"),
+     Bearer-only federation API (200), and the full kill→DEGRADED→serve-from-replica
+     →queued-write (202 + X-Federation-Queued-Write-Id)→recover→drain (state=done)
+     →reconcile (central has queued key; replicated back to edge) lifecycle.
+     FED-011..016 fixes verified live (loops start from real entry points; edge boot
+     logs `[federation] replication + failover loops started (edge mode).`).
+  2. **FED-020 (P0-in-effect, filed P1)** — delta-applied replica rows lose
+     `federation_version`/`updated_at` (entry-level metadata dropped by the delta
+     branch of `applyRevisionBatch`): central v4/v5 rows land as v0/NULL on the edge;
+     `local-status` shows `lastAppliedRevision:5, maxVersion:1`, revisionLag clamped
+     to 0 — a stale edge can look healthy. Snapshot path is correct, which is why
+     the bootstrap-heavy tests missed it.
+  3. **FED-021 (P2)** — revisionLag derives from the local (corruptible) watermark
+     instead of central's advertised maxVersion; FED-022 (P2) — settings boot seed
+     bypasses stamping so settings never replicate via delta (edge settings=0).
+- **Time-to-first-success:** ~3 min standalone completion on central; federation
+  convergence ~10s after seeding; full lifecycle verified in ~15 min of testing.
+- **Friction count:** 4 (stream:true 503 with mock — identical on central, not
+  federation; undocumented model prefix; provider API shapes need source-reading;
+  proxy ~2x timeout on failure paths).
+- **Artifacts:** `docs/dogfood/2026-08-20-integration.md`,
+  `docs/dogfood/diagnostics.md` §7-10 (addendum), `skills/9router-federation-usage/SKILL.md`
+  v2.0.0 (rewritten to current reality), board FED-020..FED-022 (event id 369).
+- **Foreman:** woken — CooldownS 21600 → 900 via scheduler API (Enabled=true kept).
+- **Meta:** the 2026-08-12 reverify passed while row versions were already
+  corrupting — it asserted counts and lag, never row-level version metadata. The
+  integrity probe (compare row versions central vs edge after a delta update) is now
+  step 4 of the verification playbook.
+
 ## 2026-08-08 — 9router (federation fork)
 
 - **Verdict:** 🔴 DOES-NOT-DELIVER (federation feature; standalone/upstream product works)

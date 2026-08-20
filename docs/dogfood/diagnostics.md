@@ -94,3 +94,82 @@ machineId like the direct route).
 custom-server.js wiring, dashboardGuard, the real route wrappers, or the real /v1 auth.
 It proves modules, not product. Any future e2e must boot the real app (the dogfood repro
 layout is the blueprint: standalone output + custom-server.js + src) and hit it over HTTP.
+
+---
+
+# Addendum 2026-08-20 — second dogfood run: what still breaks, and why
+
+_After the 2026-08-12 reverify (A–D PASS), a second real-use run re-verified A–D
+(ALL PASS — see `docs/dogfood/2026-08-20-integration.md`) and then probed
+replica integrity. The row-level version metadata on edges is corrupted by the
+delta path. This is the "what the reverify missed" record._
+
+## 7. The delta-apply version drop (FED-020) — a test-shaped blind spot
+
+**Symptom:** on a converged edge, `local-status` reports
+`lastAppliedRevision:5, maxVersion:1, revisionLag:0` — an applied watermark
+*above* the local row watermark, with lag clamped to 0. Direct DB comparison:
+
+| row | central | edge |
+|---|---|---|
+| key created before edge bootstrap (snapshot path) | v1 | v1 ✅ |
+| key created after (delta path) | v4 | **v0, updated_at NULL** ❌ |
+| provider row re-stamped on central (delta path) | v5 | **v0** ❌ |
+
+**Root cause (read the wire, then the code):** the central delta handler
+serializes entries as `{table, row, federation_version, updated_at, deleted}`
+— version metadata at ENTRY level. `applyRevisionBatch`'s delta branch
+destructures `{ table, row }` and calls `upsertLogicalRow(db, table, row)`,
+which reads `entry.federation_version` — always undefined on the delta path →
+`0`. The snapshot branch passes full entries, so bootstrap rows are correct.
+
+**Why the tests missed it (the lesson):** `replication.test.js` (24 tests)
+asserts row COUNTS and the `lastAppliedRevision` watermark — both stay green
+while versions corrupt. The 2026-08-12 reverify also only checked counts +
+lag. The check that catches this: compare the edge row's
+`federation_version`/`updated_at` to central's after a delta-delivered update,
+or assert `local-status.maxVersion == lastAppliedRevision` on a converged
+edge. **Assert the data, not just the counters.**
+
+**Right way:** delta branch passes the full entry —
+`for (const entry of rows) upsertLogicalRow(db, entry.table, entry)` — plus a
+regression test that updates a row on central after bootstrap and asserts the
+edge replica keeps the entry's version/updated_at.
+
+## 8. The status metric's second failure mode (FED-021)
+
+`revisionLag = max(0, localWatermark - lastAppliedRevision)` — even after
+FED-020, lag measured against the EDGE's own (possibly corrupted, possibly
+stale) rows can't tell "healthy" from "stale". The edge already receives
+central's true watermark (`maxVersion`) in every snapshot/delta payload —
+compute lag against that. FED-016 fixed central's self-lag; this is the
+edge-side twin: a metric that only reports what the replica's own (mutable,
+corruptible) rows say.
+
+## 9. Settings: an eighth table that never moves (FED-022)
+
+The docs/constants promise 8 replicated tables; in practice `settings`
+replicates only via snapshot timing. Boot seed `src/lib/db/migrate.js:116` is
+a raw insert that skips stamping → `federation_version=NULL` → the delta query
+(`> ?`) excludes it forever. `settingsRepo.js:107` stamps, so dashboard-driven
+settings changes would flow — but the seed (password hash, defaults) never
+does, and an edge that snapshots before central's first seed keeps `settings=0`
+indefinitely. Decide: stamp the seed, or document settings as per-instance and
+drop it from `REPLICATE_TABLES`.
+
+## 10. The right way to verify federation (updated playbook)
+
+1. Boot central + edge via `npm run build && node custom-server.js` (repo
+   root works — FED-017) with fresh DATA_DIRs and fast intervals
+   (SYNC 2000 / HEARTBEAT 1000 / OUTAGE 5000).
+2. Check the edge boot log for `[federation] replication + failover loops
+   started` — no line, no federation.
+3. Seed via dashboard API (login → keys → providers), then run acceptance
+   A–D from `docs/dogfood/2026-08-20-integration.md`.
+4. **Then check integrity** (the step both prior runs skipped): compare row
+   `federation_version`/`updated_at` between central and edge for rows that
+   changed AFTER the edge bootstrapped; assert
+   `local-status.maxVersion == lastAppliedRevision` on a converged edge.
+5. `stream:false` only for mock-upstream verification; `stream:true` fails
+   503 with the mock on central AND edge (mock format limitation, not a
+   federation bug — re-verify against a real Ollama before shipping).
