@@ -407,7 +407,11 @@ function upsertLogicalRow(db, table, entry) {
       break;
     }
     case "providerConnections": {
-      const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = row;
+      // FED-020: rename the business timestamp on destructure — an un-renamed
+      // `updatedAt` here SHADOWS the outer federation stamp (entry.updated_at)
+      // and lands the business value in the replica's federation updated_at
+      // column (1ms race vs the write path's two separate now() stamps).
+      const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt: rowUpdatedAt, ...rest } = row;
       db.run(
         `INSERT INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt, federation_version, updated_at, deleted)
          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -418,12 +422,14 @@ function upsertLogicalRow(db, table, entry) {
            federation_version = excluded.federation_version,
            updated_at = excluded.updated_at,
            deleted = excluded.deleted`,
-        [id, provider, authType || "oauth", name ?? null, email ?? null, priority ?? null, isActive === false ? 0 : 1, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString(), fv, updatedAt, deleted]
+        [id, provider, authType || "oauth", name ?? null, email ?? null, priority ?? null, isActive === false ? 0 : 1, stringifyJson(rest), createdAt || new Date().toISOString(), rowUpdatedAt || new Date().toISOString(), fv, updatedAt, deleted]
       );
       break;
     }
     case "providerNodes": {
-      const { id, type, name, createdAt, updatedAt, ...rest } = row;
+      // FED-020: same shadowing fix as providerConnections — keep the row's
+      // business updatedAt out of the federation updated_at column.
+      const { id, type, name, createdAt, updatedAt: rowUpdatedAt, ...rest } = row;
       db.run(
         `INSERT INTO providerNodes(id, type, name, data, createdAt, updatedAt, federation_version, updated_at, deleted)
          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -432,12 +438,14 @@ function upsertLogicalRow(db, table, entry) {
            federation_version = excluded.federation_version,
            updated_at = excluded.updated_at,
            deleted = excluded.deleted`,
-        [id, type ?? null, name ?? null, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString(), fv, updatedAt, deleted]
+        [id, type ?? null, name ?? null, stringifyJson(rest), createdAt || new Date().toISOString(), rowUpdatedAt || new Date().toISOString(), fv, updatedAt, deleted]
       );
       break;
     }
     case "proxyPools": {
-      const { id, isActive, testStatus, createdAt, updatedAt, ...rest } = row;
+      // FED-020: same shadowing fix as providerConnections — keep the row's
+      // business updatedAt out of the federation updated_at column.
+      const { id, isActive, testStatus, createdAt, updatedAt: rowUpdatedAt, ...rest } = row;
       db.run(
         `INSERT INTO proxyPools(id, isActive, testStatus, data, createdAt, updatedAt, federation_version, updated_at, deleted)
          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -447,7 +455,7 @@ function upsertLogicalRow(db, table, entry) {
            federation_version = excluded.federation_version,
            updated_at = excluded.updated_at,
            deleted = excluded.deleted`,
-        [id, isActive === false ? 0 : 1, testStatus ?? null, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString(), fv, updatedAt, deleted]
+        [id, isActive === false ? 0 : 1, testStatus ?? null, stringifyJson(rest), createdAt || new Date().toISOString(), rowUpdatedAt || new Date().toISOString(), fv, updatedAt, deleted]
       );
       break;
     }
