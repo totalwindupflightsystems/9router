@@ -584,6 +584,92 @@ describe("write-path stamping hooks", () => {
   });
 });
 
+// ─── FED-022: boot/import settings seeds are federation-stamped ─────────
+
+describe("FED-022 regression: settings seeds stamp federation_version (delta-visible)", () => {
+  it("legacy JSON boot seed (runMigrationOnce → importLegacyMain) stamps settings; delta delivers it to an edge", async () => {
+    // Legacy db.json in the temp DATA_DIR — runMigrationOnce picks it up on a
+    // fresh DB and imports it. Pre-fix this insert bypassed stamp.js, leaving
+    // federation_version NULL forever (invisible to `federation_version > since`).
+    fs.writeFileSync(
+      path.join(tempDir, "db.json"),
+      JSON.stringify({ settings: { cloudEnabled: true, comboStrategy: "fallback" } })
+    );
+
+    const factories = await loadAdapterFactories();
+    const factory = factories.find((f) => f.name === "better-sqlite3") || factories[0];
+    const file = path.join(tempDir, `${factory.name.replace(":", "-")}-legacy-seed.sqlite`);
+    const db = await factory.create(file);
+
+    const { runMigrationOnce } = await import("@/lib/db/migrate.js");
+    await runMigrationOnce(db);
+
+    // The seeded settings row carries a real stamp.
+    const row = db.get(`SELECT federation_version, updated_at, deleted FROM settings WHERE id = 1`);
+    expect(row).toBeTruthy();
+    expect(row.federation_version).not.toBeNull();
+    expect(row.federation_version).toBeGreaterThanOrEqual(1);
+    expect(typeof row.updated_at).toBe("string");
+    expect(row.deleted).toBe(0);
+
+    // A delta from 0 carries the settings row with the stamped metadata.
+    const { buildDelta, applyRevisionBatch, readLastAppliedRevision } = await import("@/lib/federation/replication.js");
+    const delta = buildDelta(db, 0);
+    const entry = delta.rows.find((r) => r.table === "settings");
+    expect(entry).toBeTruthy();
+    expect(entry.federation_version).toBe(row.federation_version);
+    expect(entry.updated_at).toBe(row.updated_at);
+    expect(entry.row.data.cloudEnabled).toBe(true);
+
+    // The edge apply delivers it with version/updated_at preserved.
+    const edge = await createMigratedDb();
+    const res = applyRevisionBatch(edge, delta);
+    expect(res.applied).toBe(true);
+    expect(readLastAppliedRevision(edge)).toBe(delta.maxVersion);
+    const eRow = edge.get(`SELECT federation_version, updated_at, deleted, data FROM settings WHERE id = 1`);
+    expect(eRow.federation_version).toBe(row.federation_version);
+    expect(eRow.updated_at).toBe(row.updated_at);
+    expect(eRow.deleted).toBe(0);
+    expect(JSON.parse(eRow.data).cloudEnabled).toBe(true);
+    edge.close?.();
+    db.close?.();
+  });
+
+  it("importDb restore path stamps settings; delta delivers it to an edge", async () => {
+    const db = await createMigratedDb();
+    pointDriverAt(db);
+    const dbApi = await import("@/lib/db/index.js");
+
+    await dbApi.importDb({ settings: { cloudEnabled: true } });
+
+    const row = db.get(`SELECT federation_version, updated_at, deleted FROM settings WHERE id = 1`);
+    expect(row).toBeTruthy();
+    expect(row.federation_version).not.toBeNull();
+    expect(row.federation_version).toBeGreaterThanOrEqual(1);
+    expect(typeof row.updated_at).toBe("string");
+    expect(row.deleted).toBe(0);
+
+    const { buildDelta, applyRevisionBatch } = await import("@/lib/federation/replication.js");
+    const delta = buildDelta(db, 0);
+    const entry = delta.rows.find((r) => r.table === "settings");
+    expect(entry).toBeTruthy();
+    expect(entry.federation_version).toBe(row.federation_version);
+    expect(entry.updated_at).toBe(row.updated_at);
+    expect(entry.row.data.cloudEnabled).toBe(true);
+
+    const edge = await createMigratedDb();
+    const res = applyRevisionBatch(edge, delta);
+    expect(res.applied).toBe(true);
+    const eRow = edge.get(`SELECT federation_version, updated_at, deleted FROM settings WHERE id = 1`);
+    expect({ federation_version: eRow.federation_version, updated_at: eRow.updated_at }).toEqual({
+      federation_version: row.federation_version,
+      updated_at: row.updated_at,
+    });
+    expect(eRow.deleted).toBe(0);
+    edge.close?.();
+  });
+});
+
 // ─── Central route handlers (server.js) ────────────────────────────────
 
 describe("central route handlers (server.js)", () => {

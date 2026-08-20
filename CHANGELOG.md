@@ -67,6 +67,15 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(federation): settings seed stamped so settings replicate via delta (FED-022)
+  The boot-time legacy JSON import (`importLegacyMain`) and the import/restore
+  path (`importDb`) wrote the settings row with a raw unstamped INSERT, leaving
+  `federation_version = NULL` forever — the delta query
+  (`federation_version > since`) excluded it, so seeded/restored settings only
+  ever reached edges via full-snapshot timing. Both inserts now use the same
+  `stampInsert`/`stampUpsertConflict` helpers as `settingsRepo`, so the
+  settings row carries a real version and propagates via deltas like the
+  other 7 replicated tables.
 - **Federation (revisionLag metric)**: the edge `revisionLag` status metric
   (dashboard "behind N revisions" banner) is now measured against the
   central instance's advertised watermark — persisted as
