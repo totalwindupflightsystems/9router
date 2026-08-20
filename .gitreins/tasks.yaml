@@ -410,3 +410,11 @@ tasks:
   status: complete
   created_at: '2026-08-20T12:16:55.286350+00:00'
   completed_at: '2026-08-20T12:41:32.815359+00:00'
+- id: NR-GAP-029
+  title: master mirror 31 behind upstream
+  criteria:
+  - origin/master fast-forwarded to upstream/master HEAD; git rev-list --count origin/master..upstream/master
+    == 0; fork default branch tracks upstream v0.5.55
+  status: complete
+  created_at: '2026-08-20T15:17:56.933763+00:00'
+  completed_at: '2026-08-20T15:18:06.700591+00:00'
