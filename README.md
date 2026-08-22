@@ -192,7 +192,7 @@ Default URLs:
 ## 🧪 Testing
 
 **The suite is NOT all-green by design** — don't chase a red run as a regression.
-The baseline is ~1841 pass / ~88 fail / ~59 skip (1988 total), with every
+The baseline is ~1988 pass / ~84 fail / ~59 skip (2131 total, verified 2026-08-22), with every
 known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
 Some failures are live-network tests (`real/*.real.test.js`, `mimo-free.live.*`)
 that need real credentials and are expected to fail locally — skip them.
