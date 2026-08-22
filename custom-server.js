@@ -385,7 +385,7 @@ function resolveStandaloneServerPath({ dir } = {}) {
 // tracing does not follow custom-server.js's dynamic imports, so the
 // standalone Docker image ships NONE of these unless the Dockerfile copies
 // them explicitly (Dockerfile.federation ships the whole src/; the plain
-// Dockerfile must copy src/lib/federation + src/lib/db + src/lib/dataDir.js).
+// Dockerfile must copy src/lib/federation + src/lib/db + src/lib/dataDir.mjs).
 // An edge without them fails open — requests fall through to local handlers
 // with only a console.error, i.e. FEDERATION_MODE=edge is silently inert.
 // Returns the missing module paths (empty when the runtime is complete or
@@ -400,7 +400,7 @@ function missingFederationRuntimeModules({ dir, mode } = {}) {
     path.join(base, "src", "lib", "federation", "proxy.js"),
     path.join(base, "src", "lib", "federation", "startLoops.js"),
     path.join(base, "src", "lib", "db", "driver.js"),
-    path.join(base, "src", "lib", "dataDir.js"),
+    path.join(base, "src", "lib", "dataDir.mjs"),
   ].filter((p) => !fs.existsSync(p));
 }
 
@@ -416,7 +416,7 @@ function assertFederationRuntimePresent() {
       missing.map((p) => "  - " + p).join("\n") +
       "\nAn edge without these fails open and serves local data silently " +
       "(no proxying, no replication, no DEGRADED write-queue). Ship them in the " +
-      "image (Dockerfile: COPY src/lib/federation src/lib/db src/lib/dataDir.js) " +
+      "image (Dockerfile: COPY src/lib/federation src/lib/db src/lib/dataDir.mjs) " +
       "or run from a layout that has src/."
   );
   process.exit(1);

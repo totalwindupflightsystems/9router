@@ -67,6 +67,18 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(boot): eliminate MODULE_TYPELESS_PACKAGE_JSON warnings on prod boot (NR-GAP-030)
+  With no root `"type"` field, Node 22 auto-detected ESM syntax in the
+  typeless `.js` files that `custom-server.js` loads natively at boot
+  (the background-token-refresh module + the federation runtime graph it
+  dynamically imports in every mode), warned once per package scope, and
+  paid a reparse tax on each. Declared the three natively-loaded subtrees
+  explicitly ESM with scoped `package.json` files (`src/sse/`,
+  `src/lib/federation/`, `src/lib/db/`) and renamed the lone straggler
+  `src/lib/dataDir.js` → `dataDir.mjs` (import sites, the FED-015 boot
+  guard, and the Dockerfile COPY updated to match). Boot log is now
+  warning-free; standalone mode is unchanged (the declaration only tells
+  Node what was already true — every covered file was already ESM).
 - fix(federation): settings seed stamped so settings replicate via delta (FED-022)
   The boot-time legacy JSON import (`importLegacyMain`) and the import/restore
   path (`importDb`) wrote the settings row with a raw unstamped INSERT, leaving

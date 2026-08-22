@@ -7,7 +7,7 @@
 #   1. the full src/ tree — custom-server.js loads the federation modules
 #      (src/lib/federation/{proxy,failover,queue,headers}.js) with DYNAMIC
 #      imports that Next's file tracing does not follow, and the DB layer
-#      (src/lib/db/paths.js → src/lib/dataDir.js) is only partially traced;
+#      (src/lib/db/paths.js → src/lib/dataDir.mjs) is only partially traced;
 #      shipping src/ makes every federation import resolvable at runtime
 #   2. the `@/` import alias — the app source imports `@/lib/...`
 #      (jsconfig alias). Node cannot resolve that bare specifier at runtime,

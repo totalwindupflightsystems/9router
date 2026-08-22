@@ -132,7 +132,7 @@ describe("missingFederationRuntimeModules — unit (spawned child)", () => {
       path.join(tempDir, "src", "lib", "federation", "proxy.js"),
       path.join(tempDir, "src", "lib", "federation", "startLoops.js"),
       path.join(tempDir, "src", "lib", "db", "driver.js"),
-      path.join(tempDir, "src", "lib", "dataDir.js"),
+      path.join(tempDir, "src", "lib", "dataDir.mjs"),
     ]);
   });
 
@@ -141,7 +141,7 @@ describe("missingFederationRuntimeModules — unit (spawned child)", () => {
       "src/lib/federation/proxy.js",
       "src/lib/federation/startLoops.js",
       "src/lib/db/driver.js",
-      "src/lib/dataDir.js",
+      "src/lib/dataDir.mjs",
     ]) {
       const p = path.join(tempDir, rel);
       fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -549,7 +549,7 @@ describe("NR-GAP-019 — placeholder boot gate (spawn smoke)", () => {
       "src/lib/federation/proxy.js",
       "src/lib/federation/startLoops.js",
       "src/lib/db/driver.js",
-      "src/lib/dataDir.js",
+      "src/lib/dataDir.mjs",
     ]) {
       const p = path.join(tempDir, rel);
       fs.mkdirSync(path.dirname(p), { recursive: true });
