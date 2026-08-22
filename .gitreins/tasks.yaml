@@ -418,3 +418,22 @@ tasks:
   status: complete
   created_at: '2026-08-20T15:17:56.933763+00:00'
   completed_at: '2026-08-20T15:18:06.700591+00:00'
+- id: NR-GAP-030
+  title: Eliminate MODULE_TYPELESS_PACKAGE_JSON boot warnings
+  criteria:
+  - Production boot (node custom-server.js) emits zero MODULE_TYPELESS_PACKAGE_JSON
+    warnings in stderr; standalone mode behavior unchanged; full test suite shows
+    no new failures vs baseline 1841 pass / 88 fail / 59 skip
+  status: complete
+  created_at: '2026-08-22T00:11:42.374311+00:00'
+  completed_at: '2026-08-22T00:30:55.252099+00:00'
+- id: NR-GAP-031
+  title: Full-suite + federation e2e re-verification
+  criteria:
+  - Full suite green with counts matching README claim (baseline 1841 pass / 88 fail
+    / 59 skip, 1988 total) via verify-no-regression.mjs exit 0 AND live 3-instance
+    federation lifecycle e2e passes (linked - kill central - degraded serving - recover
+    - reconcile) with recorded output committed or linked
+  status: complete
+  created_at: '2026-08-22T10:43:53.717340+00:00'
+  completed_at: '2026-08-22T10:58:52.924339+00:00'
