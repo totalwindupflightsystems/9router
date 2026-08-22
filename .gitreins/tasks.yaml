@@ -437,3 +437,12 @@ tasks:
   status: complete
   created_at: '2026-08-22T10:43:53.717340+00:00'
   completed_at: '2026-08-22T10:58:52.924339+00:00'
+- id: FED-023
+  title: Refresh xAI + DeepSeek provider registries against live catalogs
+  criteria:
+  - 'xai.js and deepseek.js registry model lists match the live provider catalogs:
+    all current models present (grok-4.5/grok-4.6/grok-4.3 for xAI; deepseek-v4-flash-0731/deepseek-v4-pro-0813/deepseek-v4-flash-vision-exp
+    for DeepSeek), no stale IDs, regression gate no new fails, build PASS'
+  status: complete
+  created_at: '2026-08-22T21:57:24.630144+00:00'
+  completed_at: '2026-08-22T22:02:50.280637+00:00'
