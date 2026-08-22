@@ -1,6 +1,13 @@
 # Unreleased
 
 ## Features
+- **Providers**: refresh xAI + DeepSeek registries to the live catalogs —
+  xAI gains grok-4.20, grok-4.20-multi-agent, grok-4.6, grok-4.5, grok-4.3
+  and grok-build-0.1 (search-via-chat default moved from the stale
+  `grok-4.20-reasoning` to `grok-4.20`); DeepSeek gains the dated pins
+  deepseek-v4-pro-0813 / deepseek-v4-flash-0731 and the experimental
+  deepseek-v4-flash-vision-exp. Existing entries (incl. the
+  deepseek-v4-pro-max / deepseek-v4-pro-none internal aliases) are kept.
 - **Federation (docs, Docker, end-to-end)**: the federation feature is now
   deployable and documented end to end. `docs/FEDERATION.md` covers the
   deployment topologies (single central + N edges, per-datacenter edges,
