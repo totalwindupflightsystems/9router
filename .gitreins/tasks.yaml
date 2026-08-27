@@ -475,3 +475,11 @@ tasks:
   status: complete
   created_at: '2026-08-27T11:31:00.150656+00:00'
   completed_at: '2026-08-27T11:35:11.097906+00:00'
+- id: NR-GAP-035
+  title: "Spec-vs-code drift in federation-spec.md \xA75"
+  criteria:
+  - "spec \xA75 paths match the real route files (grep-verifiable) and list all 7\
+    \ endpoints"
+  status: complete
+  created_at: '2026-08-27T18:47:55.507113+00:00'
+  completed_at: '2026-08-27T18:48:31.611976+00:00'
