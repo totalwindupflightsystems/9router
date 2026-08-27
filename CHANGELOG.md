@@ -74,6 +74,16 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(security): reject short FEDERATION_TOKEN at boot + document secret
+  rotation (NR-GAP-034) — a configured `FEDERATION_TOKEN` shorter than 16
+  chars is now treated like the `change-me-*` placeholders: flagged by the
+  boot-time secret check, so a federation-mode boot (central or edge)
+  refuses to start with a `[security] FATAL` + exit 1 (standalone keeps
+  warning-only). The federation API (snapshot/delta/verify/replay) is
+  gated only by this token, so a 3-char token was brute-forceable.
+  `docs/FEDERATION.md` gains a "Rotating secrets" section (§6.5) covering
+  `FEDERATION_TOKEN` / `JWT_SECRET` / `API_KEY_SECRET` / `INITIAL_PASSWORD`
+  rotation steps and the ≥ 16-char (prefer 32+) minimum-length rule.
 - fix(ci): wire federation E2E into npm + CI (NR-GAP-033) — the standalone
   federation lifecycle proof (`tests/federation/e2e.mjs`, central + 2 edge
   instances: standalone boot → LINKED → central outage → DEGRADED replica

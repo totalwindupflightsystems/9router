@@ -450,7 +450,7 @@ describe("checkPlaceholderSecrets (NR-GAP-019 placeholder guard)", () => {
 
   it("returns [] when all secrets are real values", () => {
     expect(
-      runProbe(envWith(["tk-abc-12345", "jwt-abc-12345", "ak-abc-12345", "pw-abc-12345"]))
+      runProbe(envWith(["tk-abc-12345-abcdef", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"]))
     ).toEqual([]);
   });
 
@@ -478,8 +478,41 @@ describe("checkPlaceholderSecrets (NR-GAP-019 placeholder guard)", () => {
 
   it("flags only the placeholders when mixed with real secrets", () => {
     expect(
-      runProbe(envWith(["change-me-to-a-long-random-federation-token", "jwt-abc-12345", "change-me", "pw-abc-12345"]))
+      runProbe(envWith(["change-me-to-a-long-random-federation-token", "jwt-abc-12345-abcdef", "change-me", "pw-abc-12345-abcdef"]))
     ).toEqual(["FEDERATION_TOKEN", "API_KEY_SECRET"]);
+  });
+
+  // NR-GAP-034: a configured FEDERATION_TOKEN shorter than 16 chars is
+  // brute-forceable (the federation API is gated only by this token) — treat
+  // it like a placeholder: flagged at boot, federation-mode boots refuse.
+  it("flags a short FEDERATION_TOKEN (\"abc\") even with real other secrets", () => {
+    expect(
+      runProbe(envWith(["abc", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"]))
+    ).toEqual(["FEDERATION_TOKEN"]);
+  });
+
+  it("flags a short FEDERATION_TOKEN (\"12345\")", () => {
+    expect(
+      runProbe(envWith(["12345", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"]))
+    ).toEqual(["FEDERATION_TOKEN"]);
+  });
+
+  it("does NOT flag a 16-char FEDERATION_TOKEN (boundary)", () => {
+    expect(
+      runProbe(envWith(["0123456789abcdef", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"]))
+    ).toEqual([]);
+  });
+
+  it("flags a 15-char FEDERATION_TOKEN", () => {
+    expect(
+      runProbe(envWith(["0123456789abcde", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"]))
+    ).toEqual(["FEDERATION_TOKEN"]);
+  });
+
+  it("does NOT flag an unset FEDERATION_TOKEN (standalone default, no length gate)", () => {
+    expect(
+      runProbe(envWith([undefined, "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"]))
+    ).toEqual([]);
   });
 });
 
@@ -500,7 +533,10 @@ describe("NR-GAP-019 — placeholder boot gate (spawn smoke)", () => {
     "change-me-to-a-long-random-api-key-secret",
     "change-me",
   ];
-  const REAL_VALUES = ["tk-abc-12345", "jwt-abc-12345", "ak-abc-12345", "pw-abc-12345"];
+  const REAL_VALUES = ["tk-abc-12345-abcdef", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"];
+  // NR-GAP-034: short (<16 char) FEDERATION_TOKEN is brute-forceable — same
+  // boot gate as placeholders: federation mode refuses, standalone warns.
+  const SHORT_TOKEN_VALUES = ["abc", "jwt-abc-12345-abcdef", "ak-abc-12345-abcdef", "pw-abc-12345-abcdef"];
 
   function bootEnv(mode, values) {
     const SECRET_KEYS = [
@@ -574,5 +610,14 @@ describe("NR-GAP-019 — placeholder boot gate (spawn smoke)", () => {
     expect(res.status).toBe(0);
     expect(res.stderr).not.toMatch(/\[security\]/);
     expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  it("central + short FEDERATION_TOKEN: exit 1 with FATAL, server.js never required", () => {
+    const { res, marker } = boot("central", SHORT_TOKEN_VALUES);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/\[security\] FATAL: placeholder secrets still in use/);
+    expect(res.stderr).toMatch(/FEDERATION_TOKEN/);
+    expect(res.stderr).toMatch(/refusing to boot in FEDERATION_MODE=central/);
+    expect(fs.existsSync(marker)).toBe(false);
   });
 });

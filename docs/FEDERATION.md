@@ -130,6 +130,13 @@ or the orchestrator's secret store). The token is compared in constant time
 (SHA-256 pre-hash) and never appears in dashboard responses — the config
 page only reports "configured yes/no".
 
+**Minimum length (NR-GAP-034):** a configured `FEDERATION_TOKEN` shorter
+than 16 characters is treated like a placeholder at boot — flagged by the
+same `[security]` gate as the `change-me-*` example values. A federation-mode
+boot (central or edge) with a short token **refuses to start** (FATAL +
+exit 1); standalone keeps warning-only. Use ≥ 16 chars (prefer 32+, e.g.
+`openssl rand -hex 32`). See §6.5 for rotation.
+
 ---
 
 ## 4. Replication model
@@ -318,7 +325,47 @@ untouched) and surfaces an "upgrade edge" banner. Fix: deploy the newer
 image to the edge. Apply resumes automatically from the same revision —
 deltas are version-ordered, so nothing is lost.
 
-### 6.5 Upgrades
+### 6.5 Rotating secrets
+
+Rotation matters: any secret that may have leaked (a compromised instance,
+a token in a log/commit/chat, a departed operator with access to the env)
+must be replaced — the federation API is gated only by `FEDERATION_TOKEN`,
+so a leaked token lets anyone read the full config snapshot and push
+replays. The boot gate (NR-GAP-019/034) refuses to start with `change-me-*`
+placeholders or a `FEDERATION_TOKEN` shorter than 16 chars, but it cannot
+detect a *leaked* long token — only rotation fixes that.
+
+**`FEDERATION_TOKEN`** (shared by all instances):
+
+1. Generate a new long random value: `openssl rand -hex 32` (64 chars).
+2. Update **every** instance's env / compose `environment:` / secret store
+   with the new value — all edges AND central must agree.
+3. Restart **edges first, then central** (same order as §6.6 upgrades).
+   Brief auth-window tradeoff: if you restart central first, edges keep
+   presenting the old token and get 401s until they are restarted too —
+   either order works as long as all instances are updated before the
+   last one restarts; edges-first minimizes the window where a stale edge
+   is rejected.
+
+**`JWT_SECRET`** (dashboard session signing): rotating it invalidates all
+existing dashboard sessions — users simply re-login. No data loss; do it
+when you suspect session-cookie forgery or as part of a general secret
+sweep. Restart the instance after changing it.
+
+**`API_KEY_SECRET`** (API-key signing/verification): rotating it invalidates
+all issued API keys — re-issue keys to clients after the change (the
+dashboard API-key page). Restart the instance after changing it.
+
+**`INITIAL_PASSWORD`** (dashboard admin password): change it in the
+dashboard (or env for fresh setups) — existing sessions stay valid until
+re-login. Use a password manager; never reuse it across instances.
+
+**Minimum-length rule:** `FEDERATION_TOKEN` must be ≥ 16 chars (prefer 32+,
+e.g. `openssl rand -hex 32`); a shorter configured token is rejected at
+boot in federation mode (NR-GAP-034). The other secrets have no length
+gate, but use long random values for all of them.
+
+### 6.6 Upgrades
 
 1. Upgrade **edges first** (they must be at least central's schemaVersion).
 2. Upgrade central last.

@@ -428,6 +428,10 @@ function assertFederationRuntimePresent() {
 // quickstarts still boot); exported so spawned-child unit tests can exercise
 // it with arbitrary env objects (importing this file into vitest would leak
 // the http.createServer monkeypatch above).
+// NR-GAP-034: a configured FEDERATION_TOKEN shorter than 16 chars is
+// brute-forceable — the federation API (snapshot/delta/verify/replay) is
+// gated only by this token. Treat it like a placeholder: flagged at boot, so
+// federation-mode boots refuse to start (standalone keeps warning-only).
 function checkPlaceholderSecrets(env = process.env) {
   const PLACEHOLDER_PREFIXES = [
     ["FEDERATION_TOKEN", "change-me"],
@@ -435,9 +439,14 @@ function checkPlaceholderSecrets(env = process.env) {
     ["API_KEY_SECRET", "change-me"],
     ["INITIAL_PASSWORD", "change-me"],
   ];
-  return PLACEHOLDER_PREFIXES.filter(([name, prefix]) =>
+  const flagged = PLACEHOLDER_PREFIXES.filter(([name, prefix]) =>
     String(env[name] || "").startsWith(prefix)
   ).map(([name]) => name);
+  const token = String(env.FEDERATION_TOKEN || "");
+  if (token.length > 0 && token.length < 16 && !flagged.includes("FEDERATION_TOKEN")) {
+    flagged.push("FEDERATION_TOKEN");
+  }
+  return flagged;
 }
 
 module.exports = {
