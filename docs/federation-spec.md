@@ -166,10 +166,22 @@ LINKED → DEGRADED → RECOVERING → LINKED     (state persisted in federation
    unchanged. *Gate: `FEDERATION_MODE` unset ⇒ zero schema/behavior drift vs baseline.*
 2. **FED-002 — Replication service + routes.** `src/lib/federation/replication.js`
    (snapshot/delta apply, revision watermark, transactional batches),
-   `src/lib/federation/server.js` (central routes: snapshot/delta/verify/status),
-   `src/lib/federation/edgeClient.js` (pull + poll loop). Federation hooks in
-   `src/lib/db` write paths to stamp `federation_version`. Tests: central snapshot/delta
-   correctness; edge apply idempotency; schemaVersion blocking.
+   `src/lib/federation/server.js` (central route HANDLERS: `handleSnapshot`,
+   `handleDelta`, `handleVerify`, `handleStatus`, `handleReplay`,
+   `handleLocalStatus`, `handleConfigStatus`), `src/lib/federation/edgeClient.js`
+   (pull + poll loop). The HTTP routes are Next.js route handlers in
+   `src/app/api/federation/*/route.js` (one dir per endpoint) that import the
+   handlers from `server.js` and wrap them with `withFederationAuth` (roleGuard)
+   — all 7 endpoints:
+   - `GET  /api/federation/snapshot` — full snapshot (`exportDb()` shape + version columns)
+   - `GET  /api/federation/delta` — rows where `federation_version > since` + tombstones + watermark
+   - `GET  /api/federation/verify` — heartbeat: token + edgeId, echoes central lease + schemaVersion
+   - `GET  /api/federation/status` — role, revision, schema version, lease (diagnostics)
+   - `POST /api/federation/replay` — replay queued edge writes (FED-004 recovery drain)
+   - `GET  /api/federation/local-status` — token-less local status for the instance's own dashboard (FED-005)
+   - `GET  /api/federation/config-status` — token-less read-only config surface for the dashboard config page (FED-005)
+   Federation hooks in `src/lib/db` write paths to stamp `federation_version`.
+   Tests: central snapshot/delta correctness; edge apply idempotency; schemaVersion blocking.
 3. **FED-003 — Edge proxy + role guard.** `custom-server.js` forwarding middleware
    (method/body/SSE/abort), `src/lib/federation/roleGuard.js` route-handler guard.
    Tests: proxy passthrough of `/v1/chat/completions` (SSE), dashboard API forwarding,
