@@ -74,6 +74,13 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(ci): wire federation E2E into npm + CI (NR-GAP-033) — the standalone
+  federation lifecycle proof (`tests/federation/e2e.mjs`, central + 2 edge
+  instances: standalone boot → LINKED → central outage → DEGRADED replica
+  serving + queued writes → restart → RECOVERING → reconcile) now runs as
+  `npm run test:e2e` and as a dedicated CI job (10-minute timeout, fails on
+  any non-zero exit) so edge→central proxying and failover wiring are
+  exercised on every push instead of shipping unverified.
 - fix(boot): eliminate MODULE_TYPELESS_PACKAGE_JSON warnings on prod boot (NR-GAP-030)
   With no root `"type"` field, Node 22 auto-detected ESM syntax in the
   typeless `.js` files that `custom-server.js` loads natively at boot

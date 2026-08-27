@@ -35,3 +35,30 @@ jobs:
       # never gate on the raw vitest exit code.
       - name: Run vitest + regression gate
         run: bash scripts/gitreins-guard-tests.sh
+
+  # Federation end-to-end: spawns 3 real instances (central + 2 edges) and
+  # proves edge→central proxying + edge-serving-from-replica during a
+  # central outage. Only needs root deps (the loader aliases @/ → src/; no
+  # build step). A broken proxy/failover wiring must turn CI red, so the
+  # step exits non-zero on any failed check (no `|| true`).
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # NOTE: package-lock.json is gitignored in this repo (see .gitignore
+      # line 66) — use `npm install` (not `npm ci`) and no npm cache, or
+      # setup-node fails with "Dependencies lock file is not found".
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Run federation E2E
+        run: npm run test:e2e
