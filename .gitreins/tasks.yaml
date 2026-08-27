@@ -456,3 +456,22 @@ tasks:
   status: complete
   created_at: '2026-08-26T22:36:54.901159+00:00'
   completed_at: '2026-08-26T22:37:03.949436+00:00'
+- id: NR-GAP-033
+  title: Wire federation E2E into npm + CI
+  criteria:
+  - npm run test:e2e executes tests/federation/e2e.mjs green (exit 0, 17/17 checks)
+    from repo root; .github/workflows/tests.yml has a CI job running it that fails
+    on non-zero exit; vitest suite shows no regression (1988 pass / 84 fail / 59 skip
+    baseline)
+  status: complete
+  created_at: '2026-08-27T04:49:13.658111+00:00'
+  completed_at: '2026-08-27T04:51:36.242504+00:00'
+- id: NR-GAP-034
+  title: Weak/short FEDERATION_TOKEN rejection + secret rotation docs
+  criteria:
+  - custom-server.js checkPlaceholderSecrets flags FEDERATION_TOKEN shorter than 16
+    chars (in addition to change-me prefix); tests cover short-token rejection; docs/FEDERATION.md
+    documents secret rotation; vitest suite shows no regression vs 1988/84/59 baseline
+  status: complete
+  created_at: '2026-08-27T11:31:00.150656+00:00'
+  completed_at: '2026-08-27T11:35:11.097906+00:00'
