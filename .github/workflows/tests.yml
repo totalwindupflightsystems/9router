@@ -19,9 +19,9 @@ jobs:
         with:
           node-version: 22
 
-      # NOTE: package-lock.json is gitignored in this repo (see .gitignore
-      # line 66) — use `npm install` (not `npm ci`) and no npm cache, or
-      # setup-node fails with "Dependencies lock file is not found".
+      # NOTE: package-lock.json is tracked in this repo (commit 0f8d3204,
+      # 2026-08-18) — `npm ci` works on fresh runners; `npm install` is
+      # kept here for speed.
       - name: Install root dependencies
         run: npm install
 
@@ -54,9 +54,9 @@ jobs:
         with:
           node-version: 22
 
-      # NOTE: package-lock.json is gitignored in this repo (see .gitignore
-      # line 66) — use `npm install` (not `npm ci`) and no npm cache, or
-      # setup-node fails with "Dependencies lock file is not found".
+      # NOTE: package-lock.json is tracked in this repo (commit 0f8d3204,
+      # 2026-08-18) — `npm ci` works on fresh runners; `npm install` is
+      # kept here for speed.
       - name: Install root dependencies
         run: npm install
 
