@@ -99,6 +99,14 @@ All `FEDERATION_*` vars are optional. Defaults live in
 | `FEDERATION_REPLAY_BATCH_SIZE` | `50` | edge | Replay batch size when draining the queue on recovery. |
 | `FEDERATION_REDACT_FIELDS` | — | edge | Comma-separated JSON paths redacted from replicated provider/API-key rows (proxy-only edges). |
 
+> **Where the secrets live in Docker:** `docker-compose.federation.yml` does
+> not bake in the shared secrets — it reads `FEDERATION_TOKEN`,
+> `JWT_SECRET`, `API_KEY_SECRET` and `INITIAL_PASSWORD` from `.env` via
+> `env_file` on the `x-federation-common` anchor (inherited by
+> central/edge-a/edge-b). Create `.env` from the tracked example
+> (`cp .env.example .env`), then edit the values. `.env` is gitignored and
+> never committed.
+
 ### 3.1 Non-federation vars that matter
 
 | Var | Sharing policy |
@@ -125,10 +133,11 @@ All `FEDERATION_*` vars are optional. Defaults live in
 openssl rand -hex 32
 ```
 
-Put the same value in every instance's env (`.env`, compose `environment:`,
-or the orchestrator's secret store). The token is compared in constant time
-(SHA-256 pre-hash) and never appears in dashboard responses — the config
-page only reports "configured yes/no".
+Put the same value in every instance's env — in Docker, `.env` (the compose
+file reads it via `env_file`; `cp .env.example .env` to get started), or the
+orchestrator's secret store on bare metal. The token is compared in constant
+time (SHA-256 pre-hash) and never appears in dashboard responses — the
+config page only reports "configured yes/no".
 
 **Minimum length (NR-GAP-034):** a configured `FEDERATION_TOKEN` shorter
 than 16 characters is treated like a placeholder at boot — flagged by the
@@ -259,25 +268,27 @@ of a false green "Federation linked".
 
 ### 6.1 Docker (example compose)
 
-> **Change the secrets first.** `docker-compose.federation.yml` ships with
-> placeholder secrets (`FEDERATION_TOKEN`, `JWT_SECRET`, `API_KEY_SECRET`,
-> `INITIAL_PASSWORD` all start with `change-me`). A federation-mode boot
-> (the `central`/`edge` services) with placeholders still in place REFUSES
+> **Set the secrets in `.env` first.** `docker-compose.federation.yml` does
+> not bake in secrets — it reads the four shared secrets
+> (`FEDERATION_TOKEN`, `JWT_SECRET`, `API_KEY_SECRET`, `INITIAL_PASSWORD`)
+> from `.env` via `env_file` (on the `x-federation-common` anchor, so
+> central/edge-a/edge-b all inherit it). A federation-mode boot (the
+> `central`/`edge` services) with placeholder values still in place REFUSES
 > to start with a loud `[security] FATAL` error and exit code 1 — replace
 > them before any real deployment, or the instance is trivially compromised
 > beyond localhost. (Standalone quickstarts, `FEDERATION_MODE` unset, still
 > boot with a prominent warning — localhost-only testing only.)
 
 ```bash
-# 1. Replace the placeholder secrets in docker-compose.federation.yml (or
-#    override them via the environment). All four must be long, random values;
-#    FEDERATION_TOKEN must be identical on every instance:
+# 1. Create .env from the tracked example and fill in real values. All four
+#    must be long, random values; FEDERATION_TOKEN (and ideally all four)
+#    must be identical on every instance:
 #      FEDERATION_TOKEN:  <long random token, shared edge↔central>
 #      JWT_SECRET:        <long random string>
 #      API_KEY_SECRET:    <long random string>
 #      INITIAL_PASSWORD:  <dashboard login password>
-sed -i 's/change-me-to-a-long-random-federation-token/YOUR-LONG-RANDOM-TOKEN/' docker-compose.federation.yml
-#    ...and edit the remaining three change-me-* values by hand.
+cp .env.example .env
+$EDITOR .env   # replace the placeholder values (never commit .env)
 
 # 2. Build + start central + 2 edges:
 docker compose -f docker-compose.federation.yml up -d --build

@@ -43,15 +43,17 @@ x-federation-common: &federation-common
     context: .
     dockerfile: Dockerfile.federation
   restart: unless-stopped
+  # Shared secrets — FEDERATION_TOKEN, JWT_SECRET, API_KEY_SECRET and
+  # INITIAL_PASSWORD — are NOT baked into this file. They are read from .env
+  # via env_file below so nothing secret lands in git. They MUST be identical
+  # on every federation instance (see docs/FEDERATION.md §3). Get started:
+  #   cp .env.example .env   (then edit the placeholder values; .env is gitignored)
+  env_file:
+    - .env
   environment: &federation-env
     NODE_ENV: production
     HOSTNAME: "0.0.0.0"
     DATA_DIR: /app/data
-    # Shared secrets — MUST be identical on every instance (see docs).
-    FEDERATION_TOKEN: change-me-to-a-long-random-federation-token
-    JWT_SECRET: change-me-to-a-long-random-jwt-secret
-    API_KEY_SECRET: change-me-to-a-long-random-api-key-secret
-    INITIAL_PASSWORD: change-me
     # Federation knobs (optional; defaults shown)
     FEDERATION_SYNC_INTERVAL_MS: "5000"
     FEDERATION_HEARTBEAT_INTERVAL_MS: "2000"
