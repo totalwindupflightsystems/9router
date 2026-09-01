@@ -1,5 +1,40 @@
 # Dogfood Log
 
+## 2026-09-01 — 9router (federation fork) — run 3: re-verify the fixes
+
+- **Verdict:** ✅ SHIPPABLE (federation feature). Every formerly-open finding
+  (FED-020 delta version drop, FED-021 lag metric, FED-022 settings
+  replication, NR-GAP-034/036/039 hardening) re-verified FIXED at row level
+  against real deployments.
+- **Promise:** "Edges proxy /v1 + dashboard API to central, replicate its
+  SQLite within seconds, keep serving during a central outage (writes queued,
+  reconciled later) — using only documented env vars."
+- **Method:** real deployment @ `cd90fd9e` (repo-root production path,
+  `npm ci` + build), real dashboard API (login/key/provider/combo/settings),
+  real `/v1` against a local mock Ollama, SIGKILL central → degraded →
+  serve-from-replica → 202 queued write → restart → drain → re-link.
+- **Top findings (all minor, P3):**
+  1. **R3-01** — PUT `/api/keys/{id}` silently ignores `name` (200 + no-op).
+  2. **R3-02** — short-FEDERATION_TOKEN boot guard logs placeholder-secrets
+     wording (hard refusal, but misleading message).
+  3. **R3-03** — `[federation] pull failed: fetch failed` logged once per
+     sync interval for the whole outage; no rate limiting.
+- **Row-level integrity:** apiKeys v4 delta, settings v6, combos v7 —
+  `federation_version` + `updated_at` identical central/edge. FED-020
+  signature (`maxVersion < lastAppliedRevision`) absent.
+- **Time-to-first-success:** ~6 min (clean scratch → first `/v1` completion
+  through the edge). Friction count: 4 (none blocking).
+- **Artifacts:** `docs/dogfood/2026-09-01-integration.md`,
+  `docs/dogfood/diagnostics.md` §11,
+  `skills/9router-federation-usage/SKILL.md` v3.0.0, board R3-01..03
+  (event id 452).
+- **Foreman:** cooldown 259200s (3-day) with an empty board at start —
+  woken to 900s to work R3-01..03, per the stand-in speed-up loop.
+- **Meta:** the three-layer termination check (L3 = real user workflow) is
+  what makes this verdict trustworthy; the 12-file/189-test federation
+  vitest suite passes at HEAD too, but it passed at earlier HEADs that
+  still hid FED-020.
+
 ## 2026-08-20 — 9router (federation fork) — re-test after FED-011..016
 
 - **Verdict:** 🟡 PROMISING-BUT-ROUGH (federation now WORKS end-to-end; one P1

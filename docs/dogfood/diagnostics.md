@@ -173,3 +173,29 @@ drop it from `REPLICATE_TABLES`.
 5. `stream:false` only for mock-upstream verification; `stream:true` fails
    503 with the mock on central AND edge (mock format limitation, not a
    federation bug — re-verify against a real Ollama before shipping).
+
+## 11. Run 3 (2026-09-01): the fixes held — what re-verification looks like when it passes
+
+Run 3 repeated the full L3 playbook at HEAD (`cd90fd9e`) and every check
+passed, including row-level probes. Three lessons worth keeping:
+
+1. **The row-level probe is the sensitive canary, not the status metric.**
+   The delta-apply corruption (FED-020) never showed in `revisionLag` while
+   it was live, and its absence now only becomes *proven* by comparing
+   `federation_version`/`updated_at` per row across central and edge after a
+   delta update. Run 3 did this for apiKeys (v4 delta), settings (v6), and
+   combos (v7): versions and `updated_at` matched on both sides. Keep this
+   step first when any future acceptance check regenerates doubt.
+2. **A fix can regress only where the test suite can't see.** The three
+   fix commits (25790823, f825ae5b, fa3cb076) each shipped with unit tests
+   — yet the 08-20 bug also had "coverage" and shipped. What actually
+   caught the original bug was real-boot behavior (loops starting from real
+   entry points), and what proves the fixes is still real-boot behavior.
+   The vitest federation suite passing at HEAD (run 3: 12 files, 189 tests,
+   0 fail, ~2s) is corroborating evidence, never the verdict.
+3. **Recovery latency is observable but undocumented.** Edge re-link after
+   central restart took ~15–20s in run 3 (SYNC 2000/HEARTBEAT 1000/OUTAGE
+   5000): heartbeat successes flip state quickly, but the drain + delta
+   catch-up + replay cycle dominates. During the outage the edge logs one
+   `[federation] pull failed: fetch failed` per sync interval (filed R3-03).
+   Expect a bounded window of `degraded` after restart and don't panic-fix.
