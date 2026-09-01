@@ -115,3 +115,4 @@
 - **Foreman:** not woken (CooldownS already 900); 6 pending P0/P1/P2 tasks on the board.
 - **Meta:** the "e2e 17/17 PASS" claim coexists with a dead feature — the harness starts
   the loops itself and bypasses Next's dashboardGuard. Tests proved modules, not product.
+2026-09-01 | PROMISING-BUT-ROUGH | 20s t2fs | friction 6 | 5 findings
