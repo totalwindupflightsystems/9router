@@ -74,6 +74,14 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(cli): make `npm run cli:pack` work out of the box (DF-9ROUTER-3) —
+  `cli/scripts/build-cli.js` invokes esbuild via `execSync`, but esbuild was
+  declared only in `cli/package.json` devDependencies while the root
+  package.json has no workspaces, so a fresh clone (no `cli/node_modules`)
+  died `MODULE_NOT_FOUND: esbuild`. esbuild `^0.25.12` is now a root
+  devDependency (hoisted, resolvable from `cli/`), with root + cli
+  lockfiles updated. `npm run cli:pack` exits 0 from a no-`cli/node_modules`
+  state and produces `9router-0.5.55.tgz`.
 - fix(security): reject short FEDERATION_TOKEN at boot + document secret
   rotation (NR-GAP-034) — a configured `FEDERATION_TOKEN` shorter than 16
   chars is now treated like the `change-me-*` placeholders: flagged by the
