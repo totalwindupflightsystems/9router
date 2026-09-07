@@ -30,15 +30,24 @@ export async function getCustomModels() {
   return Object.values(all);
 }
 
-// Atomic check-then-insert inside transaction to prevent duplicate races
-export async function addCustomModel({ providerAlias, id, type = "llm", name }) {
+// Atomic upsert inside transaction to prevent duplicate races.
+// Re-adding an existing model updates caps/name without resetting omitted fields.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
   db.transaction(() => {
-    const row = db.get(`SELECT 1 FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
-    if (row) return;
-    const value = stringifyJson({ providerAlias, id, type, name: name || id });
+    // Upstream parity (v0.5.69): re-adding an existing model now UPDATES
+    // caps/name in place instead of being a silent no-op (merged with
+    // federation stamping so the insert still carries federation_version).
+    const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
+    if (row) {
+      const prev = parseJson(row.value) || {};
+      const next = { ...prev, ...(name ? { name } : {}), ...(caps ? { caps } : {}) };
+      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
+      return;
+    }
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}) });
     const s = stampInsert(db);
     db.run(`INSERT INTO kv(scope, key, value${s.cols}) VALUES('customModels', ?, ?${s.placeholders})`, [k, value, ...s.params]);
     added = true;

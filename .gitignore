@@ -97,3 +97,5 @@ dagger.db
 .coding-hermes/board/board.db
 .gitreins/history/
 .gitreins/usage.jsonl
+# Kiro local workspace state (upstream v0.5.69)
+.kiro/

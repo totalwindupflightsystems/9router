@@ -3,6 +3,15 @@ export async function register() {
     const { initConsoleLogCapture } = await import("@/lib/consoleLogBuffer");
     initConsoleLogCapture();
 
+    // Upstream parity (v0.5.69): serve the synced model catalog to the
+    // dashboard's capabilities page (server-only install, no node:fs in
+    // the browser bundle) + background catalog sync.
+    const { installCatalogSource } = await import("open-sse/providers/catalogOverride.js");
+    await installCatalogSource();
+
+    const { startModelCatalogSync } = await import("@/lib/modelCatalog/sync.js");
+    startModelCatalogSync();
+
     // FED-013: belt-and-suspenders loop starter for the `next start` path
     // (custom-server.js is the primary entry; both call into the
     // double-start-guarded startFederationLoops, so firing from both is

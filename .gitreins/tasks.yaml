@@ -483,3 +483,13 @@ tasks:
   status: complete
   created_at: '2026-08-27T18:47:55.507113+00:00'
   completed_at: '2026-08-27T18:48:31.611976+00:00'
+- id: DF-9ROUTER-3
+  title: npm run cli:pack works out of the box
+  criteria:
+  - npm run cli:pack exits 0 from repo root and produces 9router-0.5.55.tgz
+  - esbuild resolves from cli/ via root hoisting (require.resolve prints /home/kara/9router/node_modules/esbuild/lib/main.js)
+  - "root package.json devDependencies contains esbuild ^0.25.12 and package-lock.json\
+    \ is updated \u2014 both committed on federation"
+  status: complete
+  created_at: '2026-09-03T13:59:53.900439+00:00'
+  completed_at: '2026-09-03T14:00:00.467252+00:00'

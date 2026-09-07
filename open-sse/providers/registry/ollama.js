@@ -43,7 +43,16 @@ export default {
     { id: "mistral-large-3:675b", name: "Mistral Large 3 675B" },
     { id: "gemma4:31b", name: "Gemma 4 31B" },
   ],
-  serviceKinds: ["llm"],
+  serviceKinds: ["llm", "webFetch"],
+  fetchConfig: {
+    baseUrl: "https://ollama.com/api/web_fetch",
+    method: "POST",
+    authType: "apikey",
+    authHeader: "bearer",
+    formats: ["markdown"],
+    maxCharacters: 200000,
+    timeoutMs: 30000,
+  },
   features: {
     usage: true,
     usageApikey: true,
