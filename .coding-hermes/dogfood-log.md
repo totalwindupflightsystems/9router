@@ -117,3 +117,5 @@
   the loops itself and bypasses Next's dashboardGuard. Tests proved modules, not product.
 2026-09-01 | PROMISING-BUT-ROUGH | 20s t2fs | friction 6 | 5 findings
 2026-09-04 | PROMISING-BUT-ROUGH | 12s t2fs | friction 9 | 5 findings
+2026-09-07 | PROMISING-BUT-ROUGH | 170s t2fs | friction 9 | 5 findings
+
