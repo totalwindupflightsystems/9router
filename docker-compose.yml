@@ -11,7 +11,9 @@ services:
     container_name: 9router
     restart: always
     ports:
-      - "20128:20128"
+      # Host port overridable (compose interpolates from the environment or the
+      # project-dir .env file): PORT=30128 docker compose up -d
+      - "${PORT:-20128}:20128"
     volumes:
       - 9router-data:/app/data
     env_file:
@@ -31,7 +33,12 @@ services:
     container_name: headroom
     restart: always
     ports:
-      - "8787:8787"
+      # Headroom is optional at runtime (9router only calls it when the
+      # headroom toggle is enabled and HEADROOM_URL is reachable). The HOST
+      # port is overridable so a busy 8787 doesn't abort `compose up`:
+      # HEADROOM_PORT=18787 docker compose up -d
+      # (the container-internal port stays 8787 to match HEADROOM_URL).
+      - "${HEADROOM_PORT:-8787}:8787"
 
 volumes:
   9router-data:
