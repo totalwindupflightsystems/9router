@@ -436,6 +436,41 @@ ROUTER-MISS line first.
   only evidence of the lane when the probe's own request shape can't cause
   the failure.
 
+- **FREE-LANE 400 ≠ PING-BUDGET — REVOKE THE DISCOUNT (2026-09-08,
+  clinepass ling-3.0-flash-sante:free)**: the 09-07 ping-budget fix applies to
+  500 "empty response"; a persistent **400** across a FULL probe day (11+
+  probes) is a hard reject = dead lane. A dead :free lane still shows
+  normalized_price 0.0 and passes every price check, so nothing flags it —
+  revoke: discount `valid_to` + lane `disabled`/`disabled_reason` + price back
+  to NULL. Never leave a $0 row alive on a dead lane.
+  **⚠️ SUPERSEDED IN PART (2026-09-09): this revocation rule was itself an
+  ID-FORM ARTIFACT for sante:free — see the next pitfall. The revoke action is
+  still correct WHEN the probe used the /models-listed vendor-org id; it is
+  premise-false when the probe hit the bare or cline-pass/:free form.**
+- **CLINEPASS CHAT-ID FORMS — TWO FORMS, ONE PER LANE CLASS (2026-09-09,
+  chat probes 18/18 GET /models :free ids = HTTP 200)**: paid/in-plan lanes
+  answer ONLY at `cline-pass/<bare>` (vendor-org form = 403 product-surface).
+  FREE `:free` lanes answer ONLY at `<vendor-org>/<model>:free` exactly as
+  GET /models lists them — bare = 400 "invalid model format", `cline-pass/:free`
+  = 404 "model not found". Consequences: (a) the 09-05 `cline-pass/<bare>`
+  doctrine applies to PAID lanes only; (b) a :free-lane death verdict MUST
+  chat-probe the /models-listed vendor-org id BEFORE revoking — the 09-08
+  sante:free revocation (bare-form 400s) and the 08-28 "catalog scrape
+  artifact" family disable were the SAME artifact; sante:free + 16 sibling
+  lanes were alive all along (restored 09-09); (c) genuinely removed upstream
+  09-09: glm-5.2:free, minimax-m2.7:free, minimax-m3:free (absent from GET
+  /models + 404 at every form). Fix mechanism: probe_fixes rows
+  bare → vendor-org id (18 added 09-09) so the hourly probe retries at the
+  callable id; `provider_rules.jsonl` clinepass/chat-id-forms carries the
+  contract (DATA > CODE).
+- **AUTO PROBE_GAP ROWS CAN BE PREMISE-FALSE — CHECK provider_rules FIRST
+  (2026-09-08, opencode-go)**: router_probefix auto-rows said "HTTP 400 …
+  likely transient/auth" for all 10 opencode-go lanes while the 09-07
+  session-header contract row already explained every 400 (probe deliberately
+  omits `x-opencode-session` to report fleet usability, not raw endpoint
+  health). Rule: resolve each auto row against provider_rules contracts before
+  treating it as open work; an explanation row beats a re-diagnosis.
+
 - Sub-plan providers on models.dev look like junk ids (`zai-coding-plan`) —
   they are the FLAT-RATE LANES the registry wants; don't filter them out.
 - models.dev model names ≠ registry names (zai: `glm-5.3` vs registry
