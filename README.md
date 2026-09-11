@@ -1390,7 +1390,7 @@ docker pull decolua/9router:latest   # update to latest
 | ---------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | `JWT_SECRET`                                         | Auto-generated (`~/.9router/jwt-secret`) | JWT signing secret for dashboard auth cookie (override to share across instances)   |
 | `INITIAL_PASSWORD`                                   | `123456`                                 | First login password when no saved hash exists                                      |
-| `DATA_DIR`                                           | `~/.9router`                             | Main app data location (SQLite at `$DATA_DIR/db/data.sqlite`)                       |
+| `DATA_DIR`                                           | `~/.9router`                             | Main app data location (SQLite at `$DATA_DIR/db/data.sqlite`); must be writable — the app fails fast at boot if it cannot create/write it |
 | `PORT`                                               | framework default                        | Service port (`20128` in examples)                                                  |
 | `HOSTNAME`                                           | framework default                        | Bind host (Docker defaults to `0.0.0.0`)                                            |
 | `NODE_ENV`                                           | runtime default                          | Set `production` for deploy                                                         |
