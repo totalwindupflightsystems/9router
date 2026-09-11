@@ -493,3 +493,36 @@ tasks:
   status: complete
   created_at: '2026-09-03T13:59:53.900439+00:00'
   completed_at: '2026-09-03T14:00:00.467252+00:00'
+- id: r3-tick-336
+  title: R3-01/R3-02/R3-03/DF-9ROUTER-3 small fixes (commit a2177acf)
+  criteria:
+  - 'R3-01: PUT /api/keys/<id> with {"name":"X"} renames the key (name reaches updateApiKey);
+    {"isActive":false} still toggles; blank, non-string, or absent update fields return
+    400 instead of a silent 200'
+  - 'R3-02: booting with FEDERATION_MODE=central and a FEDERATION_TOKEN shorter than
+    16 chars exits 1 with a message naming the too-short token, NOT the placeholder-secrets
+    wording; the change-me placeholder path keeps its original wording'
+  - 'R3-03: the edge pull loop logs the first pull failure and then only every 12th
+    consecutive failure (bounded log volume during an outage), resets the counter
+    after a successful pull, and still logs schema-blocked pulls separately'
+  - 'DF-9ROUTER-3: /api/auth/status reports defaultPasswordIsPublic (false when a
+    password hash exists or INITIAL_PASSWORD is set) and the login page shows the
+    ''123456'' hint only when that flag is true'
+  status: complete
+  created_at: '2026-09-11T00:10:20.701874+00:00'
+  completed_at: '2026-09-11T10:39:52.710171+00:00'
+- id: df-9router-2
+  title: DATA_DIR fail-fast (commit f2511cd5)
+  criteria:
+  - "Configured DATA_DIR that cannot be created (EACCES/EPERM) throws a descriptive\
+    \ Error naming path, OS error, and remedy \u2014 no silent fallback to ~/.9router"
+  - Existing-but-unwritable configured DATA_DIR is detected (accessSync W_OK) and
+    throws the same descriptive error
+  - Unset DATA_DIR still returns the default ~/.9router with no warning; Windows Unix-path
+    guard keeps warn+default
+  - src/mitm/paths.js (CJS) mirrors the ESM behavior in lockstep
+  - New vitest tests cover throw/writable/unset for both ESM and CJS copies; full
+    suite shows no new regressions vs known-fails baseline
+  status: complete
+  created_at: '2026-09-11T10:47:56.949761+00:00'
+  completed_at: '2026-09-11T10:47:57.206091+00:00'
