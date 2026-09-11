@@ -526,3 +526,16 @@ tasks:
   status: complete
   created_at: '2026-09-11T10:47:56.949761+00:00'
   completed_at: '2026-09-11T10:47:57.206091+00:00'
+- id: df3-exit137-t338
+  title: "DF-9ROUTER-3: production server killed silently (exit 137, no crash log)\
+    \ \u2014 add crash/boot/shutdown file logging to custom-server.js + cli/app mirror\
+    \ + README recovery guidance + tests"
+  criteria:
+  - node custom-server.js child with DATA_DIR=<tmp> writes a boot record to <tmp>/logs/crash.log;
+    SIGTERM appends a shutdown record before exit; an uncaught exception appends an
+    uncaughtException record with stack; cli/app/custom-server.js carries identical
+    logic; README documents log location and exit-137 interpretation; new vitest tests
+    pass; IP/XFF logic untouched
+  status: complete
+  created_at: '2026-09-11T17:04:13.172975+00:00'
+  completed_at: '2026-09-11T17:20:21.572351+00:00'
