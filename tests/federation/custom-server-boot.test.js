@@ -615,9 +615,34 @@ describe("NR-GAP-019 — placeholder boot gate (spawn smoke)", () => {
   it("central + short FEDERATION_TOKEN: exit 1 with FATAL, server.js never required", () => {
     const { res, marker } = boot("central", SHORT_TOKEN_VALUES);
     expect(res.status).toBe(1);
+    // R3-02: the too-short branch now names the real problem instead of the
+    // shared placeholder wording.
+    expect(res.stderr).toMatch(/\[security\] FATAL: FEDERATION_TOKEN too short/);
+    expect(res.stderr).not.toMatch(/placeholder secrets still in use/);
+    expect(res.stderr).toMatch(/Refusing to boot in FEDERATION_MODE=central/);
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it("standalone + short FEDERATION_TOKEN: WARNING names the too-short token, still boots", () => {
+    const { res, marker } = boot(null, SHORT_TOKEN_VALUES);
+    expect(res.status).toBe(0);
+    expect(res.stderr).toMatch(/\[security\] WARNING: FEDERATION_TOKEN too short/);
+    expect(res.stderr).not.toMatch(/placeholder secrets/);
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  it("central + placeholder 'change-me…' token keeps the placeholder wording (no mislabel)", () => {
+    // The placeholder FEDERATION_TOKEN value itself must NOT be reported as
+    // "too short" — R3-02 is about separating the two failure classes.
+    const { res, marker } = boot("central", [
+      "change-me-to-a-long-random-federation-token",
+      "jwt-abc-12345-abcdef",
+      "ak-abc-12345-abcdef",
+      "pw-abc-12345-abcdef",
+    ]);
+    expect(res.status).toBe(1);
     expect(res.stderr).toMatch(/\[security\] FATAL: placeholder secrets still in use/);
-    expect(res.stderr).toMatch(/FEDERATION_TOKEN/);
-    expect(res.stderr).toMatch(/refusing to boot in FEDERATION_MODE=central/);
+    expect(res.stderr).not.toMatch(/too short/);
     expect(fs.existsSync(marker)).toBe(false);
   });
 });

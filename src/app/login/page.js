@@ -10,6 +10,9 @@ export default function LoginPage() {
   const [retryAfter, setRetryAfter] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasPassword, setHasPassword] = useState(null);
+  // DF-9ROUTER-3: server-computed (auth/status) — client env reads diverge
+  // between SSR and hydration, so the hint is driven by API data instead.
+  const [defaultPasswordIsPublic, setDefaultPasswordIsPublic] = useState(false);
   const [authMode, setAuthMode] = useState("password");
   const [ssoType, setSsoType] = useState("oidc");
   const [oidcConfigured, setOidcConfigured] = useState(false);
@@ -45,6 +48,7 @@ export default function LoginPage() {
             return;
           }
           setHasPassword(!!data.hasPassword);
+          setDefaultPasswordIsPublic(data.defaultPasswordIsPublic === true);
           setAuthMode(data.authMode || "password");
           setSsoType(data.ssoType || "oidc");
           setOidcConfigured(data.oidcConfigured === true);
@@ -251,12 +255,12 @@ export default function LoginPage() {
                 </Button>
 
                 <p className="text-xs text-center text-text-muted mt-2">
-                  {process.env.INITIAL_PASSWORD
-                    ? null
-                    : <>
-                        Default password is{" "}
-                        <code className="bg-sidebar px-1 rounded">123456</code>
-                      </>}
+                  {defaultPasswordIsPublic && (
+                    <>
+                      Default password is{" "}
+                      <code className="bg-sidebar px-1 rounded">123456</code>
+                    </>
+                  )}
                 </p>
                 {hasPassword === false && (
                   <p className="text-xs text-center text-amber-600 dark:text-amber-400">

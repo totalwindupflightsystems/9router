@@ -469,6 +469,14 @@ if (require.main === module) {
 
   const placeholderSecrets = checkPlaceholderSecrets();
   if (placeholderSecrets.length > 0) {
+    // R3-02: the NR-GAP-034 too-short-FEDERATION_TOKEN branch shares the
+    // NR-GAP-019 placeholder guard — give it its own message so ops can tell
+    // a brute-forceable token apart from the compose example values.
+    const shortToken = placeholderSecrets.includes("FEDERATION_TOKEN") &&
+      (() => {
+        const t = String(process.env.FEDERATION_TOKEN || "");
+        return t.length > 0 && t.length < 16 && !t.startsWith("change-me");
+      })();
     const federationMode = process.env.FEDERATION_MODE;
     if (federationMode) {
       // NR-GAP-019 (2nd reopen): a federation instance (compose central/edge)
@@ -477,23 +485,36 @@ if (require.main === module) {
       // (container logs are invisible to a `docker compose up -d` deployer).
       // Standalone (FEDERATION_MODE unset) keeps the warning-only path below.
       console.error(
-        "[security] FATAL: placeholder secrets still in use (" +
-          placeholderSecrets.join(", ") +
-          " are set to the docker-compose.federation.yml example values) — " +
-          "refusing to boot in FEDERATION_MODE=" +
-          federationMode +
-          ". Replace them with real secrets first (docs/FEDERATION.md §6.1); " +
-          "an instance with known secrets is trivially compromised beyond localhost."
+        shortToken
+          ? "[security] FATAL: FEDERATION_TOKEN too short — " +
+              "FEDERATION_TOKEN must be at least 16 characters (it is the only " +
+              "gate on the federation snapshot/delta/verify/replay API). " +
+              "Refusing to boot in FEDERATION_MODE=" +
+              federationMode +
+              ". Generate a long random token first (docs/FEDERATION.md §6.1)."
+          : "[security] FATAL: placeholder secrets still in use (" +
+              placeholderSecrets.join(", ") +
+              " are set to the docker-compose.federation.yml example values) — " +
+              "refusing to boot in FEDERATION_MODE=" +
+              federationMode +
+              ". Replace them with real secrets first (docs/FEDERATION.md §6.1); " +
+              "an instance with known secrets is trivially compromised beyond localhost."
       );
       process.exit(1);
     }
     console.error(
-      "[security] WARNING: placeholder secrets still in use (" +
-        placeholderSecrets.join(", ") +
-        " are set to the docker-compose.federation.yml example values). " +
-        "Fine for localhost-only testing, but this instance is NOT safe to " +
-        "expose beyond localhost. Replace them before any real deployment " +
-        "— see docs/FEDERATION.md §6.1."
+      shortToken
+        ? "[security] WARNING: FEDERATION_TOKEN too short — must be at least " +
+            "16 characters (it is the only gate on the federation API). Fine " +
+            "for localhost-only testing, but this instance is NOT safe to " +
+            "expose beyond localhost. Generate a long random token — see " +
+            "docs/FEDERATION.md §6.1."
+        : "[security] WARNING: placeholder secrets still in use (" +
+            placeholderSecrets.join(", ") +
+            " are set to the docker-compose.federation.yml example values). " +
+            "Fine for localhost-only testing, but this instance is NOT safe to " +
+            "expose beyond localhost. Replace them before any real deployment " +
+            "— see docs/FEDERATION.md §6.1."
     );
   }
 

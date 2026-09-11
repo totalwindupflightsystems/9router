@@ -71,6 +71,12 @@ export async function pullOnce({ fetchImpl = globalThis.fetch, centralUrl = null
 // schedules the next tick after the configured interval. Unhandled errors
 // are logged and the loop continues (a transient failure must not kill the
 // edge's replication).
+//
+// R3-03: repeated identical pull failures log once at warn, then once per
+// PULL_FAIL_LOG_EVERYTH consecutive failure — a long central outage must
+// produce bounded log volume, not one line per sync interval.
+const PULL_FAIL_LOG_EVERYTH = 12;
+
 export function start({ fetchImpl = globalThis.fetch, centralUrl = null, intervalMs = null } = {}) {
   if (isStandalone()) {
     console.warn("[federation] edgeClient.start() called in standalone mode — replication disabled (zero drift).");
@@ -81,6 +87,7 @@ export function start({ fetchImpl = globalThis.fetch, centralUrl = null, interva
     return null;
   }
   const interval = intervalMs ?? getSyncIntervalMs();
+  let consecutiveFailures = 0;
   const tick = async () => {
     try {
       // Record the edge role + identity in federation_meta (idempotent) so
@@ -92,10 +99,22 @@ export function start({ fetchImpl = globalThis.fetch, centralUrl = null, interva
         [getEdgeId(), latestVersion()]
       );
       const result = await pullOnce({ fetchImpl, centralUrl });
-      if (!result.ok) {
-        console.warn(`[federation] pull failed: ${result.error}`);
-      } else if (result.blocked) {
+      if (result.blocked) {
+        // Schema-blocked pulls return { ok:false, blocked:true } — check the
+        // flag BEFORE the !ok branch or it is unreachable dead code. Kept
+        // unthrottled: the "upgrade this edge" condition must stay visible.
         console.warn(`[federation] pull blocked: ${result.error}`);
+      } else if (!result.ok) {
+        consecutiveFailures += 1;
+        // First failure always logs; afterwards every Nth (bounded volume).
+        if (consecutiveFailures === 1 || consecutiveFailures % PULL_FAIL_LOG_EVERYTH === 0) {
+          console.warn(
+            `[federation] pull failed: ${result.error}` +
+              (consecutiveFailures > 1 ? ` (consecutive failure #${consecutiveFailures})` : "")
+          );
+        }
+      } else {
+        consecutiveFailures = 0;
       }
     } catch (err) {
       console.error("[federation] pull error:", err);
