@@ -230,6 +230,16 @@ function providerMatchesKinds(providerId, kindFilter) {
   return kindFilter.some((k) => kinds.includes(k));
 }
 
+// A provider is usable without a stored connection only when its registry entry
+// declares `noAuth: true` — the same flag the chat/TTS/media handlers use to skip
+// credential lookup (see src/sse/services/auth.js FREE_PROVIDERS check and the
+// noAuth-derived CREDENTIALED_PROVIDERS set in src/sse/handlers/tts.js).
+// Any other provider answers /v1 with 404 "No active credentials for provider"
+// until a connection exists, so it must not be advertised as retrievable.
+function providerIsCredentialless(providerId) {
+  return AI_PROVIDERS[providerId]?.noAuth === true;
+}
+
 // Combo matches kindFilter when its `kind` field is in the list.
 // Combos with no kind are treated as LLM.
 function comboMatchesKinds(combo, kindFilter) {
@@ -247,9 +257,14 @@ export async function buildModelsList(kindFilter, options = {}) {
   // cross-instance recursive loops.
   const skipDynamicFetch = options.skipDynamicFetch === true;
   let connections = [];
+  // Distinguishes a SUCCESSFUL lookup that found nothing (fresh install: only
+  // credentialless providers are usable) from a FAILED lookup (DB unavailable:
+  // keep the all-static fail-open list so discovery is not erased).
+  let connectionsLoaded = false;
   try {
     connections = await getProviderConnections();
     connections = connections.filter(c => c.isActive !== false);
+    connectionsLoaded = true;
   } catch (e) {
     console.log("Could not fetch providers, returning all models");
   }
@@ -307,13 +322,21 @@ export async function buildModelsList(kindFilter, options = {}) {
   }
 
   if (connections.length === 0) {
-    // DB unavailable -> return static models, filtered by per-model kind
+    // Two very different states land here:
+    //  - the lookup SUCCEEDED and found nothing (fresh install) -> advertise
+    //    only providers that genuinely need no credentials. Listing the whole
+    //    static catalog here is what advertised ~1000 models that immediately
+    //    fail chat with 404 "No active credentials for provider".
+    //  - the lookup FAILED (DB unavailable) -> keep the legacy all-static
+    //    fail-open catalog so a transient error cannot erase discovery.
+    const failOpen = !connectionsLoaded;
     const aliasToProviderId = Object.fromEntries(
       Object.entries(PROVIDER_ID_TO_ALIAS).map(([id, alias]) => [alias, id])
     );
     for (const [alias, providerModels] of Object.entries(PROVIDER_MODELS)) {
       const providerId = aliasToProviderId[alias] || alias;
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
+      if (!failOpen && !providerIsCredentialless(providerId)) continue;
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
         if (isDisabled(alias, model.id)) continue;
@@ -331,6 +354,9 @@ export async function buildModelsList(kindFilter, options = {}) {
       if (!kindFilter.includes(LLM_KIND)) continue;
       const providerAlias = customModel.providerAlias;
       if (!providerAlias) continue;
+      // A custom model on a credential-required provider is just as unusable as
+      // its provider's static models until a connection exists.
+      if (!failOpen && !providerIsCredentialless(aliasToProviderId[providerAlias] || providerAlias)) continue;
 
       const modelId = String(customModel.id).trim();
       if (!modelId) continue;

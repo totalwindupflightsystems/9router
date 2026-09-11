@@ -74,6 +74,23 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(models): hide unconfigured providers from the fresh-install catalog
+  (DF-9ROUTER-2) — `GET /v1/models` and `GET /v1/models/{id}` advertised the
+  whole static catalog (652 LLM entries) whenever the active-connection list
+  was empty, because a successful lookup that found nothing and a failed
+  lookup were treated identically. Every one of those models answered chat
+  with 404 `No active credentials for provider`, so a fresh install looked
+  fully provisioned while nothing was usable; `GET /v1/models/{id}` even
+  returned 200 for a model that could not be called. A successful lookup with
+  zero active connections now lists static and custom models only for
+  providers whose registry entry declares `noAuth: true` (the same flag the
+  chat/TTS/media handlers use to skip credential lookup), so genuinely
+  credentialless providers such as OpenCode Free, edge-tts, google-tts and
+  local-device stay discoverable while credential-required providers do not.
+  A lookup that THROWS keeps the previous all-static fail-open catalog, so a
+  transient DB failure cannot erase discovery, and the non-empty
+  active-connection path is unchanged. Kind filtering, disabled-model
+  filtering and the response shape are preserved.
 - fix(cli): make `npm run cli:pack` work out of the box (DF-9ROUTER-3) —
   `cli/scripts/build-cli.js` invokes esbuild via `execSync`, but esbuild was
   declared only in `cli/package.json` devDependencies while the root
