@@ -5,6 +5,7 @@ globalThis.__9ROUTER_CUSTOM_SERVER__ = true;
 
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { pathToFileURL } = require("url");
@@ -17,6 +18,116 @@ const origCreate = http.createServer.bind(http);
 // so the request-detail header sanitizer redacts it too.
 const PEER_TOKEN = crypto.randomBytes(24).toString("hex");
 process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
+
+// ─── DF-9ROUTER-3: crash/boot/shutdown JSONL logging ─────────────────────
+//
+// A production OOM kill (SIGKILL, exit 137) cannot be caught by any signal
+// handler, so the diagnostic surface this facility provides is the RECORDS
+// themselves: every boot appends a `boot` record, every clean signal stop
+// appends `shutdown`, every crash appends `uncaughtException` /
+// `unhandledRejection`. A `boot` record with NO following record means the
+// process died abnormally (OOM killer / SIGKILL) — check `dmesg` or
+// `journalctl -k` for the kernel OOM entry. That boot-vs-shutdown gap is the
+// entire point of this facility.
+//
+// ALL logging here is FAIL-OPEN: any fs error while writing the crash log is
+// swallowed (with at most one console.error). The crash logger must never
+// itself crash or block the process.
+//
+// Log location: <dataDir>/logs/crash.log, where dataDir resolves as
+// process.env.DATA_DIR, else the platform default mirroring
+// src/lib/dataDir.mjs (kept inline — this file is CJS and dependency-light,
+// it must not import the ESM dataDir module).
+function crashLogDataDir() {
+  const configured = process.env.DATA_DIR;
+  if (configured) return configured;
+  if (process.platform === "win32") {
+    return path.join(
+      process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"),
+      "9router"
+    );
+  }
+  return path.join(os.homedir(), ".9router");
+}
+
+let crashLogFile = null; // resolved lazily on first write
+
+function crashLogWrite(record) {
+  try {
+    if (!crashLogFile) {
+      const logsDir = path.join(crashLogDataDir(), "logs");
+      fs.mkdirSync(logsDir, { recursive: true });
+      crashLogFile = path.join(logsDir, "crash.log");
+    }
+    fs.appendFileSync(crashLogFile, JSON.stringify(record) + "\n");
+  } catch (e) {
+    try {
+      console.error("[crashlog] write failed:", e && e.message ? e.message : e);
+    } catch {
+      /* stderr itself may be broken during a crash — stay silent */
+    }
+  }
+}
+
+function crashLogRecord(event, extra) {
+  return Object.assign(
+    { ts: new Date().toISOString(), event, pid: process.pid },
+    extra
+  );
+}
+
+// Boot record. Written only on the real boot path (require.main === module)
+// — requiring this module (unit-test children) must not append boot lines.
+function crashLogBoot() {
+  crashLogWrite(
+    crashLogRecord("boot", {
+      argv: path.basename(process.argv[1] || ""),
+      dataDir: crashLogDataDir(),
+    })
+  );
+}
+
+// Crash handlers: log the failure, mirror it to console.error, then exit
+// non-zero — Node's default die behavior is preserved (an installed handler
+// suppresses the default, so we exit explicitly; the process must NOT be
+// kept alive after an uncaught exception).
+process.on("uncaughtException", (err) => {
+  crashLogWrite(
+    crashLogRecord("uncaughtException", {
+      name: err && err.name ? err.name : "Error",
+      message: err && err.message ? err.message : String(err),
+      stack: err && err.stack ? String(err.stack) : String(err),
+    })
+  );
+  console.error(err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const err = reason instanceof Error ? reason : null;
+  crashLogWrite(
+    crashLogRecord("unhandledRejection", {
+      name: err ? err.name : "NonError",
+      message: err ? err.message : String(reason),
+      stack: err ? String(err.stack) : String(reason),
+    })
+  );
+  console.error(reason);
+  process.exit(1);
+});
+
+// Shutdown records: a clean SIGINT/SIGTERM stop leaves a `shutdown` line.
+// Registered before (and additive to) the background-token-refresh
+// process.once stoppers below — the deferred exit lets that cleanup run
+// first. SIGKILL (exit 137, the OOM kill) can never reach a handler — see
+// the facility comment above for why the missing-record reading is the
+// diagnostic.
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    crashLogWrite(crashLogRecord("shutdown", { signal: sig }));
+    setImmediate(() => process.exit(0));
+  });
+}
 
 let backgroundRefreshStarted = false;
 
@@ -456,6 +567,11 @@ module.exports = {
 };
 
 if (require.main === module) {
+  // DF-9ROUTER-3: the boot record is written even when boot fails below —
+  // a boot line with no following shutdown/crash record marks an abnormal
+  // death (OOM/SIGKILL) in post-mortem.
+  crashLogBoot();
+
   const serverPath = resolveStandaloneServerPath();
   if (!serverPath) {
     console.error(
@@ -519,4 +635,19 @@ if (require.main === module) {
   }
 
   require(serverPath);
+
+  // TEST-ONLY hook (DF-9ROUTER-3): lets spawned-child tests exercise the
+  // crash-log paths synchronously. NINEROUTER_CRASH_TEST=throw raises an
+  // uncaught error after boot, =reject creates an unhandled rejection, and
+  // =sigterm sends SIGTERM to this process. Never set this in production.
+  const crashTest = process.env.NINEROUTER_CRASH_TEST;
+  if (crashTest === "throw") {
+    setImmediate(() => {
+      throw new Error("NINEROUTER_CRASH_TEST throw");
+    });
+  } else if (crashTest === "reject") {
+    Promise.reject(new Error("NINEROUTER_CRASH_TEST reject"));
+  } else if (crashTest === "sigterm") {
+    process.kill(process.pid, "SIGTERM");
+  }
 }

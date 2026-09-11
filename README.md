@@ -1538,6 +1538,21 @@ Notes:
 
 - Set `ENABLE_REQUEST_LOGS=true`
 
+### Crash logging
+
+The production wrapper (`custom-server.js`, used by `npm start` and the Docker image) appends one JSON object per line to `$DATA_DIR/logs/crash.log` (default `~/.9router/logs/crash.log`). All crash-log writes are fail-open — a logging error never crashes or blocks the server.
+
+Record shapes:
+
+```json
+{"ts":"…ISO…","event":"boot","pid":123,"argv":"custom-server.js","dataDir":"…"}
+{"ts":"…ISO…","event":"shutdown","pid":123,"signal":"SIGTERM"}
+{"ts":"…ISO…","event":"uncaughtException","pid":123,"name":"Error","message":"…","stack":"…"}
+{"ts":"…ISO…","event":"unhandledRejection","pid":123,"name":"Error","message":"…","stack":"…"}
+```
+
+**Reading an exit-137 (OOM/SIGKILL) death:** SIGKILL cannot be caught, so nothing is logged for it. A `boot` record with no following `shutdown`/`uncaughtException`/`unhandledRejection` record means the process was killed abnormally — check `dmesg` or `journalctl -k` for the kernel OOM killer entry.
+
 ---
 
 ## 🛠️ Tech Stack
