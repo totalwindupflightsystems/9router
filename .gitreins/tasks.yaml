@@ -562,3 +562,16 @@ tasks:
   status: complete
   created_at: '2026-09-12T10:05:29.944111+00:00'
   completed_at: '2026-09-12T10:23:57.153544+00:00'
+- id: DF-9ROUTER-5-CLI-DOCS-T341
+  title: Document the fork CLI source-build and launcher lifecycle
+  criteria:
+  - README.md documents exact commands to build and run this fork's CLI from source
+    without referring to cli/dist/cli.js, and distinguishes it from the upstream npm
+    package.
+  - cli/README.md explains foreground cleanup, tray/background detachment, normal-signal
+    shutdown, and the SIGKILL orphan limitation without claiming SIGKILL can be handled.
+  - CHANGELOG.md records the documentation correction, and all commands and paths
+    match cli/package.json and cli/cli.js.
+  status: complete
+  created_at: '2026-09-12T16:52:03.385110+00:00'
+  completed_at: '2026-09-12T16:57:21.828910+00:00'
