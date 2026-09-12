@@ -552,3 +552,13 @@ tasks:
   status: complete
   created_at: '2026-09-11T23:45:35.840045+00:00'
   completed_at: '2026-09-12T00:01:10.639261+00:00'
+- id: QA-9ROUTER-5
+  title: Honor REQUIRE_API_KEY=false on remote /v1 routes in federation mode
+  criteria:
+  - Fresh installs with REQUIRE_API_KEY=false allow keyless remote /v1 requests while
+    REQUIRE_API_KEY=true or unset still rejects them; loopback, CLI-token, valid-key,
+    and federation-token route behavior stay unchanged; focused tests, build, full
+    regression baseline, secrets, and lint pass.
+  status: complete
+  created_at: '2026-09-12T10:05:29.944111+00:00'
+  completed_at: '2026-09-12T10:23:57.153544+00:00'
