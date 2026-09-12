@@ -77,6 +77,13 @@
 - **CLI**: document this fork's source pack/run path (`DATA_DIR=/tmp/9router-cli-pack npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser`) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
 
 ## Fixes
+- fix(cli): `npm run cli:pack` on a fresh clone now fails fast with actionable
+  guidance instead of a bare `MODULE_NOT_FOUND: esbuild` stack (DF-9ROUTER-3).
+  The CLI build script preflights its build-time dependencies and, when
+  missing, names both remediation commands (`npm --prefix cli install` /
+  `cd cli && npm install`) and exits non-zero without a stack trace; the
+  source-launcher docs (README.md, cli/README.md) now document the one-time
+  CLI dependency install step before the pack command.
 - fix(federation): honor the documented `REQUIRE_API_KEY=false` deployment
   opt-out on remote public LLM routes (QA-9ROUTER-5) — `REQUIRE_API_KEY` was
   documented in `.env.example` and the README env tables but had no production

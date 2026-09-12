@@ -82,6 +82,7 @@ The published `npm install -g 9router` package is upstream. To build and run the
 CLI launcher in this fork from a source checkout, run:
 
 ```bash
+npm --prefix cli install   # one-time: CLI build deps (esbuild)
 DATA_DIR=/tmp/9router-cli-pack npm run cli:pack
 node cli/cli.js --skip-update --no-browser
 ```

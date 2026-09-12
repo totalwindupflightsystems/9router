@@ -152,6 +152,7 @@ run this fork's CLI launcher from a source checkout, use the source entrypoint
 an ambient `.env` may point it at a system-owned directory:
 
 ```bash
+npm --prefix cli install   # one-time: CLI build deps (esbuild)
 DATA_DIR=/tmp/9router-cli-pack npm run cli:pack
 node cli/cli.js --skip-update --no-browser
 ```
