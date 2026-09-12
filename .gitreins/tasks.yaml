@@ -539,3 +539,16 @@ tasks:
   status: complete
   created_at: '2026-09-11T17:04:13.172975+00:00'
   completed_at: '2026-09-11T17:20:21.572351+00:00'
+- id: df2-model-catalog-t339
+  title: DF-9ROUTER-2 filter fresh-install model catalog by usable providers
+  criteria:
+  - When provider lookup succeeds with zero active connections, /v1/models exposes
+    static models only for credentialless noAuth providers and does not advertise
+    credential-required providers; when provider lookup fails, the current all-static
+    fail-open fallback remains; non-empty connection behavior remains unchanged; regression
+    tests prove zero-connection, lookup-failure, and active-connection cases; user-facing
+    behavior is documented; focused tests, build/lint, and the repository regression
+    baseline gate pass.
+  status: complete
+  created_at: '2026-09-11T23:45:35.840045+00:00'
+  completed_at: '2026-09-12T00:01:10.639261+00:00'
