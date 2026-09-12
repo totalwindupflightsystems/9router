@@ -484,15 +484,19 @@ tasks:
   created_at: '2026-08-27T18:47:55.507113+00:00'
   completed_at: '2026-08-27T18:48:31.611976+00:00'
 - id: DF-9ROUTER-3
-  title: npm run cli:pack works out of the box
+  title: 'npm run cli:pack fails out of the box (MODULE_NOT_FOUND: esbuild)'
   criteria:
-  - npm run cli:pack exits 0 from repo root and produces 9router-0.5.55.tgz
-  - esbuild resolves from cli/ via root hoisting (require.resolve prints /home/kara/9router/node_modules/esbuild/lib/main.js)
-  - "root package.json devDependencies contains esbuild ^0.25.12 and package-lock.json\
-    \ is updated \u2014 both committed on federation"
+  - 'cli/scripts/build-cli.js preflights its esbuild dependency: when cli/node_modules
+    lacks esbuild, the build exits non-zero with an actionable remediation message
+    that names the exact install command (npm --prefix cli install or npm install
+    inside cli/) instead of a bare MODULE_NOT_FOUND stack; README.md and/or cli/README.md
+    document the cli dependency-install prerequisite in the fork source-pack/run section;
+    with cli/node_modules present the cli:pack build path is unchanged; npx eslint
+    reports 0 problems on changed files; vitest suite shows no regression vs tests/__baseline__/known-fails.txt
+    baseline'
   status: complete
-  created_at: '2026-09-03T13:59:53.900439+00:00'
-  completed_at: '2026-09-03T14:00:00.467252+00:00'
+  created_at: '2026-09-12T23:13:08.438801+00:00'
+  completed_at: '2026-09-12T23:20:03.109058+00:00'
 - id: r3-tick-336
   title: R3-01/R3-02/R3-03/DF-9ROUTER-3 small fixes (commit a2177acf)
   criteria:
