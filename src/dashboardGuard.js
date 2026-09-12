@@ -169,6 +169,11 @@ async function hasValidApiKey(request) {
 async function canAccessPublicLlmApi(request) {
   if (isLocalRequest(request)) return true;
   if (await hasValidCliToken(request)) return true;
+  // REQUIRE_API_KEY=false deployment opt-out: allow remote keyless access to
+  // the public LLM API only when the effective setting is exactly false.
+  // Fail closed — null settings or a settings read error keep the 401 path.
+  const settings = await loadSettings();
+  if (settings && settings.requireApiKey === false) return true;
   return await hasValidApiKey(request);
 }
 

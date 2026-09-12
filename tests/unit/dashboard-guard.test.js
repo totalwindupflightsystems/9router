@@ -216,6 +216,91 @@ describe("dashboard guard public LLM API access", () => {
   });
 });
 
+describe("dashboard guard REQUIRE_API_KEY=false opt-out (QA-9ROUTER-5)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
+    mocks.validateApiKey.mockResolvedValue(false);
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockResolvedValue(false);
+  });
+
+  it("allows remote keyless public LLM API when requireApiKey=false", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true, requireApiKey: false });
+
+    const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("allows remote keyless rewritten public LLM API when requireApiKey=false", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true, requireApiKey: false });
+
+    const response = await proxy(request("/api/v1/chat/completions", { host: "router.example.com" }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("rejects remote keyless public LLM API when requireApiKey=true", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true, requireApiKey: true });
+
+    const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("rejects remote keyless public LLM API when requireApiKey is absent (secure default)", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true });
+
+    const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("fails closed when settings read returns null", async () => {
+    mocks.getSettings.mockResolvedValue(null);
+
+    const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("fails closed when settings read throws", async () => {
+    mocks.getSettings.mockRejectedValue(new Error("db unavailable"));
+
+    const response = await proxy(request("/v1/chat/completions", { host: "router.example.com" }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("allows remote public LLM API with valid CLI token even when requireApiKey=true", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true, requireApiKey: true });
+
+    const response = await proxy(request("/v1/chat/completions", {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("keeps loopback allowed regardless of requireApiKey", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true, requireApiKey: true });
+
+    const response = await proxy(localRequest("/v1/chat/completions", { host: "localhost:20128" }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+});
+
 describe("dashboard guard local-only access", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -74,6 +74,21 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Fixes
+- fix(federation): honor the documented `REQUIRE_API_KEY=false` deployment
+  opt-out on remote public LLM routes (QA-9ROUTER-5) — `REQUIRE_API_KEY` was
+  documented in `.env.example` and the README env tables but had no production
+  read under `src/`, and `dashboardGuard.canAccessPublicLlmApi` unconditionally
+  demanded a valid API key after the loopback/CLI-token checks, so a remote
+  keyless `/v1` request got 401 even with `REQUIRE_API_KEY=false`.
+  `settingsRepo` now parses `REQUIRE_API_KEY` narrowly (exact `true`/`false`;
+  anything else is treated as unset) and an explicit value overrides the stored
+  setting — unset preserves stored/default behavior with the secure
+  `requireApiKey: true` default intact. The guard keeps its loopback →
+  CLI-token ordering, then allows the public LLM route only when effective
+  `settings.requireApiKey === false`; null settings or a settings-read failure
+  fail closed into the existing API-key validation. Federation-token auth,
+  relayed-client-key handling and `/api/federation/*` roleGuard handoff are
+  unchanged.
 - fix(models): hide unconfigured providers from the fresh-install catalog
   (DF-9ROUTER-2) — `GET /v1/models` and `GET /v1/models/{id}` advertised the
   whole static catalog (652 LLM entries) whenever the active-connection list

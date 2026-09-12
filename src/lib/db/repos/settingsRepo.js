@@ -71,9 +71,25 @@ async function readRaw() {
   return row ? parseJson(row.data, {}) : {};
 }
 
+// REQUIRE_API_KEY deployment policy (QA-9ROUTER-5): an explicit "true"/"false"
+// env value wins over the stored setting so a deployment can pin API-key
+// enforcement from the environment; when unset, the stored setting (or the
+// secure default) applies. Parsing is intentionally narrow — only exact
+// lowercase "true"/"false" are honored; anything else is treated as unset.
+function envRequireApiKeyOverride() {
+  const raw = process.env.REQUIRE_API_KEY;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return undefined;
+}
+
 // Merge raw settings with defaults; backward-compat for missing keys
 export function mergeWithDefaults(raw) {
   const merged = { ...DEFAULT_SETTINGS, ...(raw || {}) };
+  const envRequireApiKey = envRequireApiKeyOverride();
+  if (envRequireApiKey !== undefined) {
+    merged.requireApiKey = envRequireApiKey;
+  }
   for (const [key, defVal] of Object.entries(DEFAULT_SETTINGS)) {
     if (merged[key] === undefined) {
       if (
