@@ -76,6 +76,45 @@ That's it! Start coding with FREE AI models.
 
 ---
 
+## Run this fork from source
+
+The published `npm install -g 9router` package is upstream. To build and run the
+CLI launcher in this fork from a source checkout, run:
+
+```bash
+DATA_DIR=/tmp/9router-cli-pack npm run cli:pack
+node cli/cli.js --skip-update --no-browser
+```
+
+The `DATA_DIR` override keeps the reproducible pack command writable when an
+ambient `.env` points at a system-owned directory. `npm run cli:pack` writes a
+`9router-<version>.tgz` artifact at the repository root; run the source
+launcher at `cli/cli.js`, which is also the installed `9router` executable.
+There is no separate compiled CLI entrypoint.
+
+---
+
+## Process lifecycle / shutdown
+
+The foreground launcher starts its server as a detached process group. In
+foreground mode, Ctrl+C (`SIGINT`), `SIGTERM`, and `SIGHUP` run launcher cleanup,
+which kills that server process and its group before the launcher exits. Stop a
+foreground launcher with Ctrl+C or `SIGTERM` rather than `SIGKILL`.
+
+`SIGKILL` cannot be handled. If a timeout wrapper sends `SIGKILL` to the
+launcher, its cleanup cannot run and the detached server can remain serving.
+That is an unavoidable orphan limitation, not evidence that normal shutdown
+failed.
+
+When Windows or Linux users select the tray/background option, the launcher
+starts an unreferenced detached tray process, cleans up the foreground server,
+and exits so the background launcher can own the port. Stop that mode through
+the tray **Quit** action; there is no `--stop` flag. On macOS the launcher keeps
+its current process instead, because a detached child loses the login session
+required by `NSStatusItem`; use the tray **Quit** action there as well.
+
+---
+
 ## 🚀 CLI Options
 
 ```bash

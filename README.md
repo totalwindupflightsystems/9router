@@ -144,6 +144,24 @@ npm ci   # reproducible install from the tracked package-lock.json (`npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
+### CLI launcher from this fork
+
+`npm install -g 9router` installs the published upstream package. To build and
+run this fork's CLI launcher from a source checkout, use the source entrypoint
+`cli/cli.js` after packing it. Override `DATA_DIR` for the pack command because
+an ambient `.env` may point it at a system-owned directory:
+
+```bash
+DATA_DIR=/tmp/9router-cli-pack npm run cli:pack
+node cli/cli.js --skip-update --no-browser
+```
+
+The pack command writes `9router-<version>.tgz` at the repository root; it is a
+package artifact, not the source launcher to execute. The launcher entrypoint is
+`cli/cli.js` (the same file installed as the `9router` executable), not a
+compiled `dist` entrypoint. See [cli/README.md](cli/README.md) for foreground,
+tray, and shutdown behavior.
+
 > ⚠️ Dev mode (`npm run dev` / `next dev`) does **not** support
 > `FEDERATION_MODE=edge`: the edge proxy + DEGRADED intercept live only in
 > `custom-server.js`, which the Next.js dev server never loads, so an edge

@@ -73,6 +73,9 @@
   header in non-standalone modes. Standalone mode is unchanged (no-op).
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
+## Docs
+- **CLI**: document this fork's source pack/run path (`DATA_DIR=/tmp/9router-cli-pack npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser`) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
+
 ## Fixes
 - fix(federation): honor the documented `REQUIRE_API_KEY=false` deployment
   opt-out on remote public LLM routes (QA-9ROUTER-5) — `REQUIRE_API_KEY` was
