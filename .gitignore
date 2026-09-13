@@ -92,7 +92,7 @@ graphify-out/*
 .next-analyze/*
 
 # Local tooling DBs / caches (never commit)
-dagger.db
+dagger.db*
 .vfs/
 .coding-hermes/board/board.db
 .gitreins/history/

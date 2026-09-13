@@ -23,6 +23,26 @@ feature** as a clean, mergeable PR back upstream.
 - Default branch: `master` (fork mirrors upstream). Work branch: **`federation`**.
 - The PR is opened from `totalwindupflightsystems/9router:federation` → `decolua/9router:master`.
 
+### Intentional tracked layout
+
+- **Application:** `src/`, `public/`, `images/`, and `i18n/` hold the Next.js gateway,
+  dashboard, static assets, and translations.
+- **Provider engine:** `open-sse/` contains provider-agnostic request translation and
+  execution; provider integrations remain tracked source, including generated registries
+  that must not be hand-edited.
+- **CLI and tests:** `cli/` is the separately packaged launcher; `tests/` is its own ESM
+  test package with federation E2E coverage.
+- **Documentation and skills:** `README.md`, `DOCKER.md`, `docs/`, `gitbook/`, and
+  `skills/` are tracked documentation surfaces. Dated verification evidence belongs in
+  `docs/dogfood/`.
+- **Deployment and runtime entrypoints:** `Dockerfile*`, `docker-compose*.yml`,
+  `custom-server.js`, `start.sh`, and `captain-definition` are intentional operational
+  surfaces; root package/config files support the application, CI, linting, and builds.
+- **Generated or local-only:** ignored `node_modules/`, `.next/`, `.next-cli-build/`,
+  `dagger.db*`, `.vfs/`, coverage/build outputs, and board DB/Parquet caches are not
+  tracked source. `.coding-hermes/` and `.gitreins/` hold fleet/guard state and fixtures;
+  do not clean or regenerate them during repository-layout work.
+
 ## Commands
 
 ```bash
