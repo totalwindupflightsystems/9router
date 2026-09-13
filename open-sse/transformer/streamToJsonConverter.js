@@ -5,6 +5,17 @@
  */
 
 /**
+ * Text carried by a Responses message item's `content` array.
+ */
+function messageItemText(item) {
+  if (!Array.isArray(item?.content)) return "";
+  return item.content
+    .filter((c) => c && typeof c.text === "string")
+    .map((c) => c.text)
+    .join("");
+}
+
+/**
  * Process a single SSE message and update state accordingly.
  */
 function processSSEMessage(msg, state) {
@@ -27,6 +38,14 @@ function processSSEMessage(msg, state) {
     state.created = parsed.response?.created_at || state.created;
   } else if (eventType === "response.output_item.done") {
     state.items.set(parsed.output_index ?? 0, parsed.item);
+  } else if (eventType === "response.output_text.delta") {
+    // Some Responses-compatible upstreams stream the assistant text as deltas
+    // and close the message item without it (or never emit the item at all), so
+    // keep the deltas as the text source of last resort.
+    const idx = Number.isInteger(parsed.output_index) ? parsed.output_index : 0;
+    if (typeof parsed.delta === "string" && parsed.delta.length > 0) {
+      state.textByIndex.set(idx, (state.textByIndex.get(idx) || "") + parsed.delta);
+    }
   } else if (eventType === "response.completed" || eventType === "response.done") {
     state.status = "completed";
     if (parsed.response?.usage) {
@@ -60,7 +79,9 @@ export async function convertResponsesStreamToJson(stream) {
     created: Math.floor(Date.now() / 1000),
     status: "in_progress",
     usage: { ...EMPTY_RESPONSE },
-    items: new Map()
+    items: new Map(),
+    // output_index → accumulated `response.output_text.delta` text
+    textByIndex: new Map()
   };
 
   try {
@@ -85,11 +106,30 @@ export async function convertResponsesStreamToJson(stream) {
     reader.releaseLock();
   }
 
-  // Build output array from accumulated items (ordered by index)
+  // Build output array from accumulated items (ordered by index).
+  // An index that only ever carried text deltas still produces a message item —
+  // otherwise a client asking for JSON gets an empty `output` (and therefore an
+  // empty completion) from an upstream that streams text without closing a
+  // message item.
   const output = [];
-  const maxIndex = state.items.size > 0 ? Math.max(...state.items.keys()) : -1;
+  const indices = new Set(state.items.keys());
+  for (const idx of state.textByIndex.keys()) indices.add(idx);
+  const maxIndex = indices.size > 0 ? Math.max(...indices) : -1;
   for (let i = 0; i <= maxIndex; i++) {
-    output.push(state.items.get(i) || { type: "message", content: [], role: "assistant" });
+    const item = state.items.get(i);
+    const streamed = state.textByIndex.get(i) || "";
+    if (!item) {
+      output.push(streamed
+        ? { type: "message", role: "assistant", content: [{ type: "output_text", text: streamed, annotations: [] }] }
+        : { type: "message", content: [], role: "assistant" });
+      continue;
+    }
+    // Fill a message item whose text never landed in the terminal item.
+    if (item.type === "message" && !messageItemText(item) && streamed) {
+      output.push({ ...item, content: [{ type: "output_text", text: streamed, annotations: [] }] });
+      continue;
+    }
+    output.push(item);
   }
 
   return {

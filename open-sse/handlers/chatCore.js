@@ -474,8 +474,21 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
 
-  // Provider forced streaming but client wants JSON
-  if (!clientRequestedStreaming && providerRequiresStreaming) {
+  // Provider forced streaming but client wants JSON.
+  //
+  // Two independent causes make the upstream answer with an event stream even
+  // though the client asked for `stream: false`:
+  //   (a) the provider config requires streaming (`forceStream`), or
+  //   (b) the request translator forced the outbound body to stream — the
+  //       OpenAI → Responses translation always sends `stream: true`, and
+  //       /responses answers every streaming request with SSE.
+  // In both cases the body must go through the SSE→JSON aggregation. Without
+  // (b), the non-streaming JSON parser read a Responses event stream as a Chat
+  // Completions payload, found no `choices[].delta` events, and returned HTTP
+  // 200 with an empty `choices[0].message.content`.
+  const clientWantsJson = !stream || (!clientRequestedStreaming && providerRequiresStreaming);
+  const upstreamBodyStreams = providerRequiresStreaming || finalBody?.stream === true;
+  if (clientWantsJson && upstreamBodyStreams) {
     const result = await handleForcedSSEToJson({ ...sharedCtx, providerResponse, sourceFormat, targetFormat: providerResponseFormat, customToolNames, trackDone, appendLog });
     if (result) { streamController.handleComplete(); return result; }
   }
