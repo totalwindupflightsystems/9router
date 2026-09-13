@@ -600,3 +600,12 @@ tasks:
   status: complete
   created_at: '2026-09-13T12:16:22.885269+00:00'
   completed_at: '2026-09-13T12:35:29.099421+00:00'
+- id: DF-9ROUTER-11
+  title: OpenAI-compatible non-streaming chat empty completions
+  criteria:
+  - POST /v1/chat/completions with stream:false returns non-empty assistant content
+    for a routable configured model; regression tests prove streaming still produces
+    DOGFOOD_OK and non-streaming now produces content; guard PASS
+  status: complete
+  created_at: '2026-09-13T18:54:27.256271+00:00'
+  completed_at: '2026-09-13T19:03:54.346844+00:00'
