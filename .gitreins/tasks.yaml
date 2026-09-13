@@ -579,3 +579,15 @@ tasks:
   status: complete
   created_at: '2026-09-12T16:52:03.385110+00:00'
   completed_at: '2026-09-12T16:57:21.828910+00:00'
+- id: CLN-1
+  title: 'Repo hygiene: clean up project folder structure'
+  criteria:
+  - Tracked historical E2E evidence is preserved under docs/dogfood with no live code
+    or documentation depending on the old e2e-output path
+  - The tracked repository contains no generated cache/build/database artifacts, and
+    intentional top-level project directories are documented in AGENTS.md
+  - git diff --check, the relevant focused checks, and the repository GitReins Tier
+    1 guard pass without a new regression
+  status: complete
+  created_at: '2026-09-13T05:42:19.833140+00:00'
+  completed_at: '2026-09-13T05:54:59.319192+00:00'
