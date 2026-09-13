@@ -171,6 +171,24 @@
   report `revisionLag` 0. The local status payload also carries the
   advertised value as `centralMaxVersion` (edge only). Standalone and
   central modes are unchanged (`revisionLag` 0 + edge-only note).
+
+## Maintenance
+- **Dependencies**: conservative refresh of nine semver-compatible direct
+  packages — `@next/third-parties` 16.3.0 → 16.3.5, `@xyflow/react`
+  12.11.2 → 12.11.6, `jose` 6.2.8 → 6.2.12, `marked` 18.0.9 → 18.0.13,
+  `next` 16.3.0 → 16.3.5, `open` 11.0.0 → 11.0.3, `postcss` 8.5.26 → 8.5.28,
+  `sql.js` 1.14.1 → 1.14.2 and `zustand` 5.0.14 → 5.0.15. The `package.json`
+  declarations keep their existing `^` ranges (minimum raised to the wanted
+  version) and `package-lock.json` is regenerated from them, so the only
+  transitive movement is what those bumps require (`next`'s
+  `@next/env`/`@next/swc-*`/`@swc/helpers`/`sharp`, `@xyflow/system`, and
+  `open`'s `default-browser`/`powershell-utils`/`wsl-utils` chain).
+  **Major-version upgrades remain deferred** — `better-sqlite3` 13, `chalk` 6,
+  `confbox` 0.3, `esbuild` 0.28, `eslint` 10, `eslint-config-next` 16.3,
+  `http-proxy-middleware` 4, `material-symbols` 0.47, `react`/`react-dom` 19.3,
+  `react-is` 19, `socks-proxy-agent` 10, `undici` 8 and `uuid` 14 are
+  intentionally not taken here, so this refresh requires no source migration.
+  Env: none.
 # v0.5.69 (2026-09-05)
 
 ## Features
