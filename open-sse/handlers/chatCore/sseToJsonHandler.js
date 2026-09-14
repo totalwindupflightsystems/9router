@@ -4,6 +4,7 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
+import { claudeMessageFromChatCompletion } from "./clientFormatResponse.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
@@ -271,7 +272,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         if (hasToolCalls) message.tool_calls = toolCalls;
         const responseDone = jsonResponse.status === "completed" || jsonResponse.status === "done";
         const finishReason = hasToolCalls ? "tool_calls" : (responseDone ? "stop" : (jsonResponse.status || "stop"));
-        finalResp = {
+        const chatCompletion = {
           id: jsonResponse.id || `chatcmpl-${Date.now()}`,
           object: "chat.completion",
           created: jsonResponse.created_at || Math.floor(Date.now() / 1000),
@@ -279,6 +280,11 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
           choices: [{ index: 0, message, finish_reason: finishReason }],
           usage: { prompt_tokens: inTokens, completion_tokens: outTokens, total_tokens: inTokens + outTokens, ...cacheDetails }
         };
+        // An Anthropic client reads `content[]`, never `choices[]`. Handing it a
+        // chat.completion body is a silent HTTP 200 with no content, not an error.
+        finalResp = sourceFormat === FORMATS.CLAUDE
+          ? claudeMessageFromChatCompletion(chatCompletion)
+          : chatCompletion;
       }
 
       return { success: true, response: new Response(JSON.stringify(finalResp), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
@@ -347,9 +353,18 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     // lost on the non-streaming return path. Inlined (not imported from
     // nonStreamingHandler.js) to avoid a circular import: nonStreamingHandler
     // already imports parseSSEToOpenAIResponse from this module.
-    const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
-      ? chatCompletionToResponses(parsed, customToolNames)
-      : parsed;
+    //
+    // An Anthropic client (`POST /v1/messages`) needs the same treatment in the
+    // other direction: it reads `content[]`, so a raw chat.completion body is a
+    // silent HTTP 200 with no assistant content.
+    let finalBody;
+    if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
+      finalBody = chatCompletionToResponses(parsed, customToolNames);
+    } else if (sourceFormat === FORMATS.CLAUDE) {
+      finalBody = claudeMessageFromChatCompletion(parsed);
+    } else {
+      finalBody = parsed;
+    }
 
     return { success: true, response: new Response(JSON.stringify(finalBody), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {

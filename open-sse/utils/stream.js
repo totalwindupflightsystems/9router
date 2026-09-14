@@ -137,6 +137,13 @@ export function createSSEStream(options = {}) {
           let injectedUsage = false;
           let responsesTerminal = false;
 
+          // The upstream's own terminator: forwarded verbatim below, and latched
+          // here so flush() does not append a second one (the documented contract
+          // is exactly one `data: [DONE]`, not two).
+          if (trimmed.startsWith("data:") && trimmed.slice(5).trim() === "[DONE]") {
+            streamDoneSent = true;
+          }
+
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
             try {
               const parsed = JSON.parse(trimmed.slice(5).trim());
@@ -269,13 +276,20 @@ export function createSSEStream(options = {}) {
             sseEmittedCount++;
           }
 
-          if (keepsOpenAIResponsesFormat && !streamDoneSent) {
-            const doneOutput = "data: [DONE]\n\n";
-            reqLogger?.appendConvertedChunk?.(doneOutput);
-            controller.enqueue(sharedEncoder.encode(doneOutput));
+          // Only latch the sentinel flag when this branch actually emitted one.
+          // For every other client format the terminator is decided in flush():
+          // an OpenAI-chat client must still get its `data: [DONE]` even though
+          // the transform dropped the upstream's copy, while a Responses client
+          // closes on response.completed.
+          if (keepsOpenAIResponsesFormat) {
+            if (!streamDoneSent) {
+              const doneOutput = "data: [DONE]\n\n";
+              reqLogger?.appendConvertedChunk?.(doneOutput);
+              controller.enqueue(sharedEncoder.encode(doneOutput));
+            }
+            streamDoneSent = true;
+            openAIResponsesDoneSent = true;
           }
-          streamDoneSent = true;
-          if (keepsOpenAIResponsesFormat) openAIResponsesDoneSent = true;
           continue;
         }
 
@@ -384,6 +398,12 @@ export function createSSEStream(options = {}) {
 
         if (mode === STREAM_MODE.PASSTHROUGH) {
           if (buffer) {
+            // A terminator that arrived without its trailing newline is still
+            // forwarded here; latch it so the block below does not append a
+            // second one.
+            if (buffer.startsWith("data:") && buffer.slice(5).trim() === "[DONE]") {
+              streamDoneSent = true;
+            }
             let output = buffer;
             if (buffer.startsWith("data:") && !buffer.startsWith("data: ")) {
               output = "data: " + buffer.slice(5);
@@ -476,6 +496,21 @@ export function createSSEStream(options = {}) {
           reqLogger?.appendConvertedChunk?.(doneOutput);
           controller.enqueue(sharedEncoder.encode(doneOutput));
           openAIResponsesDoneSent = true;
+          streamDoneSent = true;
+        }
+
+        // Documented contract (docs/api-reference.md): an OpenAI Chat Completions
+        // stream ends with exactly one `data: [DONE]`. The upstream shape is not
+        // something the client should have to know about — a Responses-API /
+        // forced-stream upstream closes on `response.completed` and never sends
+        // the sentinel, and the translation above does not forward one — so the
+        // terminator is emitted here for OpenAI-format clients, exactly once,
+        // whether or not the upstream sent its own (passthrough latches the flag
+        // when it forwards that copy). Other client formats are terminated by
+        // their own contract (Claude: message_stop) and must not receive it.
+        if (sourceFormat === FORMATS.OPENAI && !streamDoneSent) {
+          reqLogger?.appendConvertedChunk?.(SSE_DONE);
+          controller.enqueue(sharedEncoder.encode(SSE_DONE));
           streamDoneSent = true;
         }
 
