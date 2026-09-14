@@ -34,4 +34,10 @@ paths = [
   '''.*\.md$''',
   '''tests/unit/embeddings.cloud.test.js''',
   '''tests/unit/xai-video-core.test.js''',
+  # Upstream's OAuth client-constants file: every key-like string in it is a
+  # PUBLIC client identifier by design (Firebase web key, zed/trae/windsurf
+  # clientIds, clientSecret:"-") — published verbatim in decolua/9router.
+  # Whole-tree scan trips on it whenever a backport touches the file.
+  # (Both gitreins' built-in scanner and gitleaks itself honor this paths list.)
+  '''src/lib/oauth/constants/oauth\.js''',
 ]
