@@ -499,6 +499,24 @@ export function createSSEStream(options = {}) {
           streamDoneSent = true;
         }
 
+        // A Claude client's contract ends on `message_stop`. The translator emits
+        // it when the upstream sends a finish_reason, and the null-chunk flush
+        // call above covers a chat-native OpenAI upstream. Upstreams whose own
+        // translator does not synthesise a terminal on flush (gemini, kiro,
+        // ollama, cursor, commandcode — all return null for a null chunk) would
+        // otherwise leave the client with zero message_stop and hang it until
+        // timeout, so ask the OpenAI→Claude translator for the terminal it owes.
+        // The latch inside it makes this a no-op whenever one already went out.
+        if (sourceFormat === FORMATS.CLAUDE && !state.claudeTerminalSent) {
+          const claudeTerminal = translateResponse(FORMATS.OPENAI, FORMATS.CLAUDE, null, state);
+          for (const item of claudeTerminal || []) {
+            if (item === null || item === undefined) continue;
+            const output = formatSSE(item, sourceFormat);
+            reqLogger?.appendConvertedChunk?.(output);
+            controller.enqueue(sharedEncoder.encode(output));
+          }
+        }
+
         // Documented contract (docs/api-reference.md): an OpenAI Chat Completions
         // stream ends with exactly one `data: [DONE]`. The upstream shape is not
         // something the client should have to know about — a Responses-API /
