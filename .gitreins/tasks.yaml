@@ -609,3 +609,16 @@ tasks:
   status: complete
   created_at: '2026-09-13T18:54:27.256271+00:00'
   completed_at: '2026-09-13T19:03:54.346844+00:00'
+- id: DF-9ROUTER-16
+  title: Core OpenAI and Anthropic completion paths fail (dogfood P0 2026-09-13)
+  criteria:
+  - 'Live-reproduced: OpenAI-compatible non-streaming /v1/chat/completions returns
+    non-empty assistant content; Anthropic-format /v1/messages returns non-empty content
+    in BOTH streaming and non-streaming modes; OpenAI-compatible streaming terminates
+    with exactly one ''data: [DONE]'' sentinel as documented (docs/api-reference.md
+    line 71). Regression tests added under tests/unit/ cover each path; ''cd tests
+    && npx vitest run'' shows no new failures vs the known-fails baseline through
+    tests/__baseline__/verify-no-regression.mjs.'
+  status: complete
+  created_at: '2026-09-14T01:24:12.010823+00:00'
+  completed_at: '2026-09-14T01:44:19.165894+00:00'
