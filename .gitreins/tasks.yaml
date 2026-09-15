@@ -651,3 +651,12 @@ tasks:
   status: complete
   created_at: '2026-09-15T01:27:22.355856+00:00'
   completed_at: '2026-09-15T01:43:33.953494+00:00'
+- id: DF-9ROUTER-22
+  title: Skip synthetic [DONE] for Claude passthrough clients
+  criteria:
+  - 'stream.js passthrough flush emits no data: [DONE] when sourceFormat is Claude;
+    new vitest suite passthrough-done-sentinel-gate.test.js passes covering Claude-suppressed/OpenAI-synthesized/OpenAI-exactly-once/gemini-skipped
+    cases; baseline verify-no-regression clean; commit with co-author trailer landed'
+  status: complete
+  created_at: '2026-09-15T10:17:18.112185+00:00'
+  completed_at: '2026-09-15T10:23:21.142485+00:00'
