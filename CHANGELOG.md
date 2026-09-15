@@ -77,6 +77,18 @@
 - **CLI**: document this fork's source pack/run path (`DATA_DIR=/tmp/9router-cli-pack npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser`) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
 
 ## Fixes
+- fix(cli): the launcher no longer reports a healthy start when the server never
+  bound (DF-9ROUTER-18). Readiness was a bare TCP connect to the configured
+  port, so with a foreign/stale listener already on it (occupied port,
+  docker-published port, stale instance) the CLI printed "Router is now
+  running" and exited 0 while its own child died with `EADDRINUSE`. The launcher
+  now pre-flights the port before spawning (occupied → clear `EADDRINUSE`
+  refusal naming the port, exit non-zero, nothing started), requires the 9router
+  identity probe (`GET /api/health` → `{"ok":true}`) plus a live child for
+  readiness, and turns an early child exit or a readiness timeout into a
+  non-zero exit with a diagnostic — in every mode, including tray/background
+  mode, which previously had no watcher on the child at all. Free-port behavior
+  is unchanged.
 - fix(cli): `npm run cli:pack` on a fresh clone now fails fast with actionable
   guidance instead of a bare `MODULE_NOT_FOUND: esbuild` stack (DF-9ROUTER-3).
   The CLI build script preflights its build-time dependencies and, when

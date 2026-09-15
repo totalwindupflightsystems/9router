@@ -4,27 +4,18 @@ const { spawn, exec, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
-const net = require("net");
 const os = require("os");
 
-// Poll until the server accepts TCP connections on port, or timeout — avoids blind fixed waits.
-function waitServerReady(port, { timeoutMs = 15000, intervalMs = 150 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    const tryConnect = () => {
-      const socket = net.connect({ host: "127.0.0.1", port }, () => {
-        socket.destroy();
-        resolve(true);
-      });
-      socket.on("error", () => {
-        socket.destroy();
-        if (Date.now() >= deadline) return resolve(false);
-        setTimeout(tryConnect, intervalMs);
-      });
-    };
-    tryConnect();
-  });
-}
+// Startup readiness/failure detection (DF-9ROUTER-18) lives in
+// ./src/cli/utils/serverStartup so it is unit-testable: an occupied port is
+// refused BEFORE spawning, readiness requires the 9router identity probe (not
+// just an open socket), and an early child exit is a hard failure.
+const {
+  checkPortAvailable,
+  describeOccupiedPort,
+  describeStartupFailure,
+  waitForServerReady,
+} = require("./src/cli/utils/serverStartup");
 
 // Native spinner - no external dependency
 function createSpinner(text) {
@@ -542,7 +533,24 @@ if (!fs.existsSync(serverPath)) {
 const updatePromise = checkForUpdate();
 killAllAppProcesses(port)
   .then(() => killProcessOnPort(port))
-  .then(() => startServer(updatePromise));
+  // Pre-flight (DF-9ROUTER-18): the cleanup above is best-effort — a port we
+  // could not free (held by another user, published by docker, lsof missing)
+  // would make the child we are about to spawn die with EADDRINUSE. Refuse
+  // instead of starting a doomed child and reporting a healthy start.
+  .then(() => checkPortAvailable({ port }))
+  .then((portState) => {
+    if (!portState.ok) {
+      console.error(describeOccupiedPort(port, portState));
+      process.exit(1);
+    }
+    startServer(updatePromise);
+  })
+  // A throw anywhere in the launch path must still be a loud, non-zero exit —
+  // never a launcher that silently does nothing.
+  .catch((err) => {
+    console.error(`❌ Startup failed: ${err?.message || err}`);
+    process.exit(1);
+  });
 
 // Show interface selection menu
 async function showInterfaceMenu(latestVersion) {
@@ -609,6 +617,10 @@ function startServer(updatePromise) {
   const CRASH_LOG_LINES = 50;
   let crashLog = [];
 
+  // Flips true only once the readiness probe confirms OUR child is serving.
+  // Before that, any child exit is a startup failure — never a silent restart.
+  let serverReady = false;
+
   function spawnServer() {
     serverStartTime = Date.now();
     crashLog = [];
@@ -634,6 +646,27 @@ function startServer(updatePromise) {
   }
 
   let server = spawnServer();
+
+  // ── Startup gate (DF-9ROUTER-18) ─────────────────────────────────────────
+  // The launcher must never report success for a failed start. An early child
+  // exit (EADDRINUSE and friends) or a readiness timeout is a hard failure with
+  // a non-zero exit code — in every mode, including tray/background mode, which
+  // has no other watcher on the child process.
+  function printCrashLog() {
+    if (!crashLog.length) return;
+    console.error("\n--- Server crash log ---");
+    crashLog.forEach((l) => console.error(l));
+    console.error("--- End crash log ---\n");
+  }
+
+  function failStartup(result) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.error(`\n${describeStartupFailure(port, result)}`);
+    printCrashLog();
+    cleanup();
+    process.exit(1);
+  }
 
   // Cleanup function - force kill server process
   let isCleaningUp = false;
@@ -715,7 +748,9 @@ function startServer(updatePromise) {
     console.log(`\n🚀 ${pkg.name} v${pkg.version}`);
     console.log(`Server: http://${displayHost}:${port}`);
 
-    waitServerReady(port).then(() => {
+    waitForServerReady({ port, child: server }).then((result) => {
+      if (!result.ok) return failStartup(result);
+      serverReady = true;
       initTrayIcon();
       console.log("\n💡 Router is now running in system tray. Close this terminal if you want.");
       console.log("   Right-click tray icon to open dashboard or quit.\n");
@@ -725,7 +760,9 @@ function startServer(updatePromise) {
   }
 
   // Wait for server to be ready, then show interface menu loop + tray
-  waitServerReady(port).then(async () => {
+  waitForServerReady({ port, child: server }).then(async (result) => {
+    if (!result.ok) return failStartup(result);
+    serverReady = true;
     // Resolve parallel update check (already running); don't block server start on it.
     const latestVersion = await latestVersionPromise;
     // Start tray icon alongside TUI
@@ -817,11 +854,16 @@ function startServer(updatePromise) {
   function attachServerEvents() {
     server.on("error", (err) => {
       console.error("Failed to start server:", err.message);
+      // Before readiness the startup gate owns the failure: it reports the
+      // diagnostic and exits non-zero (DF-9ROUTER-18). Restarting here would
+      // race it and could mask a start that never works.
+      if (!serverReady) return;
       if (!isShuttingDown) tryRestart();
       else { cleanup(); process.exit(1); }
     });
 
     server.on("close", (code) => {
+      if (!serverReady) return; // pre-ready exits are reported by the startup gate
       if (isShuttingDown || code === 0) {
         process.exit(code || 0);
         return;
@@ -854,11 +896,7 @@ function startServer(updatePromise) {
     restartCount++;
     const delay = Math.min(1000 * restartCount, 10000);
     console.error(`\n⚠️  Server exited (code=${code ?? "unknown"}). Restarting in ${delay / 1000}s... (${restartCount}/${MAX_RESTARTS})`);
-    if (crashLog.length) {
-      console.error("\n--- Server crash log ---");
-      crashLog.forEach(l => console.error(l));
-      console.error("--- End crash log ---\n");
-    }
+    printCrashLog();
 
     setTimeout(() => {
       server = spawnServer();
