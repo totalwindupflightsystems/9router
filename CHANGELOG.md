@@ -77,6 +77,22 @@
 - **CLI**: document this fork's source pack/run path (`DATA_DIR=/tmp/9router-cli-pack npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser`) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
 
 ## Fixes
+- **OpenAI/Anthropic clients**: a Responses-API upstream that closes its event
+  stream without a terminal event (`response.completed` / `response.done` /
+  `response.incomplete` / `response.failed`) is no longer relayed as a
+  successful completion (DF-9ROUTER-23). A stream that dies with zero assistant
+  output used to answer HTTP 200 with `finish_reason:"in_progress"` — not an
+  OpenAI finish_reason — on `/v1/chat/completions`, and with
+  `content:[{type:"text",text:""}]` + `stop_reason:"end_turn"` on `/v1/messages`,
+  so a health check could not tell "the model produced nothing" from "the model
+  had nothing to say". The stream-to-JSON converter now records whether a
+  terminal event was seen, and a non-terminal upstream with no assistant text
+  and no tool-call items fails loud with `502 upstream_empty_completion` instead
+  of a plausible empty body. Additionally, every 200 response (and the recorded
+  request detail) now carries a `finish_reason` clamped to the OpenAI enum —
+  `incomplete` → `length`, anything else → `stop` — so `in_progress` / `failed` /
+  `unknown` can no longer leak to a client. A completed upstream with empty
+  output is still a legitimate 200.
 - fix(cli): the launcher no longer reports a healthy start when the server never
   bound (DF-9ROUTER-18). Readiness was a bare TCP connect to the configured
   port, so with a foreign/stale listener already on it (occupied port,

@@ -16,6 +16,16 @@ function messageItemText(item) {
 }
 
 /**
+ * Fold a terminal event's usage block into the accumulated state.
+ */
+function captureUsage(response, state) {
+  if (!response?.usage) return;
+  state.usage.input_tokens = response.usage.input_tokens || 0;
+  state.usage.output_tokens = response.usage.output_tokens || 0;
+  state.usage.total_tokens = response.usage.total_tokens || 0;
+}
+
+/**
  * Process a single SSE message and update state accordingly.
  */
 function processSSEMessage(msg, state) {
@@ -48,13 +58,17 @@ function processSSEMessage(msg, state) {
     }
   } else if (eventType === "response.completed" || eventType === "response.done") {
     state.status = "completed";
-    if (parsed.response?.usage) {
-      state.usage.input_tokens = parsed.response.usage.input_tokens || 0;
-      state.usage.output_tokens = parsed.response.usage.output_tokens || 0;
-      state.usage.total_tokens = parsed.response.usage.total_tokens || 0;
-    }
+    state.terminal = true;
+    captureUsage(parsed.response, state);
+  } else if (eventType === "response.incomplete") {
+    // The upstream stopped early (max_output_tokens / content filter). The answer
+    // is truncated, but it IS how the upstream said it ended.
+    state.status = "incomplete";
+    state.terminal = true;
+    captureUsage(parsed.response, state);
   } else if (eventType === "response.failed") {
     state.status = "failed";
+    state.terminal = true;
   }
 }
 
@@ -67,7 +81,7 @@ const EMPTY_RESPONSE = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
  */
 export async function convertResponsesStreamToJson(stream) {
   if (!stream || typeof stream.getReader !== "function") {
-    return { id: `resp_${Date.now()}`, object: "response", created_at: Math.floor(Date.now() / 1000), status: "failed", output: [], usage: { ...EMPTY_RESPONSE } };
+    return { id: `resp_${Date.now()}`, object: "response", created_at: Math.floor(Date.now() / 1000), status: "failed", terminal: false, output: [], usage: { ...EMPTY_RESPONSE } };
   }
 
   const reader = stream.getReader();
@@ -78,6 +92,12 @@ export async function convertResponsesStreamToJson(stream) {
     responseId: "",
     created: Math.floor(Date.now() / 1000),
     status: "in_progress",
+    // Whether the upstream ever said how it ended (`response.completed` /
+    // `response.done` / `response.incomplete` / `response.failed`). A stream that
+    // just closes leaves `status` at whatever it last was — `in_progress` — which
+    // is NOT an answer: a caller relaying that body hands the client an empty
+    // completion it cannot tell apart from a legitimate empty one.
+    terminal: false,
     usage: { ...EMPTY_RESPONSE },
     items: new Map(),
     // output_index → accumulated `response.output_text.delta` text
@@ -137,6 +157,10 @@ export async function convertResponsesStreamToJson(stream) {
     object: "response",
     created_at: state.created,
     status: state.status || "completed",
+    // `status` is left at its upstream value (a Responses body may legitimately
+    // be `in_progress`); this flag is what a consumer must check before treating
+    // an empty `output` as an answer.
+    terminal: state.terminal,
     output,
     usage: state.usage
   };
