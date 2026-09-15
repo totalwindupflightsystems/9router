@@ -37,7 +37,11 @@ function buildTransformStream({ provider, sourceFormat, targetFormat, userAgent,
     return createSSETransformStreamWithLogger(targetFormat, sourceFormat, provider, reqLogger, toolNameMap, model, connectionId, body, onStreamComplete, apiKey, customToolNames, credentials);
   }
 
-  return createPassthroughStreamWithLogger(provider, reqLogger, model, connectionId, body, onStreamComplete, apiKey);
+  // Passthrough (client format === upstream format) still needs the client
+  // format: stream.js uses it to decide whether the synthetic `data: [DONE]`
+  // terminator belongs to the client's contract (OpenAI clients keep the
+  // OpenClaw-hang workaround; Claude clients end on message_stop).
+  return createPassthroughStreamWithLogger(provider, reqLogger, model, connectionId, body, onStreamComplete, apiKey, sourceFormat);
 }
 
 /**

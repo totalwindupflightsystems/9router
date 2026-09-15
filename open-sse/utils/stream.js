@@ -27,7 +27,7 @@ const STREAM_MODE = {
  * @param {object} options
  * @param {string} options.mode - Stream mode: translate, passthrough
  * @param {string} options.targetFormat - Provider format (for translate mode)
- * @param {string} options.sourceFormat - Client format (for translate mode)
+ * @param {string} options.sourceFormat - Client format (translate mode: translation target; passthrough mode: gates the synthetic [DONE] terminator)
  * @param {string} options.provider - Provider name
  * @param {object} options.reqLogger - Request logger instance
  * @param {string} options.model - Model name
@@ -416,9 +416,15 @@ export function createSSEStream(options = {}) {
           // Some clients (e.g. OpenClaw) expect the OpenAI-style sentinel:
           //   data: [DONE]\n\n
           // Without it they can hang until timeout and trigger failover.
-          // Gemini-family clients (Antigravity, Vertex, Gemini) reject this sentinel with 400 syntax errors.
+          // The sentinel is an OpenAI-client terminator, not a universal one:
+          // Gemini-family clients (Antigravity, Vertex, Gemini) reject it with 400
+          // syntax errors, and a Claude client's contract ends on the upstream's own
+          // `message_stop` (forwarded verbatim above) — appending [DONE] after it
+          // hands an Anthropic client a malformed stream end. Passthrough means the
+          // client format IS the upstream format (sourceFormat), so gate on it.
           const isGeminiFamily = provider === "antigravity" || provider === "gemini" || provider === "vertex";
-          if (!streamDoneSent && !isGeminiFamily) {
+          const isClaudeClient = sourceFormat === FORMATS.CLAUDE;
+          if (!streamDoneSent && !isGeminiFamily && !isClaudeClient) {
             const doneOutput = "data: [DONE]\n\n";
             reqLogger?.appendConvertedChunk?.(doneOutput);
             controller.enqueue(sharedEncoder.encode(doneOutput));
@@ -559,7 +565,7 @@ export function createSSETransformStreamWithLogger(targetFormat, sourceFormat, p
   });
 }
 
-export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null) {
+export function createPassthroughStreamWithLogger(provider = null, reqLogger = null, model = null, connectionId = null, body = null, onStreamComplete = null, apiKey = null, sourceFormat = null) {
   return createSSEStream({
     mode: STREAM_MODE.PASSTHROUGH,
     provider,
@@ -568,6 +574,10 @@ export function createPassthroughStreamWithLogger(provider = null, reqLogger = n
     connectionId,
     body,
     onStreamComplete,
-    apiKey
+    apiKey,
+    // Client format: passthrough mode uses it only to decide whether the
+    // synthetic `data: [DONE]` terminator belongs to the client's contract
+    // (OpenAI) or not (Claude — message_stop, gemini-family — 400s).
+    sourceFormat
   });
 }
