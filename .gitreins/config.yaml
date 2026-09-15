@@ -7,9 +7,9 @@ guards:
   static_analysis: false
 evaluator:
   model: deepseek-v4-flash
-  max_iterations: 100
-  max_time: "30m"
-  max_input_tokens: "4M"
+  max_iterations: 200
+  max_time: "45m"
+  max_input_tokens: "8M"
   max_output_tokens: "384k"
   static_analysis_diagnostics: false
 history:
