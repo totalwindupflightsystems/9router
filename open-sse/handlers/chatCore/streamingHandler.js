@@ -63,8 +63,17 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
   // return a clean JSON error instead. The message is stripped of HTML tags
   // and clamped so untrusted upstream text never reaches the client verbatim
   // (the UI may render error.message as HTML).
+  // NDJSON is a STREAMING wire format, not an error page (DF-9ROUTER-24):
+  // a native Ollama upstream (`ollama-local` -> `/api/chat`) answers a
+  // `stream:true` request with `application/x-ndjson`, one raw JSON object per
+  // line with no `data:` prefix, and the transform below already parses that
+  // framing (stream.js `parseSSELine` + the `FORMATS.OLLAMA` branch of
+  // `translateResponse`). Only genuinely non-streaming bodies (HTML/text error
+  // pages, unknown types) stay blocked - that is the crash protection this
+  // gate exists for.
   const upstreamContentType = (providerResponse.headers.get('content-type') || '').toLowerCase();
-  if (upstreamContentType && !upstreamContentType.includes('text/event-stream') && !upstreamContentType.includes('application/json')) {
+  const upstreamIsNDJSON = upstreamContentType.includes('application/x-ndjson') || upstreamContentType.includes('application/ndjson');
+  if (upstreamContentType && !upstreamIsNDJSON && !upstreamContentType.includes('text/event-stream') && !upstreamContentType.includes('application/json')) {
     const bodyText = await providerResponse.text().catch(() => '');
     const titleMatch = bodyText.match(/<title>([^<]+)<\/title>/i);
     const sanitizedTitle = (titleMatch?.[1] || '').replace(/<[^>]*>/g, '').replace(/[\r\n]+/g, ' ').trim().slice(0, 160);

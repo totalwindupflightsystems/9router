@@ -95,6 +95,25 @@
   `tests/unit/api-reference-auth-claims.test.js` (DF-9ROUTER-9/14/19).
 
 ## Fixes
+- **Streaming (Ollama)**: a native Ollama upstream's NDJSON stream is no longer
+  blocked as a non-SSE response (DF-9ROUTER-24). `ollama-local` posts to
+  Ollama's native `/api/chat`, which answers a `stream:true` request with
+  `application/x-ndjson` — one raw JSON object per line, no `data:` prefix.
+  streamingHandler's content-type gate (the guard that keeps an upstream
+  HTML/plain-text error page out of the SSE transform) only recognised
+  `text/event-stream` and `application/json`, so it read the NDJSON body,
+  logged `BLOCKED 200 · non-SSE (application/x-ndjson)` and handed the client
+  the upstream status as a JSON error: every streaming request to the only
+  credential-free provider path failed (the client saw a 503) while Ollama
+  itself answered 200. `application/x-ndjson` and `application/ndjson` are now
+  whitelisted — case-insensitively and with parameters (`…; charset=utf-8`) —
+  so the Ollama→client transform downstream receives the stream it already
+  knows how to parse (NDJSON → OpenAI chat chunks → any client format, Claude
+  included). HTML, plain-text and unknown content types are still blocked with
+  the same JSON error shape and the upstream status preserved. Clients that
+  stream by default (Claude Code, Cline, Cursor, Codex) work against
+  `ollama-local` again. Pinned by
+  `tests/unit/ollama-ndjson-streaming-gate.test.js`.
 - **Source install / docs**: stop shipping a root-owned `DATA_DIR` default.
   `.env.example` activated `DATA_DIR=/var/lib/9router` — a path an unprivileged
   user cannot create — so the documented `cp .env.example .env` quickstart failed
