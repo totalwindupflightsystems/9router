@@ -691,3 +691,16 @@ tasks:
   status: complete
   created_at: '2026-09-15T23:07:31.087742+00:00'
   completed_at: '2026-09-15T23:30:45.134679+00:00'
+- id: DF-9ROUTER-8
+  title: '[P1] Documented source quickstart fails for unprivileged users: .env.example
+    forces root-owned DATA_DIR'
+  criteria:
+  - .env.example no longer activates a DATA_DIR the runtime user cannot create/write;
+    a fresh cp .env.example .env + npm ci + npm run dev / npm run build (and npm run
+    cli:pack) succeed as an unprivileged user with no manual DATA_DIR override, using
+    the default per-user data dir; focused regression test pins the .env.example contract
+    and fails on the pre-fix file; full suite shows no regression vs the known-fails
+    baseline; README run-from-source documents the working flow.
+  status: complete
+  created_at: '2026-09-16T05:40:26.681967+00:00'
+  completed_at: '2026-09-16T05:55:29.446425+00:00'
