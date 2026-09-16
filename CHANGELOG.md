@@ -74,9 +74,22 @@
   Env: `FEDERATION_MODE=edge`, `FEDERATION_CENTRAL_URL`, `FEDERATION_TOKEN`.
 
 ## Docs
-- **CLI**: document this fork's source pack/run path (`DATA_DIR=/tmp/9router-cli-pack npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser`) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
+- **CLI**: document this fork's source pack/run path (`npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser` — the pack no longer needs a `DATA_DIR` override, see Fixes) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
 
 ## Fixes
+- **Source install / docs**: stop shipping a root-owned `DATA_DIR` default.
+  `.env.example` activated `DATA_DIR=/var/lib/9router` — a path an unprivileged
+  user cannot create — so the documented `cp .env.example .env` quickstart failed
+  with EACCES for normal users: `npm run dev` exited shortly after printing
+  Ready, `npm run build` failed during page-data collection, and
+  `npm run cli:pack` failed too, each requiring an undocumented writable
+  `DATA_DIR` override. The assignment is now commented out and the contract is
+  documented in place (optional; unset → per-user `~/.9router`; if set it must be
+  creatable/writable by the runtime user; Docker/compose sets `/app/data`
+  itself). The README source quickstart and VPS recipe, the CLI-launcher pack
+  instructions (no more `DATA_DIR=` override), and the English GitBook
+  installation/cloud pages were updated to match. Pinned by
+  `tests/unit/env-example-data-dir.test.js`.
 - **OpenAI/Anthropic clients**: a Responses-API upstream that closes its event
   stream without a terminal event (`response.completed` / `response.done` /
   `response.incomplete` / `response.failed`) is no longer relayed as a

@@ -144,18 +144,31 @@ npm ci   # reproducible install from the tracked package-lock.json (`npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
+No `DATA_DIR` override is needed: `.env.example` leaves `DATA_DIR` unset, so the
+app stores everything under the per-user default `~/.9router` (SQLite at
+`~/.9router/db/data.sqlite`; Windows: `%APPDATA%\9router`) — a directory your own
+user can always create. To keep data elsewhere, set `DATA_DIR` to a path your user
+can create and write (as an env var or a `.env` line); the app fails fast at boot
+if it cannot create or write it. Docker is unaffected — compose sets the
+container's `DATA_DIR=/app/data`.
+
 ### CLI launcher from this fork
 
 `npm install -g 9router` installs the published upstream package. To build and
 run this fork's CLI launcher from a source checkout, use the source entrypoint
-`cli/cli.js` after packing it. Override `DATA_DIR` for the pack command because
-an ambient `.env` may point it at a system-owned directory:
+`cli/cli.js` after packing it. No `DATA_DIR` override is needed — the pack step
+resolves the same per-user default (`~/.9router`) as the server, because
+`.env.example` no longer points `DATA_DIR` at a system-owned directory:
 
 ```bash
 npm --prefix cli install   # one-time: CLI build deps (esbuild)
-DATA_DIR=/tmp/9router-cli-pack npm run cli:pack
+npm run cli:pack
 node cli/cli.js --skip-update --no-browser
 ```
+
+(If your own `.env` sets a `DATA_DIR` the current user cannot write, the pack step
+fails fast with the DATA_DIR error — point it at a writable path, or unset it, and
+re-run.)
 
 The pack command writes `9router-<version>.tgz` at the repository root; it is a
 package artifact, not the source launcher to execute. The launcher entrypoint is
@@ -1338,6 +1351,10 @@ npm run build
 # Configure
 export JWT_SECRET="your-secure-secret-change-this"
 export INITIAL_PASSWORD="your-password"
+# /var/lib/9router is a system path and does not exist on a fresh host: create it
+# first (the app fails fast at boot if DATA_DIR cannot be created/written). Or
+# drop this export entirely and the app uses the per-user default ~/.9router.
+sudo mkdir -p /var/lib/9router && sudo chown "$USER:$USER" /var/lib/9router
 export DATA_DIR="/var/lib/9router"
 export PORT="20128"
 export HOSTNAME="0.0.0.0"

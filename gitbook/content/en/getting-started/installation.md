@@ -192,8 +192,12 @@ Create `.env` file or set environment variables:
 export JWT_SECRET="your-secure-secret-change-this"
 export INITIAL_PASSWORD="your-password"
 
-# Storage
-export DATA_DIR="~/.9router"
+# Storage (OPTIONAL — omit this line to use the per-user default ~/.9router)
+# Do NOT export the literal "~/.9router": Node's fs does not expand "~", so the
+# app would create a directory literally named "~". Set a real absolute path
+# instead — one the runtime user can create and write, or the app fails fast at
+# boot with an EACCES DATA_DIR error.
+# export DATA_DIR="/absolute/writable/path"
 
 # Server
 export PORT="20128"
