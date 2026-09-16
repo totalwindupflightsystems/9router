@@ -16,6 +16,9 @@ the per-tool guides below for anything the page doesn't cover.
 2. Create an **API key**: Dashboard → **Endpoint** page → **API Keys** →
    create a new key and copy it. Keys are also usable as `x-api-key` or a
    `Bearer` token (see [API Reference](../api-reference.md#authentication)).
+   On a loopback install the key is optional — the gateway trusts local
+   clients, and `.env.example` ships `REQUIRE_API_KEY=false`; a remote client
+   needs one while the effective `requireApiKey` is `true`.
 3. Pick a model id from the dashboard's **Providers** page, or list them via
    `GET /v1/models`. Model ids use the form `<provider>/<model>`, e.g.
    `kr/claude-sonnet-4.5`.

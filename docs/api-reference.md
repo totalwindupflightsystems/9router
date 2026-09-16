@@ -15,22 +15,119 @@ All `/v1` endpoints accept CORS from any origin.
 
 ## Authentication
 
-Every `/v1` request needs an API key. Keys are created in the dashboard
-(**Dashboard → Endpoint → API Keys**) or via the API itself:
+9Router has two independent auth surfaces, and neither is a blanket
+"API key on every request" rule.
+
+### Dashboard API (`/api/*`) — deny-by-default
+
+A `/api/*` request is allowed when **any** of the following holds:
+
+1. Its path is on the public allow-list: `/api/health`, `/api/version`,
+   `/api/init`, `/api/locale`, `/api/auth/login`, `/api/auth/logout`,
+   `/api/auth/status`, `/api/auth/oidc*`, `/api/auth/saml*` and
+   `/api/settings/require-login`.
+2. Its path is under `/api/federation/*` — the dashboard session is deliberately
+   skipped there so the federation role guard can enforce `FEDERATION_TOKEN`
+   (see [Federation docs](FEDERATION.md)).
+3. It carries the `auth_token` JWT cookie issued by `POST /api/auth/login`, or
+   dashboard login is switched off through the `requireLogin` setting.
+4. It carries the on-host CLI token in the `x-9r-cli-token` header (derived from
+   `MACHINE_ID_SALT`).
+
+Every other `/api/*` route — including `GET/POST /api/keys`, `/api/settings`,
+`/api/combos`, `/api/providers`, `/api/proxy-pools`, `/api/models`, `/api/usage`,
+`/api/oauth`, `/api/cloud`, `/api/pricing`, `/api/tags`, `/api/cli-tools`,
+`/api/mcp` and `/api/translator` — answers `401 {"error":"Unauthorized"}` without
+one of the above.
+
+Two stricter classes sit inside that set:
+
+- `/api/shutdown`, `/api/settings/database`, `/api/version/update` and
+  `/api/version/shutdown` always need a valid `auth_token` session or the CLI
+  token — the `requireLogin: false` escape hatch does not apply to them, and the
+  answer is `401` otherwise.
+- The local-only routes (`/api/mcp/*`, `/api/cli-tools/cowork-settings`,
+  `/api/cli-tools/antigravity-mitm`, the install/enable/disable/check endpoints
+  under `/api/tunnel/`, `/api/headroom/start`, `/api/headroom/stop`,
+  `/api/headroom/proxy`, `/api/oauth/cursor/auto-import`,
+  `/api/oauth/kiro/auto-import` and `/api/auth/reset-password`) need the CLI token
+  or a loopback client that is authenticated, so a remote session gets `403` even
+  when its cookie is valid.
+
+Creating an API key therefore needs a session — the dashboard
+(**Dashboard → Endpoint → API Keys**), or a two-step `curl`. This example runs as
+written:
 
 ```bash
-curl -X POST http://localhost:20128/api/keys \
+# 1. Log in — the auth_token JWT cookie is stored in cookies.txt
+curl -s -c cookies.txt -X POST http://localhost:20128/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"password":"<dashboard password>"}'
+# → 200 {"success":true}
+
+# 2. Create the key with that session
+curl -s -b cookies.txt -X POST http://localhost:20128/api/keys \
   -H "Content-Type: application/json" \
   -d '{"name":"my-tool"}'
-# → 201 {"key":"sk-...","name":"my-tool","id":1,"machineId":"..."}
+# → 201 {"key":"sk-...","name":"my-tool","id":"<uuid>","machineId":"..."}
 ```
 
-Send the key as a `Bearer` token or `x-api-key` header:
+Skip step 1 and the same create call answers `401 {"error":"Unauthorized"}` —
+`/api/keys` belongs to the deny-by-default `/api/*` surface.
 
+### LLM API (`/v1`, `/v1beta`, `/api/v1`, `/api/v1beta`, `/codex`, `/responses`)
+
+These prefixes are public at the dashboard layer; their own check accepts a
+request when **any** of the following holds:
+
+1. **Trusted local client** — the request arrives from a loopback peer (and, when
+   it carries an `Origin`, that origin is loopback too). The guard lets it through
+   with no key; the endpoint handlers below add their own check.
+   A request forwarded by a reverse proxy is never counted as local.
+2. **Valid API key**, sent as any of:
+   - `Authorization: Bearer sk-...`
+   - `x-api-key: sk-...`
+   - `x-goog-api-key: sk-...`
+   - `?key=sk-...`
+3. **Remote keyless access, while the effective `requireApiKey` setting is
+   `false`.** This is a deployment opt-out — and it is the state a fresh install
+   boots in, because `.env.example` ships `REQUIRE_API_KEY=false` (see the
+   `REQUIRE_API_KEY` row in the README for the unset semantics).
+
+Otherwise a remote request with a missing or invalid key is rejected with
+`401 {"error":"API key required for remote API access"}` — the dashboard guard
+answers before the request reaches the endpoint handler.
+
+### Endpoint handlers — the second check
+
+Most LLM handlers (`/v1/chat/completions`, `/v1/messages`, `/v1/embeddings`, the
+image, audio, search, fetch and video routes) then re-check the effective
+`requireApiKey` themselves. When it is `true` they require a valid key from
+**every** client — loopback included — and answer
+`401 {"error":{"message":"Missing API key",…}}` or `"Invalid API key"`. When it is
+`false` that check is skipped. A few read-only endpoints, `GET /v1/models` among
+them, have no such check and therefore stay keyless on loopback even while
+`requireApiKey` is `true`.
+
+Verified against a running instance (loopback, no key sent):
+
+| Effective `requireApiKey` | Client | `GET /v1/models` | `POST /v1/chat/completions` |
+|---|---|---|---|
+| `false` (shipped `.env.example`) | loopback | `200` | `200` (runs) |
+| `false` | remote | `200` | `200` (runs) |
+| `true` (runtime default) | loopback | `200` | `401` `Missing API key` |
+| `true` | remote | `401` `API key required for remote API access` | `401` `API key required for remote API access` |
+
+So `GET /v1/models` works with or without a key on loopback, while a completion
+call always needs one once `requireApiKey` is `true`:
+
+```bash
+curl http://localhost:20128/v1/models
+curl http://localhost:20128/v1/models -H "Authorization: Bearer sk-..."
 ```
-Authorization: Bearer sk-...
-x-api-key: sk-...
-```
+
+When a key **is** required, a missing or invalid one surfaces from the endpoint
+handler as:
 
 | Status | Meaning |
 |---|---|
@@ -114,7 +211,7 @@ entries (OpenAI shape). Live catalogs are resolved per provider when possible.
 | `POST /v1/responses` | OpenAI Responses-format endpoint |
 | `POST /v1/api` | Generic provider passthrough |
 
-All require the same API-key auth.
+All are gated by the rules in [Authentication](#authentication).
 
 ## Errors
 
@@ -129,6 +226,12 @@ All endpoints return OpenAI-compatible error bodies:
   }
 }
 ```
+
+Two layers can answer before an endpoint does, and their bodies are flat (see
+[Authentication](#authentication)): the dashboard guard returns
+`{"error":"API key required for remote API access"}` for a keyless remote LLM
+request while `requireApiKey` is `true`, and `{"error":"Unauthorized"}` for an
+unauthenticated `/api/*` request.
 
 | HTTP | type | code | Meaning |
 |---|---|---|---|
@@ -161,7 +264,12 @@ cooldowns and are reported to clients as `429`/`503`.
 | `GET /api/settings` | Runtime settings |
 | `GET /api/federation/status` | Federation mode status (edge/central) |
 
-Dashboard routes require the JWT session cookie; `/v1` routes require an API key.
+Dashboard routes (`/api/*`) are deny-by-default and need the `auth_token` session
+cookie or the host CLI token — an API key does not authorize them. The LLM
+prefixes are keyless for trusted local clients and require an API key from remote
+clients only while the effective `requireApiKey` is `true` (`.env.example` ships
+`REQUIRE_API_KEY=false`, so a fresh install serves them keyless). See
+[Authentication](#authentication).
 
 ## See also
 

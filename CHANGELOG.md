@@ -75,6 +75,24 @@
 
 ## Docs
 - **CLI**: document this fork's source pack/run path (`npm run cli:pack` followed by `node cli/cli.js --skip-update --no-browser` — the pack no longer needs a `DATA_DIR` override, see Fixes) and the launcher lifecycle: normal foreground signals clean up the detached server group, Windows/Linux tray mode detaches an unref'd background launcher, macOS retains its launcher for `NSStatusItem`, and `SIGKILL` cannot trigger cleanup and may leave the server running (DF-9ROUTER-5).
+- **API authentication**: `docs/api-reference.md` now documents the auth model the
+  server actually implements instead of a blanket "every `/v1` request needs an API
+  key". The dashboard surface (`/api/*`) is deny-by-default — `POST /api/keys` needs
+  the `auth_token` session cookie from `POST /api/auth/login` (or the on-host
+  `x-9r-cli-token`), and the documented example is now executable as written
+  (login with a cookie jar → create key), with the 401 stated next to it. The LLM
+  prefixes (`/v1`, `/v1beta`, `/api/v1`, `/api/v1beta`, `/codex`, `/responses`)
+  accept a trusted-local client with no key, a valid key in any of the four
+  documented forms (`Authorization: Bearer`, `x-api-key`, `x-goog-api-key`,
+  `?key=`), or a remote client while the effective `requireApiKey` is `false` — which
+  is what the shipped `.env.example` sets. It also documents the second, handler-level
+  check (measured live: with `requireApiKey` true a keyless loopback completion still
+  answers 401 `Missing API key`, while `GET /v1/models` has no such check and stays
+  keyless) and no longer implies that an API key authorizes the dashboard surface. The
+  README `REQUIRE_API_KEY` row now
+  spells out the `true`/`false`/**unset** semantics (unset falls back to the stored
+  setting, default `true`). No runtime behavior changed. Pinned by
+  `tests/unit/api-reference-auth-claims.test.js` (DF-9ROUTER-9/14/19).
 
 ## Fixes
 - **Source install / docs**: stop shipping a root-owned `DATA_DIR` default.
