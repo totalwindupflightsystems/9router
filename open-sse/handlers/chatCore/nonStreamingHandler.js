@@ -92,7 +92,7 @@ function openAICompletionToResponses(responseBody, customToolNames = null) {
 /**
  * Translate non-streaming response body from provider format → OpenAI format.
  */
-export function translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames = null) {
+function translateUpstreamResponse(responseBody, targetFormat, sourceFormat, customToolNames = null) {
   if (targetFormat === sourceFormat) return responseBody;
   // Provider responded in OpenAI Chat Completions shape but the client speaks
   // Responses API — convert so tool_calls/text surface as Responses `output`.
@@ -227,6 +227,37 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
   }
 
   return responseBody;
+}
+
+/**
+ * Adapt a translated body to the CLIENT's format — applied ONCE, at the single
+ * exit of `translateNonStreamingResponse`, after every upstream branch.
+ *
+ * The branches above all produce OpenAI `chat.completion` bodies whenever the
+ * upstream answers in OpenAI-ish shape (Ollama via `ollamaBodyToOpenAI`,
+ * Gemini/Antigravity/Gemini-CLI/Vertex built inline). A Claude-format client
+ * (`POST /v1/messages`, the format `detectFormatByEndpoint()` assigns) reads
+ * `content[]`, never `choices[]`: handing it a chat.completion body is a silent
+ * HTTP 200 with no assistant content rather than an error. Patching the
+ * conversion into each upstream branch is how that hole reappears the next time
+ * a branch is added, so it lives here instead.
+ *
+ * Only an OpenAI-shaped result is converted (`choices[]` or
+ * `object:"chat.completion"`), so a body an upstream already returned in
+ * Anthropic shape — or one this function already converted — passes through
+ * untouched.
+ */
+function toClientFormat(body, sourceFormat) {
+  if (sourceFormat !== FORMATS.CLAUDE) return body;
+  const isOpenAIShaped = Array.isArray(body?.choices) || body?.object === "chat.completion";
+  return isOpenAIShaped ? claudeMessageFromChatCompletion(body) : body;
+}
+
+export function translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames = null) {
+  return toClientFormat(
+    translateUpstreamResponse(responseBody, targetFormat, sourceFormat, customToolNames),
+    sourceFormat
+  );
 }
 
 /**
