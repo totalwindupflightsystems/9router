@@ -25,8 +25,10 @@ metadata:
   catalogs (hy3, mimo variants, qwen3.7 family…) never loaded. PROVIDER_MAP
   now maps them. clinepass is NOT on models.dev — its 417-model catalog comes
   from its OWN API (https://api.cline.bot/api/v1/models, CLINEPASS_API_KEY);
-  API-callable ids are `cline-pass/<bare>` (the org/model ids in /models are
-  Cline-product-surface ONLY, 403 on raw API).**
+  API-callable ids are `cline-pass/<bare>` (vendor-org ids answered 403 product-surface
+  08-27→09-08, but **since 2026-09-09 ~10:00 UTC BOTH forms answer 200 for paid lanes —
+  `cline-pass/<bare>` preferred: gateway routes direct to canonical slug ~5.5x cheaper;
+  see the 09-10 pitfall**).**
 - `router_pricing.py` — NORMALIZED (subscription-aware) pricing: plan_terms
   per provider (per_token / per_request / per_minute / official-points /
   **flat_subscription** → effective $/M). Cline Pass = flat $9.99/mo, 2-5x
@@ -463,6 +465,23 @@ ROUTER-MISS line first.
   bare → vendor-org id (18 added 09-09) so the hourly probe retries at the
   callable id; `provider_rules.jsonl` clinepass/chat-id-forms carries the
   contract (DATA > CODE).
+- **ID-FORM DOCTRINE FLIPPED AGAIN — PAID LANES: BOTH FORMS 200 (2026-09-10,
+  clinepass glm-5.3 STUCK resolved)**: the 09-09 two-forms rule was itself
+  incomplete in the other direction. Chat probes 09-10 showed paid lanes
+  answer at BOTH `cline-pass/<bare>` AND `<vendor-org>/<model>` since
+  ~09-09 10:00 UTC (glm-5.3: 200 at both with content; raw bodies carry
+  gateway cost metadata — 6.7e-05 direct vs 3.7e-04 market, ~5.5x apart).
+  Consequences: (a) the 08-31 `fix_to=z-ai/glm-5.3` probe_fix row and the
+  "vendor-org = 403 product-surface wall" wording are id-form ARTIFACTS —
+  corrected with an appended evidence row (never edit history); (b)
+  `cline-pass/<bare>` remains the preferred probe/chat id (cheaper,
+  direct-routed); (c) before ANY lane-death verdict or revocation on
+  id-form evidence, chat-probe ALL THREE forms (`cline-pass/<bare>`,
+  `<vendor-org>/<model>`, bare) with a 300+ token budget and read the raw
+  body — 200-with-empty-content = reasoning burn, re-probe bigger; a lane
+  alive at one form is alive, period. Health DOWN history that ENDS days
+  before your run is a signal the probe self-healed — check the tail of
+  the history before diagnosing a STUCK row.
 - **AUTO PROBE_GAP ROWS CAN BE PREMISE-FALSE — CHECK provider_rules FIRST
   (2026-09-08, opencode-go)**: router_probefix auto-rows said "HTTP 400 …
   likely transient/auth" for all 10 opencode-go lanes while the 09-07
@@ -473,6 +492,22 @@ ROUTER-MISS line first.
 
 - Sub-plan providers on models.dev look like junk ids (`zai-coding-plan`) —
   they are the FLAT-RATE LANES the registry wants; don't filter them out.
+- **ENV DRIFT BREAKS S3 PUSHES — AWS_CONFIG_FILE POISONING (2026-09-10)**:
+  `AWS_CONFIG_FILE=/tmp/test-aws-config` (leftover wrong-config file in the
+  gateway's inherited env) made every `git push s3daily` fail
+  InvalidAccessKeyId — it OVERRIDES `~/.aws/config`, so the default profile
+  lost the Hetzner endpoint even though the credentials file was fine. The
+  gateway env can't be unset from inside a tick (no restart from within);
+  healing = write the CORRECT config at the pointed path + quarantine the
+  broken file. Law: when S3 pushes fail with credential errors but
+  `~/.aws/credentials` keys look right, CHECK `AWS_CONFIG_FILE` /
+  `AWS_ENDPOINT_URL` / `AWS_PROFILE` in the session env FIRST (the push
+  works under `env -u AWS_CONFIG_FILE` = proven env drift, not dead keys).
+- **model_notes.jsonl rows REQUIRE the `provider` key** (2026-09-10): two
+  provider-less notes made `router_gaps.py --json` die with
+  `KeyError: 'provider'` and broke the JSON-purity contract test —
+  `notes_by = {(n['provider'], n['model']) ...}`. Schema: {provider, model,
+  note, source, valid_from}.
 - models.dev model names ≠ registry names (zai: `glm-5.3` vs registry
   `glm-5.3-flash`; family prefix matching required, exact-id matching wrong).
 - `deepseek-v4-flash-vision-exp` exists on models.dev — the registry must not
@@ -494,3 +529,82 @@ ROUTER-MISS line first.
 - The inline-python guard: write probes as `/tmp/*.py` files, never
   `python3 -c` with JSON-ish content.
 - registry sanity invariant: `active_models × categories == model_perf rows`.
+- **UNMAPPED ≠ NEW — cline-pass IS on models.dev (2026-09-13)**: the sync
+  emitted `UNMAPPED cline-pass` because models.dev ADDED a `cline-pass`
+  provider (15 models, `cline-pass/<bare>` ids, real API sticker costs) —
+  but no mapping rule resolves it, because registry provider id is
+  `clinepass` and mapping matches `providers.jsonl` ids FIRST. Registry
+  rule stays: clinepass catalogs from its OWN API (445 models incl. 13
+  media) — do NOT map `cline-pass` → `clinepass` (that would shrink the
+  catalog 445→15). File `provider_mappings.jsonl` rules with
+  `direction: "modelsdev-silence"` to mark such providers as
+  known-unmapped (sync skips the UNMAPPED line; `report --json` still
+  carries them). Currently silenced: the sub-plan and token-plan mirrors
+  already matched by alias (zai/minimax/zhipuai/stepfun/alibaba/tencent/
+  umans coding-plan families), raw vendor catalogs we deliberately do not
+  import (moonshotai, openrouter, togetherai, anthropic, google, mistral,
+  amazon-bedrock, azure, …), and hub/aggregator providers (lmstudio,
+  modelscope, siliconflow, …). Full list lives in provider_mappings.jsonl.
+  Audit the remaining UNMAPPED lines on the next natural report.
+- **COMMIT GUARD — uncommitted data rows get clobbered by the 05:30 sync
+  run (2026-09-13)**: the pre-run script (sync → pricing → sweep →
+  models.dev sync → probe scan → gaps) mutates `data/tables/*.jsonl` in
+  the worktree BEFORE the agent starts. Evidence rows written by the
+  agent and left uncommitted are silently wiped by the NEXT run's
+  pre-script. Law: run the seed/export/test/commit block AFTER writing
+  evidence — the commit must happen inside the SAME tick that writes the
+  rows. Verify with `git status --short data/tables/` before finishing.
+- **BENCH_OVERLAY source patterns match ALL rows with that source
+  substring (2026-09-13)**: adding `'SWE Marathon': ['code_gen']`
+  re-activates every EXISTING row whose source contains the pattern
+  (grok-4.5 SWE Marathon 0.29 code_gen). That is the intended cure for
+  inert evidence, but it can also activate rows you did not mean to
+  weight — grep the pattern against benchmarks.jsonl BEFORE adding it,
+  and check which models' perf values move.
+- **PLAN-INCLUSION vs QUALITY-DISABLE RECONCILIATION (2026-09-16)**: the
+  regime lock `test_plan_included_lanes_never_disabled` fails whenever
+  `plan_terms.included_models` names a lane that is `disabled`. Two causes,
+  two different correct fixes:
+  (a) **DISTINCT model the plan genuinely covers, quality-disabled as
+  superseded** → the OFFICIAL plan coverage wins: RE-ENABLE the lane and
+  record it in `price_evidence` (a flat plan costs the same either way; the
+  superseded-gen disable was a fleet preference, and the lock overrides it).
+  Verified case: minimax Token Plan intro lists the full lineup (M3/M2.7/
+  image/speech) and codingplan.org 2026-09-16 confirms M2.5 shares the M3
+  quota, so minimax-m2.7 / MiniMax-M2.7 / MiniMax-M2.5 / MiniMax-M3 were
+  re-enabled from a superseded-generation disable.
+  (b) **SAME model under another id** (dated snapshot `step-3.5-flash-2603`,
+  duplicate spelling `MiniMax-M3` vs the canonical lowercase lane, or a
+  spelling naming no lane at all — lowercase `minimax-m2.5`) → DROP that
+  entry from `included_models` with the reasoning in the note. Re-enabling
+  would put one physical model into a chain twice, and the pricing engine
+  can price the duplicate marginally cheaper (it only flat-sub-prices the
+  canonical lane), which risks a silly duplicate head.
+  Always finish a reconciliation with pricing → seed → export → full suite →
+  commit in the SAME tick (the COMMIT GUARD above).
+- **EVERY SYNC THAT ADDS TARGET-PROVIDER LANES RE-OPENS THE TR-039 GAP
+  (2026-09-16)**: 11 new fireworks-ai lanes arrived with the models.dev sync
+  and had neither a `model_aliases.jsonl` row nor a neutral
+  `quality_estimates.jsonl` `test` fill → no `test` tier → one ROUTER-MISS
+  per lane per resolve and `test_target_providers_emit_no_router_miss`
+  RED. Target providers (commandcode / aws-bedrock / fireworks-ai) fail
+  closed on TIER ABSENCE, not on gating, so the fix is always the TR-039
+  pair: alias row to the canonical weights (corroborate the mapping with the
+  lane's sticker — e.g. `routers/glm-latest` 1.40 == glm-5.3) + a documented
+  neutral `test` estimate. Check `grep ROUTER-MISS` on a
+  coding-hermes-scheduler resolve after ANY sync that adds lanes.
+- **GITREINS GUARD TIMEOUT IS A CONFIG FACT, NOT A REASON TO BYPASS
+  (2026-09-16)**: the guard's default `test_timeout` (180s) fell behind the
+  suite (~275s after TR-039's hermetic-seed tests), so every commit failed
+  as "Tests timed out" and then the guard hook itself hit a 300s ceiling.
+  Fix `guards.test_timeout` in `.gitreins/config.yaml` (180 → 900) — never
+  `--no-verify`; a timed-out test stage is an inconclusive gate, not a pass.
+- **HEAD-DRIFT CAUSE ISOLATION VIA STASHED SLICE (2026-09-16)**: when a head
+  moves in the same run you added evidence, prove the cause before
+  explaining it: `cp data/tables/benchmarks.jsonl /tmp/keep` →
+  `git stash push -- data/tables/benchmarks.jsonl` → re-seed → snapshot
+  heads → `git stash pop` → re-seed. If the head moves WITHOUT your slice,
+  the cause is the pre-run script's data (price/plan changes), not your
+  evidence — that isolation is what makes the mandatory head-drift
+  explanation checkable instead of a guess.
+
