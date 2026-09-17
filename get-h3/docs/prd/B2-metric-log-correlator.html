@@ -1,0 +1,73 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3 agent-ops: Metric-Log Correlator</title>
+<style>
+:root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
+font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
+h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
+h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
+h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
+padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
+pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
+pre code{border:none;background:none;padding:0;color:#c9e2a8}
+ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
+hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
+strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+</style></head><body>
+<h1>PRD: <code>h3-pulse</code> — Metric–Log Correlator</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B2 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> B1 (logsey) · <strong>Feeds:</strong> B6 forensics, GAP-125-class tuning</p>
+<hr>
+<h2>The one-liner</h2>
+<p>A pocket sampler that records what the box was doing — load, memory, connections, disk — on the same timeline as the logs, and answers the question behind every flaky infra bug: <strong>&quot;what was the machine doing when this failed?&quot;</strong></p>
+<h2>The problem, measured</h2>
+<p><strong>Case file 1 — the 4-corruption day (2026-09-10):</strong> the fleet&#x27;s state database corrupted <strong>four times in three hours</strong> (11:48, 12:53, 13:54, 14:52). The root cause chain — disk at 96%, watchdog <code>kill -9</code> mid-write, repair machinery looping under pressure — was only reconstructed <em>afterward</em>, by hand, from <code>df</code> snapshots people happened to run. A 1 Hz sampler writing 40 bytes/line would have made the correlation self-evident: every corruption clusters inside the &gt;95%-disk windows. Nobody keeps that series, because keeping it &quot;properly&quot; means an observability suite, and nobody installs Prometheus to answer one question.</p>
+<p><strong>Case file 2 — the load-gate tuning (GAP-125):</strong> choosing the fleet&#x27;s load-gate threshold meant reasoning from anecdotes (&quot;feels like the box dies around load 40&quot;) because there was no per-minute loadavg series joined to the spawn-storm log lines. The gate got armed at 12; nobody can say today what the box&#x27;s <em>actual</em> degradation curve looks like.</p>
+<p>Both cases share one shape: <strong>the metric existed in the kernel&#x27;s head and evaporated.</strong> pulse keeps it, tiny.</p>
+<h2>User stories</h2>
+<p><strong>US-1 (flaky-bug hunter):</strong> As an agent investigating &quot;the API call timed out at 02:17,&quot; I run <code>pulse around 02:17 --window 10m</code> and get loadavg, RSS-by-process-group, established-connection counts, and disk pressure for that window, side-by-side with the log lines from logsey — one screen, one answer.</p>
+<p><strong>US-2 (capacity planner):</strong> As Bane setting a load gate, I run <code>pulse report --last 30d --metric load1 --join hilo-log</code> and see the fleet&#x27;s actual saturation curve against spawn-storm events — the threshold becomes a measured choice, not a vibes number.</p>
+<p><strong>US-3 (post-mortem author):</strong> As the incident reviewer, I get <code>pulse export --window ...</code> appended to the logsey evidence block — the post-mortem shows <em>why</em>, not just <em>what</em> (memory cliff? connection storm? disk full?).</p>
+<p><strong>US-4 (silent-degradation watcher):</strong> As the operator, <code>pulse watch --rule &#x27;disk_used &gt; 90 for 10m&#x27;</code> pings the fleet thread before the corruption loop starts — not after the fourth incident.</p>
+<h2>What it samples (the pocket range)</h2>
+<p>| Metric | Rate | Why |</p>
+<p>|---|---|---|</p>
+<p>| load1/5/15, cpu% | 1 Hz | saturation curves, gate tuning |</p>
+<p>| RSS by process-group (hermes, gateway, schedulerd, 9router) | 5 s | memory-cliff detection (the 22 GB watchdog story) |</p>
+<p>| established connections by port (:8642, :20128, :9092) | 5 s | request-storm evidence (the 503 hour) |</p>
+<p>| disk used% per mount, io tier | 10 s | the corruption-day signature |</p>
+<p>| oom/kill events from kernel | event-driven | hard evidence |</p>
+<p><strong>Design rules:</strong></p>
+<ul>
+<li><strong>≤ 1% of one core, ≤ 50 MB RSS, ≤ 100 MB/day on disk</strong> — a sampler that costs more than it answers gets uninstalled; the budget is the spec.</li>
+<li><strong>One line = one timestamped JSON</strong> into a daily file that logsey indexes like any other source — pulse deliberately has <em>no query layer of its own</em>; correlation happens in DuckDB where the logs already live.</li>
+<li><strong>Ring buffer for the hot answer:</strong> last 24 h in RAM-mapped file so <code>pulse around &lt;ts&gt;</code> never waits on an index build.</li>
+<li><strong>Failure posture:</strong> if pulse is dead, logs still flow (loose coupling); <code>pulse doctor</code> reports its own gaps honestly (its own series must show its own restarts).</li>
+</ul>
+<h2>Interface</h2>
+<pre><code>
+pulse daemon                    # the sampler (systemd unit, ~0 budget)
+pulse around &lt;ts&gt; [--window 10m] [--join logs]
+pulse report [--last 24h|7d|30d] [--metric ...] [--join logs]
+pulse watch --rule &#x27;&lt;metric&gt; &lt;op&gt; &lt;val&gt; for &lt;dur&gt;&#x27; [--notify tg:...]
+pulse doctor
+</code></pre>
+<h2>Success criteria</h2>
+<ol>
+<li><strong>Replay the corruption day:</strong> with pulse&#x27;s historical series present, the disk-pressure correlation is a single <code>pulse report --last 24h --metric disk</code> — the &gt;95% windows line up with all four incidents <em>without human reconstruction</em>.</li>
+<li>Rebuild the GAP-125 threshold decision from data: 30-day saturation curve vs spawn events, in one report.</li>
+<li>Budget proof: 7-day continuous run on this box at ≤1% core / ≤50 MB RSS / ≤100 MB-day disk, verified by its own series.</li>
+<li><code>pulse around &lt;ts&gt;</code> answers in &lt;1 s for any timestamp in the last 24 h.</li>
+</ol>
+<h2>Why get-h3 / why open</h2>
+<p>Observability suites solve this at 100× the footprint; nothing ships at the pocket scale with the fleet-log join built in. Every agent-fleet operator hits &quot;the box was weird at 3am&quot; with zero retained metrics. pulse + logsey is the two-file answer — and the pairing is the product: <strong>metrics on the same timeline as evidence.</strong></p>
+<h2>Risks</h2>
+<ul>
+<li>Sampler itself becomes load under a storm → its writes are append-only, rate-limited, and self-throttling above the budget; its own series is the watchdog.</li>
+<li>Metric cardinality creep (per-PID RSS explodes) → process-<em>groups</em> by config, not PIDs; the curated set is the product, not a free-for-all.</li>
+<li>Rules spam → notify dedup window (the fleet learned throttle-or-be-desensitized from the GAP-061 severity-demotion saga).</li>
+</ul>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+</body></html>

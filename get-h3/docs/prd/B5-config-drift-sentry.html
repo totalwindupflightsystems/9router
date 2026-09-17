@@ -1,0 +1,74 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3 agent-ops: Config-Drift Sentry</title>
+<style>
+:root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
+font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
+h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
+h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
+h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
+padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
+pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
+pre code{border:none;background:none;padding:0;color:#c9e2a8}
+ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
+hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
+strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+</style></head><body>
+<h1>PRD: <code>h3-sentinel</code> — Config-Drift Sentry</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B5 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> nothing · <strong>Feeds:</strong> B4 digest (drift section), B3 runbooks</p>
+<hr>
+<h2>The one-liner</h2>
+<p>A registry of every config file that <em>matters</em> on a fleet box — with provenance, expected-drift rules, and tripwires — that catches the moment a config diverges from what the operator last blessed, <strong>before</strong> the next restart turns drift into an outage.</p>
+<h2>The problem, measured</h2>
+<p><strong>Case file 1 — the <code>.env</code> wipe (2026-09-16):</strong> 9router&#x27;s repo <code>.env</code> was overwritten by its <code>.env.example</code> twin (byte-identical size, same mtime — a stray <code>cp</code>). All four federation secrets became placeholders <em>on disk</em> while the running container kept the real ones. Discovery was pure luck (a 401 during unrelated wiring). <strong>One restart would have broken central↔edge auth fleet-wide, silently, with no error pointing at the cause.</strong> The repair — pulling secrets back out of the running container — was hand-crafted, unreproducible, and is now only recorded in a chat log.</p>
+<p><strong>Case file 2 — the cooldown-pin drift (SCHED-GAP-121):</strong> an operator set a 900s cooldown in the live DB; the policy regenerator kept rewriting 7200 from <code>fleet.toml</code>. Two stores, one truth-shaped lie — the pin silently reverted on every restart until the dual-store <code>--verify</code> tripwire was hand-built. Cost: weeks of a project running at 8× its intended cooldown with nobody able to say why.</p>
+<p><strong>Case file 3 — the sibling revert:</strong> a shared <code>.gitreins/config.yaml</code> evaluator pin was silently reverted by a sibling foreman&#x27;s merge; the wrong model served until noticed days later. Config changes have <strong>no ownership trail</strong> in git — the log says a merge touched the file, not that a <em>semantic pin</em> was undone.</p>
+<p>The pattern: fleet boxes carry dozens of load-bearing configs (env files, TOML, YAML, unit drop-ins), mutations come from agents, siblings, upgrades, and stray <code>cp</code>s, and <strong>the failure only surfaces at restart — the worst possible moment.</strong></p>
+<h2>User stories</h2>
+<p><strong>US-1 (the operator&#x27;s blessing):</strong> As Bane, after fixing the <code>.env</code> mess I run <code>sentinel bless /home/kara/9router/.env --class secrets</code> — the file&#x27;s current content-hash is registered. Any later change without a fresh bless is <em>drift</em>, reported with a unified diff at next check-in.</p>
+<p><strong>US-2 (the restart insurance):</strong> As the agent about to <code>systemctl restart</code> a daemon, I run <code>sentinel check --unit 9router-central</code> first: it diffs every registered config feeding that unit against blessed state and blocks/warns <em>before</em> the restart bakes the drift in.</p>
+<p><strong>US-3 (the semantic-pin guardian):</strong> As the fleet, I declare pins beyond raw hashes: <code>sentinel pin scheduler.db projects.cooldown_s --where name=h3 --expect 21600</code> — value-level, store-level expectations (the SCHED-GAP-121 tripwire generalized to any SQLite/TOML pair), verified on schedule.</p>
+<p><strong>US-4 (the archaeologist):</strong> As the responder asking &quot;who changed this and when?&quot;, <code>sentinel history /home/kara/9router/.env</code> shows every observed mutation with timestamp, mtime evidence, and the diff — even when git isn&#x27;t watching the file (env files never are).</p>
+<h2>What it registers</h2>
+<p>| Class | Examples | Check |</p>
+<p>|---|---|---|</p>
+<p>| secret-env | 9router/.env, gateway env files | hash + required-keys-present + placeholder-detector (<code>.env.example</code>-twin detection: entropy + <code>changeme</code>-class values) |</p>
+<p>| daemon-toml/yaml | fleet.toml, schedulerd.toml, .gitreins configs | hash + semantic pins (declared values at declared paths) |</p>
+<p>| dual-store pairs | DB column ↔ toml key | value agreement per pin (both directions) |</p>
+<p>| unit drop-ins | systemd overrides | hash + effective-unit diff (<code>systemctl cat</code>) |</p>
+<p><strong>Design rules:</strong></p>
+<ul>
+<li><strong>Blessing is explicit; observation is ambient.</strong> File watching (inotify) records mutations continuously; drift is only <em>declared</em> against blessed state. No blessing = monitor-only, so adoption is zero-risk.</li>
+<li><strong>Placeholders are their own alarm class:</strong> the <code>.env.example</code> clobber is detectable <em>without</em> a prior bless (placeholder heuristics) because it&#x27;s the highest-severity, most-recurring failure in fleet history.</li>
+<li><strong>Restart-coupled checks:</strong> a tiny exec shim (or documented pre-restart hook) makes &quot;check before you restart&quot; the path of least resistance for agents.</li>
+<li><strong>Provenance is the product:</strong> every observed change is appended (JSONL, git-friendly) — the fleet&#x27;s append-only doctrine applied to config.</li>
+</ul>
+<h2>Interface</h2>
+<pre><code>
+sentinel register &lt;path|--unit name&gt; --class &lt;class&gt;
+sentinel bless &lt;path&gt; [--note &quot;...&quot;]
+sentinel check [&lt;path&gt;|--unit name|--all] [--json]
+sentinel pin &lt;store.path&gt; --expect &lt;value&gt;     # semantic, value-level pins
+sentinel history &lt;path&gt;
+sentinel daemon                                 # inotify watcher + scheduled pin checks
+</code></pre>
+<h2>Success criteria</h2>
+<ol>
+<li><strong>Replay the <code>.env</code> clobber:</strong> with sentinel live, the <code>cp .env.example .env</code> fires a placeholder-class alarm within seconds of the write — hours before any restart could have baked it in.</li>
+<li><strong>Replay SCHED-GAP-121:</strong> the value-pin check reports <code>db=900 toml=7200 MISMATCH</code> on every scheduled run until reconciled — the tripwire exists without hand-building it per case.</li>
+<li>Fleet coverage: ≥15 load-bearing configs registered on this box within a week of install, with ≥3 live-class pins.</li>
+<li>Zero false alarms after the first tuning week (drift alarm precision ≥95% — the GAP-061 desensitization lesson: alarms that cry wolf get uninstalled).</li>
+</ol>
+<h2>Why get-h3 / why open</h2>
+<p>Every multi-agent fleet has this wound: configs mutated by many hands, failures deferred to restart time. Existing tools (etcd, consul, chef) solve fleet-scale config <em>management</em>; nothing solves single-box config <em>custody</em> for heterogeneous files + DBs + units with provenance. The placeholder-detector heuristic and the dual-store pin pattern are fleet scar tissue — shipping them is the value.</p>
+<h2>Risks</h2>
+<ul>
+<li>Hash churn from legitimate writers (installers, schedulers) → per-path &quot;expected writers&quot; allowlist; noisy paths get observation-only mode instead of alarms.</li>
+<li>Bless-staleness (blessed state itself becomes wrong) → bless requires <code>--note</code> and surfaces age; blessing is a moment of accountability, not a fire-and-forget.</li>
+<li>Scope creep toward full config management → hard line: sentinel never <em>writes</em> configs, only witnesses them.</li>
+</ul>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+</body></html>

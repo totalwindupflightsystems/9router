@@ -1,0 +1,72 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3 agent-ops: Cron & Delivery Authority</title>
+<style>
+:root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
+font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
+h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
+h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
+h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
+padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
+pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
+pre code{border:none;background:none;padding:0;color:#c9e2a8}
+ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
+hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
+strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+</style></head><body>
+<h1>PRD: <code>h3-relay</code> — Fleet Cron &amp; Delivery Authority</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B6 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> nothing · <strong>Feeds:</strong> B4 digest (delivery), every scheduled job in the fleet</p>
+<hr>
+<h2>The one-liner</h2>
+<p>One declarative registry for every scheduled job on a fleet box — cron, systemd timers, agent ticks — with delivery targets, failure escalation, and destination-coverage verification: <strong>the layer that makes &quot;the pipeline ran&quot; mean &quot;the artifact arrived.&quot;</strong></p>
+<h2>The problem, measured</h2>
+<p><strong>Case file 1 — the state.db hole (2026-08-29/30):</strong> the fleet&#x27;s chat-archive pipeline reported green for days while a gap silently opened in the destination — the backup lacked the data and no check noticed. Post-mortem law, written in blood: <strong>&quot;verify pipelines by DESTINATION coverage, never cron status.&quot;</strong> The exit code lies; the destination is truth. Today that verification is hand-written per pipeline or (usually) not written at all.</p>
+<p><strong>Case file 2 — cron delivery sprawl:</strong> fleet crons deliver to Telegram threads by raw IDs (<code>tg:-1003310984808:1</code>, topic 2, topic 118900…), some to &quot;local files only,&quot; some to both. Renaming a thread or changing a delivery policy means editing every crontab line; there is no single place that answers &quot;what delivers where, how often, and did it actually arrive yesterday?&quot;</p>
+<p><strong>Case file 3 — the silent-expiry class:</strong> OpenRouter keys, plan quotas, OAuth refreshes — scheduled jobs fail on expiry <em>repeatedly</em> because the failure surfaces as one line in a log nobody greps. The fleet&#x27;s own memory is full of &quot;cron X was silently failing&quot; entries.</p>
+<h2>User stories</h2>
+<p><strong>US-1 (the registrar):</strong> As the fleet operator, I declare jobs once: <code>relay add chat-archive --cron &#x27;*/15&#x27; --run ~/.hermes/scripts/archive.sh --deliver tg:set-1 --expect &#x27;rows&gt;=500/24h&#x27;</code> — schedule, command, destination, and <strong>destination expectation</strong> in one place, replacing scattered crontab lines.</p>
+<p><strong>US-2 (the coverage prover):</strong> As the agent asked &quot;is the archive healthy?&quot;, I run <code>relay status chat-archive</code> and get: last runs, exit codes, <strong>and destination receipts</strong> — did the expected artifact/rows/topic-post actually appear — because the runner wraps execution with a lightweight verifier (file mtime, row count, Telegram API read-back).</p>
+<p><strong>US-3 (the failure escalator):</strong> As Bane, when a job fails twice or its destination check fails once, I get one Telegram ping in the job&#x27;s declared escalation thread — not a log line, not silence. After three consecutive failures the job auto-pauses (with a HIGH marker) rather than spinning hot — the fleet&#x27;s spawn-hot-loop lesson, applied to cron.</p>
+<p><strong>US-4 (the auditor):</strong> As the reviewer of the whole fleet&#x27;s automation, <code>relay audit</code> prints the full matrix: every job, schedule, last-verified destination coverage, expectation pass rate — the answer to &quot;what runs on this box and what would break if it stopped&quot; in one table, which today requires reading three crontabs and four systemd unit dirs.</p>
+<h2>What it manages</h2>
+<ul>
+<li><strong>Schedule layer:</strong> wraps cron/systemd-timer semantics (generates its own timer units or wraps existing crontab entries) — one grammar for humans and agents.</li>
+<li><strong>Execution wrapper:</strong> runs the command, captures exit + duration + output-path/rows; <strong>destination verification</strong> as a first-class step (postconditions per delivery kind: file exists+fresh, DB rows delta, Telegram message read-back).</li>
+<li><strong>Delivery layer:</strong> named targets (<code>tg:thread</code>, <code>local:path</code>, <code>digest:family</code>, <code>lore:absorb</code>) — indirection so policy changes are one edit; B4&#x27;s digest becomes just another destination.</li>
+<li><strong>Escalation layer:</strong> failure→notify rules, auto-pause thresholds, quiet windows (fleet night hours), dedup (GAP-061 throttle discipline).</li>
+</ul>
+<p><strong>Design rules:</strong></p>
+<ul>
+<li><strong>Destination truth, always:</strong> a green exit with a failed destination check is a FAILURE. The registry&#x27;s core invariant is the 08-29 law, enforced mechanically.</li>
+<li><strong>Transparent under the hood:</strong> it wraps existing cron/timers rather than replacing them; unwrapping is clean — no lock-in of the actual schedules.</li>
+<li><strong>Expectations are declarative and cheap:</strong> <code>--expect</code> starts with three verbs (exists/fresh/rows); more only as fleets ask.</li>
+<li><strong>Self-monitoring:</strong> relay&#x27;s own daemon reports into <code>relay status</code> (a monitor that can&#x27;t see itself is a liability — the sentinel doctrine applied inward).</li>
+</ul>
+<h2>Interface</h2>
+<pre><code>
+relay add &lt;name&gt; --cron|--timer &lt;spec&gt; --run &lt;cmd&gt; [--deliver &lt;target&gt;...] [--expect &lt;postcondition&gt;]
+relay status [&lt;name&gt;] [--json]
+relay audit                          # the whole-fleet matrix
+relay run &lt;name&gt; [--dry-run]         # immediate run + verification
+relay pause|resume &lt;name&gt; [--reason &quot;...&quot;]
+</code></pre>
+<h2>Success criteria</h2>
+<ol>
+<li><strong>Replay the 08-29 hole:</strong> with relay&#x27;s destination check on the archive pipeline, the gap alarms within one cycle of first missed destination coverage — instead of days.</li>
+<li>Consolidation proof: every scheduled job on this box (≥10 across crontab + timers) is registered within a week; <code>relay audit</code> reconciles 1:1 with the raw crontab/timer inventory (nothing running outside the registry).</li>
+<li>Escalation fidelity: injected failures on 3 jobs → exactly 3 Telegram escalations, deduped, with auto-pause after the configured threshold; zero noise after fix.</li>
+<li>Agent ergonomics: &quot;what runs here and is it healthy&quot; is answerable in one call by a fresh agent — verifiably false today.</li>
+</ol>
+<h2>Why get-h3 / why open</h2>
+<p>Every serious agent fleet grows ad-hoc automation until the automation itself needs a fleet. Cron has no destination semantics; timers have no escalation grammar; agent frameworks have schedulers with no delivery truth. The <strong>postcondition-verified job</strong> is the missing primitive — and it&#x27;s pure fleet scar tissue, distilled.</p>
+<h2>Risks</h2>
+<ul>
+<li>Wrapper drift (jobs edited outside relay) → <code>relay audit</code> reconciles against the live crontab/timer inventory and flags unregistered movers loudly (registry completeness is itself a verified expectation).</li>
+<li>Escalation noise → dedup windows + quiet hours + auto-pause-with-marker; the GAP-061 lesson is a design constraint, not a hope.</li>
+<li>Postcondition complexity creep → three verbs ship; anything fancier is a script the job author supplies, not relay grammar.</li>
+</ul>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+</body></html>

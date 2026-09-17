@@ -1,0 +1,78 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3 agent-ops: Runbook Compiler</title>
+<style>
+:root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
+font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
+h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
+h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
+h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
+padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
+pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
+pre code{border:none;background:none;padding:0;color:#c9e2a8}
+ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
+hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
+strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+</style></head><body>
+<h1>PRD: <code>h3-lore</code> — Runbook Compiler</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B3 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M–L (~3 weeks) · <strong>Depends on:</strong> B1 (logsey) for evidence blocks; DuckBrain + boards as inputs · <strong>Feeds:</strong> every responder, human or agent</p>
+<hr>
+<h2>The one-liner</h2>
+<p>Compiles the fleet&#x27;s <em>actual</em> incident history — DuckBrain namespaces, board events, post-mortem docs — into living runbooks per failure class, each carrying the <strong>real queries and commands that diagnosed it last time</strong>, re-validated against the current system on a schedule.</p>
+<h2>The problem, measured</h2>
+<p><strong>Runbooks rot because they&#x27;re written prose, and prose has no execution feedback.</strong> The fleet&#x27;s lived proof, three cases deep:</p>
+<ol>
+<li><strong>The gateway restart doctrine</strong> took four incidents and a compaction-boundary loss to formalize: batch config changes, pause-first under load, expect up-to-30-min drain 503s. The knowledge existed only in scattered session summaries and one memory note (&quot;drain 503s kill ticks&quot;) — invisible to a fresh agent hitting the same wall.</li>
+<li><strong>The scheduler cooldown authority model</strong> (DB vs <code>fleet.toml</code> dual-store pins, <code>--verify</code> tripwire) was learned across SCHED-GAP-025 → SCHED-GAP-121 — the <em>same</em> class of drift bit twice, a year-class apart in fleet maturity, because the first lesson lived in an AGENTS.md paragraph nobody re-reads at incident time.</li>
+<li><strong>The <code>.env</code>/<code>.env.example</code> clobber</strong> had a one-line cure (container-env repair) that survived only inside one session&#x27;s transcript. The next operator hits the same wall with no runbook — recovery took reading Docker env by hand and diffing four secret generations.</li>
+</ol>
+<p>The pattern: <strong>every incident generates world-class runbook material, and it evaporates into chat archives.</strong> Bane&#x27;s audit doctrine says findings must be <em>re-findable</em>; today they&#x27;re re-findable only by whoever remembers the keywords.</p>
+<h2>User stories</h2>
+<p><strong>US-1 (incident responder, mid-fire):</strong> As an agent at 3 a.m. facing &quot;scheduler spawns 503-ing at spawn time,&quot; I ask <code>lore match &quot;spawn 503&quot;</code> and get the drain-window runbook — checks in order, the exact logsey query, the known-good command sequence — compiled from the last three times this happened.</p>
+<p><strong>US-2 (post-incident scribe):</strong> As the agent that just closed an incident, I run <code>lore absorb --window 2h --ns coding-hermes</code> and it drafts the runbook update from what actually happened — evidence blocks, working commands, dead ends marked dead — filed as a <em>proposal</em> the operator approves.</p>
+<p><strong>US-3 (runbook auditor):</strong> As Bane reviewing coverage, I run <code>lore audit</code> and see: every failure class seen in the last 90 days, whether a runbook exists, whether its commands <em>still work</em> (last-validated date), and the classes with incidents but no runbook — coverage as a number, not a feeling.</p>
+<p><strong>US-4 (new-box onboarding):</strong> As an agent landing on a fresh fleet node, <code>lore</code> syncs the class runbooks; the box&#x27;s first responder starts with four incidents&#x27; worth of scar tissue instead of zero.</p>
+<h2>What it compiles</h2>
+<p>Per <strong>failure class</strong> (classified from the incident trail: drain-window, shared-checkout collision, secret clobber, disk-pressure corruption, cooldown drift, key-rotation, …):</p>
+<ul>
+<li><strong>Signature:</strong> the log/logsey pattern that identifies the class (from B1&#x27;s message-classes)</li>
+<li><strong>Checks in order,</strong> each with: the exact command/query, expected healthy vs incident output, and <em>what decision it drives</em></li>
+<li><strong>Recovery ladder</strong> with guardrails (what NOT to run — the fleet&#x27;s &quot;never <code>--apply</code> on cooldown policy&quot;, &quot;USR1-only restarts&quot; class of law)</li>
+<li><strong>Evidence trail:</strong> links to the DuckBrain rows, board events, and commits where each step was learned</li>
+<li><strong>Provenance + freshness:</strong> which incidents fed it, last-validated timestamp</li>
+</ul>
+<h2>The re-validation loop (what makes it living)</h2>
+<p>Dead runbooks are the disease; this is the cure:</p>
+<ul>
+<li><strong>Command lint on schedule:</strong> every command in every runbook re-runs in read-only/verify mode (<code>--verify</code> flags, <code>--dry-run</code>, SELECT-only queries) against the live system on a weekly cron; any drift flips the runbook to <code>stale</code> in <code>lore audit</code>.</li>
+<li><strong>Absorb-on-close:</strong> incident closure without an <code>lore absorb</code> leaves a visible gap in <code>lore audit</code> — the process enforces itself.</li>
+<li><strong>Human-in-the-loop on write:</strong> compile proposes, operator approves (the fleet&#x27;s board-review model); nothing auto-writes doctrine.</li>
+</ul>
+<h2>Interface</h2>
+<pre><code>
+lore match &quot;&lt;symptoms|log line&gt;&quot; [--class ...]
+lore show &lt;class&gt; [--evidence]
+lore absorb --window ... [--ns ...] [--board ...]   # propose updates from an incident trail
+lore audit [--format table|json|md]                 # coverage + freshness matrix
+lore validate [--class ...]                         # run the read-only command lint now
+</code></pre>
+<h2>Success criteria</h2>
+<ol>
+<li>Compile-from-history proof: the <strong>gateway drain-window runbook</strong>, compiled purely from the 09-16 incident trail, contains the correct checks and ≥90% of the commands the humans eventually figured out by hand — before the next drain incident occurs.</li>
+<li><code>lore audit</code> runs on the fleet&#x27;s last 90 days of incidents and produces an honest coverage matrix (≥8 failure classes, gaps named, not hidden).</li>
+<li>Re-validation catches reality: after a deliberate breaking change (e.g. rename a flag the runbooks reference), the weekly lint flips the affected runbooks to <code>stale</code> within one cycle.</li>
+<li>Responder test: a fresh agent, given only <code>lore match</code>, handles a scripted recurrence of a known incident in ≤3 steps without consulting chat history.</li>
+</ol>
+<h2>Why get-h3 / why open</h2>
+<p>Every ops team&#x27;s runbooks rot; every agent fleet re-learns the same incidents. The hard 20% — incident classification from messy trails, evidence-block extraction, the re-validation harness — is exactly what a fleet with DuckBrain + boards + logsey already has the raw material for, and nobody else has. This is Bane&#x27;s audit doctrine (&quot;findings must be re-findable&quot;) compiled into a tool.</p>
+<h2>Risks</h2>
+<ul>
+<li><strong>Garbage compounding:</strong> a wrong runbook is worse than none → proposals-not-writes, operator approval, provenance on every line.</li>
+<li>Classification sprawl → curated class list with an explicit <code>unclassified</code> bucket; absorbing into <code>unclassified</code> is always allowed, inventing classes is not (without approval).</li>
+<li>Validation false-confidence → read-only lint proves commands <em>parse and answer</em>, not that recovery <em>succeeds</em>; runbooks carry that honesty label too (the verify-harness honesty law, applied to ops).</li>
+</ul>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+</body></html>

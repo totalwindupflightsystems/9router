@@ -1,0 +1,74 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3 agent-ops: Session Evidence Vault</title>
+<style>
+:root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
+font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
+h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
+h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
+h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
+padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
+pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
+pre code{border:none;background:none;padding:0;color:#c9e2a8}
+ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
+hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
+strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+</style></head><body>
+<h1>PRD: <code>h3-evidence</code> — Session Evidence Vault &amp; Agent Scoreboard</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B8 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M–L (~3 weeks) · <strong>Depends on:</strong> B1 (logsey) for session-log mining · <strong>Feeds:</strong> B3 lore (absorb source), B4 digest (scoreboard section)</p>
+<hr>
+<h2>The one-liner</h2>
+<p>A per-session, per-agent evidence store that captures <strong>what each agent actually did</strong> — tool calls, outputs produced, artifacts landed, claims vs receipts — and turns it into the scoreboard every fleet needs but nobody builds: <strong>which agents, models, and lanes actually ship verified work.</strong></p>
+<h2>The problem, measured</h2>
+<p><strong>Case file 1 — the outcome lie (quorum finding, 09-16):</strong> the scheduler&#x27;s tick records stamped <code>outcome=&#x27;committed&#x27;</code> on <strong>1,701 zero-output ticks per week</strong> — agents that claimed completion with nothing on disk to show. The fleet had no mechanical way to separate &quot;says done&quot; from &quot;evidences done.&quot; The quorum only caught it because someone hand-joined two data stores.</p>
+<p><strong>Case file 2 — the verification gap in workers:</strong> the fleet&#x27;s own ops doctrine records worker sessions that produced identical tool calls in a loop (288 identical calls observed in <code>state.db</code>), or committed test-file-only changes against fix-claims. Each was caught by hand, after the fact, by a human reading raw logs.</p>
+<p><strong>Case file 3 — the model-value question:</strong> &quot;is lane X actually better than lane Y for foreman work?&quot; is unanswerable today — session costs live in one store, outcomes in another, tool-call quality nowhere. The value quorum needed a week of hand-built joins to say &quot;valuable but reckless.&quot; Fleets without a quorum culture just… keep paying.</p>
+<p>The raw material already exists — every session&#x27;s tool calls and outputs flow through the harness. What&#x27;s missing is the <strong>evidence-shaped capture</strong> and the joins.</p>
+<h2>User stories</h2>
+<p><strong>US-1 (the evidence hook):</strong> As a harness developer, I register an evidence sink (<code>evidence attach --harness hermes --stream tool-calls</code>) and every session gets a structured vault record: calls made, outputs&#x27; hashes, files written, commits landed, tests run — append-only, tamper-evident, redacted at write time.</p>
+<p><strong>US-2 (the scoreboard reader):</strong> As Bane deciding where to spend, I run <code>evidence score --window 30d --by model</code> and see per-model/per-lane: verified-ship rate (commits whose claims match artifacts), evidence-coverage (sessions with complete receipts), claim-vs-receipt delta, cost per <em>verified</em> outcome — the quorum report as a standing query.</p>
+<p><strong>US-3 (the loop-catcher):</strong> As the fleet&#x27;s quality gate, <code>evidence watch --rule &#x27;identical_calls &gt; 50&#x27;</code> or <code>&#x27;claimed_files_absent&#x27;</code> flags degenerate sessions <em>while they run</em> — the 288-identical-calls spin becomes a 10-minute-old alert, not a post-mortem finding.</p>
+<p><strong>US-4 (the audit reply):</strong> As the operator asked &quot;prove lane X earned its cost this month,&quot; <code>evidence report --lane xkiro --window 30d</code> emits the evidence-linked answer: sessions, verified landings, cost per verified outcome, failure classes — one artifact, every number drillable (grain doctrine).</p>
+<h2>What it captures (per session)</h2>
+<p>| Layer | Content |</p>
+<p>|---|---|</p>
+<p>| identity | session id, agent/foreman, model, provider lane, harness |</p>
+<p>| calls | tool name, args hash (args redacted), duration, outcome |</p>
+<p>| products | files written (hashes), commits (sha + verified-tree match), tests run (verdicts), messages sent (delivery receipts) |</p>
+<p>| claims | board-row flips, <code>outcome</code> stamps, completion messages |</p>
+<p>| joins | cost rows (from state surfaces), guard results, verify verdicts |</p>
+<p><strong>Design rules:</strong></p>
+<ul>
+<li><strong>Claims and receipts live in the same row-shape</strong> so <code>claims minus receipts</code> is a query, not an investigation — the 1,701-lie becomes <code>SELECT sessions WHERE claimed_committed AND artifacts_empty</code>.</li>
+<li><strong>Write-time redaction</strong> (gitleaks pattern set) — an evidence vault must never become a leak surface (B1&#x27;s rule, inherited).</li>
+<li><strong>Tamper-evidence:</strong> hash-chained appends; the vault can be wrong about the world but provably about itself.</li>
+<li><strong>Honesty labels all the way down:</strong> absent capture renders &quot;not captured,&quot; never zero — partial harness coverage is visible, not smoothed over.</li>
+</ul>
+<h2>Interface</h2>
+<pre><code>
+evidence attach --harness &lt;name&gt; [--stream tool-calls|commits|all]
+evidence score --by model|lane|agent [--window 30d] [--format table|json|html]
+evidence report --session &lt;id&gt; | --lane &lt;lane&gt; --window ...
+evidence watch --rule &lt;expr&gt; [--notify tg:...]
+evidence doctor                     # capture coverage per harness/source
+</code></pre>
+<h2>Success criteria</h2>
+<ol>
+<li><strong>Quorum replay:</strong> <code>evidence score --by lane --window 90d</code> reproduces the scheduler quorum&#x27;s headline findings (verified-vs-claimed gap, cost per verified outcome) as a standing query — the week of hand-joins becomes one command.</li>
+<li><strong>Spin detection:</strong> a deliberately injected degenerate session (looped identical calls) alerts via <code>watch</code> within 10 minutes.</li>
+<li>Capture coverage ≥95% of fleet session starts within two weeks on this box (<code>doctor</code> reports honestly).</li>
+<li>Scoreboard adoption: the weekly lane/model spending review consumes <code>evidence score</code> output as its primary artifact (digest B4 cites it).</li>
+</ol>
+<h2>Why get-h3 / why open</h2>
+<p>Agent frameworks show you <em>what agents said</em>; none show you <strong>what agents proved</strong>. The claims-vs-receipts join, the verified-ship scoreboard, and the live degeneracy watch are novel, buildable purely from harness streams, and instantly valuable to any fleet paying real money per session. This is the capstone of the agent-ops line: logsey proves the <em>box</em>, pulse proves the <em>moment</em>, forge proves the <em>lanes</em>, lore proves the <em>lessons</em> — evidence proves the <em>work</em>.</p>
+<h2>Risks</h2>
+<ul>
+<li>Capture overhead on hot paths → async appends, bounded queue, drop-oldest with a visible gap counter (never block a session for bookkeeping).</li>
+<li>Privacy/redaction at scale → redact-at-write with the guardian&#x27;s pattern set; vaults get the same secret-scan audits as any output.</li>
+<li>Metric gaming (agents optimizing the scoreboard) → score <em>verified outcomes</em>, not activity volume; the verify-harness honesty law is the anti-gaming mechanism — you can&#x27;t farm receipts that require real tests to pass.</li>
+</ul>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+</body></html>

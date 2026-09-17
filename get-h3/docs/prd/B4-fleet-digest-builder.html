@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>h3 agent-ops: Fleet Digest Builder</title>
+<style>
+:root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
+font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
+h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
+h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
+h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
+padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
+pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
+pre code{border:none;background:none;padding:0;color:#c9e2a8}
+ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
+hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
+strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+</style></head><body>
+<h1>PRD: <code>h3-digest</code> — Fleet Digest Builder</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B4 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed · <strong>Effort:</strong> S–M (~1 week) · <strong>Depends on:</strong> nothing (boards/logs via files; logsey/pulse enrich when present) · <strong>Feeds:</strong> humans who read one thing a day</p>
+<hr>
+<h2>The one-liner</h2>
+<p>A scheduled roll-up of board rows, tick evidence, guard results, and cost meters into <strong>one digest artifact per project/thread</strong> — HTML for the phone, Markdown for the repo — so humans read one page a day instead of grepping ten boards.</p>
+<h2>The problem, measured</h2>
+<p><strong>The fleet runs on boards, and boards are firehoses.</strong> Today&#x27;s inventory on this box alone: ~256 scheduler projects, 64 enabled, each with its own <code>.coding-hermes/board/</code> JSONL; qa-cron findings; DuckBrain namespaces per repo; guard logs per commit; cost meters split across <code>state.db</code> surfaces with a documented &quot;cost_source on 9 rows of 70k&quot; honesty problem. The verdict from the scheduler value quorum took a <strong>hand-built HTML report</strong> (<code>scheduler-value-quorum-2026-09-16.html</code>) to make legible — and that report was built <em>once, by hand, during an incident of attention</em>. Nobody rebuilds that daily by hand.</p>
+<p>The daily cost is real and observed: <strong>Bane reads Telegram and wants one artifact per thread</strong> (his delivery doctrine: ONE HTML artifact with TOC, grain over styling); agents burn context re-summarizing board state at every session start; incidents get noticed late because the signal is spread across ten surfaces and the operator checks the loudest one.</p>
+<h2>User stories</h2>
+<p><strong>US-1 (the operator&#x27;s morning):</strong> As Bane with coffee, I get one HTML digest per project-family in my Telegram: what landed (with narrator-grade evidence links), what&#x27;s stuck and since when, what failed validation, what it cost, and the three rows that need me — TOC&#x27;d, grain-first, no styling padding.</p>
+<p><strong>US-2 (the agent&#x27;s session start):</strong> As a foreman starting a tick, I read the digest instead of replaying board scans: my predecessor&#x27;s outcomes, the open rows I inherit, the cooldown/pause state — one file read replaces a dozen probes.</p>
+<p><strong>US-3 (the auditor):</strong> As Bane asking &quot;is this lane burning money for nothing?&quot;, the digest&#x27;s cost section carries sticker-vs-metered spend per lane <em>with the cost_source honesty label</em> — the quorum report&#x27;s discipline, produced on schedule instead of on demand.</p>
+<p><strong>US-4 (the incident reviewer):</strong> As whoever reconstructs a bad week, <code>digest --window 7d --project X</code> regenerates the trail: row flips with timestamps, guard failures, stall events, delivery receipts — the same view the operator saw, day by day.</p>
+<h2>What it compiles (per digest)</h2>
+<p>| Section | Content | Source |</p>
+<p>|---|---|---|</p>
+<p>| <strong>Landed</strong> | rows → complete, with evidence links (commit, verify verdict, narrator block when present) | board JSONL + events |</p>
+<p>| <strong>Stuck</strong> | rows pending &gt;SLA, with last-event age and owner signal | boards + cooldown state |</p>
+<p>| <strong>Quality</strong> | guard results, in-guard failures, outcome-lies (rows claiming complete with zero-output evidence) | gitreins logs, tick evidence |</p>
+<p>| <strong>Money</strong> | spend by lane/project, sticker vs metered, <code>cost_source</code> honesty labels | state.db / scheduler API |</p>
+<p>| <strong>Needs-human</strong> | the three rows a human must rule on (approvals, conflicts, budget) | priority + age heuristics |</p>
+<p>| <strong>Ops</strong> (when logsey/pulse present) | error-class top-N from the window, saturation one-liner | B1/B2 views |</p>
+<p><strong>Design rules:</strong></p>
+<ul>
+<li><strong>Delivery-native:</strong> emits to Telegram (ONE artifact, TOC, dark-theme phone HTML — the delivered style Bane has already approved), Markdown to the repo for history, raw JSON for agents. The Telegram artifact <em>is</em> the product; a digest nobody opens is a failed digest.</li>
+<li><strong>Grain over styling:</strong> every number links to its row of origin; no summary without a drill-down (the Observatory law: density, publish real numbers even when bad).</li>
+<li><strong>Honesty labels inherit:</strong> cost figures carry <code>cost_source</code>; missing data renders as &quot;no data,&quot; never as zero.</li>
+<li><strong>Schedule + on-demand:</strong> cron per project-family + <code>digest build --project X --window 24h</code> for the ad-hoc ask.</li>
+</ul>
+<h2>Interface</h2>
+<pre><code>
+digest build --project &lt;name|family&gt; [--window 24h] [--format html|md|json]
+digest schedule --project &lt;family&gt; --cron &#x27;17 6 * * *&#x27; --deliver tg:&lt;chat:topic&gt;
+digest diff --window 7d          # what changed vs the prior window&#x27;s digest
+</code></pre>
+<h2>Success criteria</h2>
+<ol>
+<li><strong>The quorum test:</strong> <code>digest build --project coding-hermes-scheduler --window 90d</code> reproduces the substance of the hand-built 09-16 quorum report (spend by tier, cost-source honesty, zero-output counts) without hand labor.</li>
+<li>Adoption proof: operator opens ≤1 artifact/day for the whole fleet and can act on &quot;needs-human&quot; items without opening a board for ≥80% of them.</li>
+<li>Agent session-start probe reduction: foreman orientation drops from N board/log scans to 1 digest read (measured via tool-call counts before/after on a pilot project).</li>
+<li>Honesty preservation: 100% of cost figures carry source labels; absent sources render as &quot;no data&quot; (audited by construction — the renderer cannot emit an unlabeled number).</li>
+</ol>
+<h2>Why get-h3 / why open</h2>
+<p>Multi-agent setups drown in board noise — every framework grows ten dashboards and no narrative. The differentiator is the <strong>evidence-first compilation grammar</strong>: evidence-linked landings, honesty-labeled costs, needs-human triage. Anyone can template HTML; the fleet discipline baked into <em>what gets included and how it&#x27;s labeled</em> is the shipped intelligence. It is also the on-ramp that makes the rest of the agent-ops line visible: digest cites logsey/pulse/lore artifacts, so the line sells itself one morning at a time.</p>
+<h2>Risks</h2>
+<ul>
+<li>Digest spam → per-family scheduling, dedup windows, and a hard &quot;three needs-human items&quot; triage cap; digests compete for attention and must win it or shrink.</li>
+<li>Board-schema drift across repos → tolerant reader (the fleet&#x27;s boards already vary; legacy pretty-printed boards are valid), per-project adapters with <code>digest doctor</code> reporting parse health.</li>
+<li>Cost-data honesty traps → renderer-enforced labels only; if the source can&#x27;t say where a number came from, the digest says &quot;unknown provenance&quot; — loudly.</li>
+</ul>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+</body></html>
