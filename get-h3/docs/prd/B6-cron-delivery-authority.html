@@ -1,72 +1,124 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>h3 agent-ops: Cron & Delivery Authority</title>
+<title>B6 Cron Delivery Authority</title>
 <style>
 :root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
 font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
 h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
 h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
-h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+h3{font-size:1.05rem;color:#fff;margin:1.2rem 0 .3rem}
+h4{font-size:1rem;color:#cfe3ff;margin:1rem 0 .2rem}
 p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
 padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
 pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
 pre code{border:none;background:none;padding:0;color:#c9e2a8}
 ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
 hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
-strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+strong{color:#fff} a{color:#5eb0ef} .tag{color:var(--mut);font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:.6rem 0}
+th,td{text-align:left;padding:.45rem;border-bottom:1px solid #2a3140;vertical-align:top}
+th{color:#8b93a1;font-weight:600}
 </style></head><body>
-<h1>PRD: <code>h3-relay</code> — Fleet Cron &amp; Delivery Authority</h1>
-<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B6 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
-<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> nothing · <strong>Feeds:</strong> B4 digest (delivery), every scheduled job in the fleet</p>
+<h1>PRD (deep): <code>h3-relay</code> — Job &amp; Delivery Authority</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B6 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed (v2 — answers the &quot;pipe dream&quot; critique head-on) · <strong>Effort:</strong> M (~2-3 weeks) · <strong>Depends on:</strong> nothing (wraps what exists) · <strong>Feeds:</strong> digest (B4), lore (B3), sentinel (restart gate)</p>
 <hr>
-<h2>The one-liner</h2>
-<p>One declarative registry for every scheduled job on a fleet box — cron, systemd timers, agent ticks — with delivery targets, failure escalation, and destination-coverage verification: <strong>the layer that makes &quot;the pipeline ran&quot; mean &quot;the artifact arrived.&quot;</strong></p>
-<h2>The problem, measured</h2>
-<p><strong>Case file 1 — the state.db hole (2026-08-29/30):</strong> the fleet&#x27;s chat-archive pipeline reported green for days while a gap silently opened in the destination — the backup lacked the data and no check noticed. Post-mortem law, written in blood: <strong>&quot;verify pipelines by DESTINATION coverage, never cron status.&quot;</strong> The exit code lies; the destination is truth. Today that verification is hand-written per pipeline or (usually) not written at all.</p>
-<p><strong>Case file 2 — cron delivery sprawl:</strong> fleet crons deliver to Telegram threads by raw IDs (<code>tg:-1003310984808:1</code>, topic 2, topic 118900…), some to &quot;local files only,&quot; some to both. Renaming a thread or changing a delivery policy means editing every crontab line; there is no single place that answers &quot;what delivers where, how often, and did it actually arrive yesterday?&quot;</p>
-<p><strong>Case file 3 — the silent-expiry class:</strong> OpenRouter keys, plan quotas, OAuth refreshes — scheduled jobs fail on expiry <em>repeatedly</em> because the failure surfaces as one line in a log nobody greps. The fleet&#x27;s own memory is full of &quot;cron X was silently failing&quot; entries.</p>
+<h2>The critique, taken seriously</h2>
+<p>&gt; <em>&quot;It seems nice but might feel like a pipe dream to get all the formats to be aligned.&quot;</em></p>
+<p>Correct — and if relay required alignment it would be a pipe dream. Two specific ways it could have been one, and the design rules that kill each:</p>
+<p><strong>Failure mode 1 — &quot;everyone migrates to our format.&quot;</strong> A declarative registry is only valuable if jobs live in it, and every fleet accumulates a different scheduling mechanism per generation. Requiring migration = a rewrite project that dies at 60% adoption and leaves a half-registry that lies about coverage.</p>
+<p>→ <strong>Rule: relay adapts to formats; formats never adapt to relay.</strong> Three modes (below), and the default mode requires <em>zero</em> changes to anything.</p>
+<p><strong>Failure mode 2 — &quot;relay becomes the thing that runs jobs.&quot;</strong> If every cron line routes through a new daemon, relay becomes a single point of failure for the entire fleet&#x27;s automation, and a busy box with a broken relay stops doing work.</p>
+<p>→ <strong>Rule: fail-open exec.</strong> The shim executes the job itself; if recording/verification fails for any reason, the job still ran and its exit code is authoritative — exactly the <code>router_spawn</code> fail-open doctrine the fleet already lives by. Observe mode has <em>no runtime dependency at all</em>.</p>
+<hr>
+<h2>Measured surface inventory (this box, 2026-09-17)</h2>
+<table>
+<tr><td>System</td><td>Count</td><td>Readable unprivileged?</td></tr>
+<tr><td>user crontab (<code>crontab -l</code>)</td><td>1 entry</td><td>yes</td></tr>
+<tr><td><code>/etc/cron.d</code> + anacron</td><td>2 files (+anacron)</td><td>yes</td></tr>
+<tr><td>user systemd timers</td><td>7</td><td>yes</td></tr>
+<tr><td>system systemd timers</td><td>21</td><td>yes (<code>list-timers</code> is unprivileged)</td></tr>
+<tr><td><strong>hermes cron</strong></td><td><strong>4 jobs — and it already records 876 deliveries, 1,000 executions, plus a <code>cron_incidents</code> table</strong></td><td>yes (SQLite)</td></tr>
+<tr><td>docker containers w/ healthchecks+restart policy</td><td>50</td><td>yes (<code>docker ps</code>)</td></tr>
+<tr><td>scheduler lanes</td><td>68 enabled projects spawning ticks</td><td>yes (API)</td></tr>
+</table>
+<p><strong>Seven surfaces, zero alignment requirement — and one of them already solved part of the problem.</strong> Hermes cron maintains execution and delivery records in SQLite. Relay&#x27;s job is not to replace that; it is to <strong>adopt it as the richest adapter</strong> and unify only what lacks records: raw crontab, systemd timers, docker workloads, scheduler ticks. The adapter set is finite (7) and every adapter reads <em>existing</em> native state.</p>
+<hr>
+<h2>The three modes (progressive, per-job, reversible)</h2>
+<p><strong>Mode 1 — OBSERVE (default; zero changes, zero risk).</strong></p>
+<p>Relay reads each system&#x27;s native schedule and state (cron logs, <code>systemctl show</code>, hermes cron DB, docker inspect, scheduler API) and reports per job: last run, exit, duration, output size/path, next expected, and — the killer feature — <strong>silence detection</strong>: &quot;this job has not run in 3 days.&quot; No job is touched, no schedule is owned, nothing can break.</p>
+<p><em>This mode alone delivers most of the value, for 100% of jobs, including the ones nobody will ever migrate.</em></p>
+<p><strong>Mode 2 — WRAP (per job, opt-in, byte-reversibly).</strong></p>
+<p>For jobs where we want run-time truth: the native entry is rewritten to call <code>h3ops relay exec &lt;name&gt; -- &lt;original command, verbatim&gt;</code>, with the original stored in the registry. The shim runs the command, records the run, evaluates postconditions, and <strong>cannot block the job</strong> (fail-open). <code>relay unwrap &lt;name&gt;</code> restores the original line byte-identically; the wrap is a single scoped diff, reviewable like any change.</p>
+<p><strong>Mode 3 — OWN (declared expectations + delivery authority).</strong></p>
+<p>Same as wrap, plus: postconditions, escalation policy, delivery targets. Per-job opt-in. No format migration — the job keeps running exactly as it did, now with receipts.</p>
+<p><strong>Adoption is a ladder, never a mandate.</strong> A job can sit in OBSERVE forever and still be valuable; WRAP is chosen job-by-job by whoever wants runtime truth; OWN is chosen where the 08-29 law applied (artifacts that must <em>arrive</em>).</p>
+<hr>
+<h2>Expectations without declarations: baseline learning</h2>
+<p>The second adoption blocker is &quot;who writes the postconditions for 65 jobs?&quot; Nobody.</p>
+<p><strong>Rule: relay learns the baseline.</strong> In OBSERVE/WRAP mode it accumulates the job&#x27;s normal pattern (exit code, duration band, output size/presence, delivery cadence) over N runs, marks the job <code>learning</code>, then alerts on <strong>deviation</strong> — not on a declared expectation. Declared postconditions (the explicit ladder below) become an <em>optional upgrade</em> for jobs that need destination truth, not a prerequisite.</p>
+<p>That means the 80% that will never be declared still get real verification — &quot;exit 0 is normal, it was always &lt;2s, and it always wrote something to that path; today it exited 0 in 0.1s and wrote nothing&quot; is a catch no cron log makes today.</p>
+<p><strong>Explicit postcondition ladder (opt-in):</strong></p>
+<ul>
+<li><strong>L1 — exit code.</strong> Free for every wrapped job; the floor.</li>
+<li><strong>L2 — artifact verbs:</strong> <code>exists &lt;path&gt;</code>, <code>fresh &lt;path&gt; &lt;max_age&gt;</code>, <code>rows &gt;= N</code>, <code>size &gt; N</code>.</li>
+<li><strong>L3 — destination read-back:</strong> the 2026-08-29 law (&quot;verify pipelines by destination coverage, never cron status&quot;) mechanized — Telegram message id retrievable, API GET returns the record, row present in the destination store. A green exit with a failed L3 check is a <strong>failure</strong>.</li>
+</ul>
+<hr>
+<h2>Delivery target registry (the &quot;delivery&quot; half)</h2>
+<p>Jobs currently hardcode destinations (raw Telegram IDs, local paths, thread topics) in 7 different notations. Relay introduces <strong>named targets</strong> — <code>tg:set-1</code>, <code>tg:ops</code>, <code>local:reports</code>, <code>digest:&lt;family&gt;</code>, <code>lore:absorb</code> — resolved in one place. Policy changes become one edit instead of a fleet-wide sed. Unmanaged destinations are recorded as such (visible, never blocked), so the registry can grow at whatever pace reality allows.</p>
+<h2>Escalation discipline (noise is how these tools get uninstalled)</h2>
+<ul>
+<li>notify after <strong>2 consecutive</strong> failures (single failures are noise);</li>
+<li>dedup window per job; <strong>quiet hours</strong> respected;</li>
+<li><strong>auto-pause after 3 consecutive</strong> failures with a HIGH marker row — the fleet&#x27;s spawn-hot-loop lesson applied to cron (a job failing forever at 5-minute cadence is a load generator);</li>
+<li>escalation goes to the job&#x27;s registered target thread, never a firehose;</li>
+<li>every alarm&#x27;s outcome is recorded → precision is measurable, and a noisy rule gets demoted (the accuracy loop from sentinel, reused).</li>
+</ul>
+<h2>Storage &amp; evidence</h2>
+<p>Append-only JSONL events per box (run, verdict, postcondition results, delivery receipt) + DuckDB rollup for queries; <strong>adopts hermes cron&#x27;s <code>executions.db</code>/<code>deliveries.db</code> read-only</strong> rather than duplicating them. The rollup feeds digest (B4) and lore (B3); sentinel&#x27;s restart gate reuses relay&#x27;s job wrapper for the pre-restart check.</p>
+<h2>Honest limits (named, not hidden)</h2>
+<ul>
+<li><strong>root crontabs</strong> are unreadable unprivileged (same class of limit as sentinel&#x27;s FD probe) → reported as <em>visibly unmonitored</em>, or covered with a narrow read privilege;</li>
+<li><strong>jobs living inside other systems</strong> (docker healthchecks, CI workflows, embedded schedulers) are OBSERVE-only — their trigger belongs to another authority, and we do not pretend otherwise;</li>
+<li><strong>baseline learning needs N runs</strong> before alerts are trustworthy → jobs carry a <code>learning</code> state and produce no alarms during it (honesty over eagerness);</li>
+<li><strong>no universal format exists</strong> — and the design never needs one;</li>
+<li><strong>wrapper-of-wrapper cases</strong> (a cron entry that calls a script that calls a scheduler) are recorded as a chain, and only the outermost hop is wrapped.</li>
+</ul>
+<h2>Migration reality table</h2>
+<table>
+<tr><td>Source</td><td>OBSERVE gives (free)</td><td>WRAP adds</td><td>Effort</td></tr>
+<tr><td>user crontab (1)</td><td>last run from syslog, silence detection</td><td>runtime record, postconditions, escalation</td><td>minutes</td></tr>
+<tr><td>/etc/cron.d + anacron (2)</td><td>same</td><td>same</td><td>minutes</td></tr>
+<tr><td>user timers (7)</td><td><code>systemctl show</code> state, last/next, result</td><td>exit receipt, artifact checks</td><td>minutes each</td></tr>
+<tr><td>system timers (21)</td><td>same</td><td>same (privilege for some units)</td><td>minutes each</td></tr>
+<tr><td>hermes cron (4)</td><td><strong>already has executions + deliveries</strong> → adopt read-only, add destination read-back</td><td>L3 checks, named targets</td><td>hours</td></tr>
+<tr><td>docker (50)</td><td>restart counts, health status, logs</td><td>health-verdict history, escalation</td><td>hours</td></tr>
+<tr><td>scheduler lanes (68)</td><td>tick outcomes via API (already structured)</td><td>destination coverage on lane artifacts</td><td>hours</td></tr>
+</table>
 <h2>User stories</h2>
-<p><strong>US-1 (the registrar):</strong> As the fleet operator, I declare jobs once: <code>relay add chat-archive --cron &#x27;*/15&#x27; --run ~/.hermes/scripts/archive.sh --deliver tg:set-1 --expect &#x27;rows&gt;=500/24h&#x27;</code> — schedule, command, destination, and <strong>destination expectation</strong> in one place, replacing scattered crontab lines.</p>
-<p><strong>US-2 (the coverage prover):</strong> As the agent asked &quot;is the archive healthy?&quot;, I run <code>relay status chat-archive</code> and get: last runs, exit codes, <strong>and destination receipts</strong> — did the expected artifact/rows/topic-post actually appear — because the runner wraps execution with a lightweight verifier (file mtime, row count, Telegram API read-back).</p>
-<p><strong>US-3 (the failure escalator):</strong> As Bane, when a job fails twice or its destination check fails once, I get one Telegram ping in the job&#x27;s declared escalation thread — not a log line, not silence. After three consecutive failures the job auto-pauses (with a HIGH marker) rather than spinning hot — the fleet&#x27;s spawn-hot-loop lesson, applied to cron.</p>
-<p><strong>US-4 (the auditor):</strong> As the reviewer of the whole fleet&#x27;s automation, <code>relay audit</code> prints the full matrix: every job, schedule, last-verified destination coverage, expectation pass rate — the answer to &quot;what runs on this box and what would break if it stopped&quot; in one table, which today requires reading three crontabs and four systemd unit dirs.</p>
-<h2>What it manages</h2>
 <ul>
-<li><strong>Schedule layer:</strong> wraps cron/systemd-timer semantics (generates its own timer units or wraps existing crontab entries) — one grammar for humans and agents.</li>
-<li><strong>Execution wrapper:</strong> runs the command, captures exit + duration + output-path/rows; <strong>destination verification</strong> as a first-class step (postconditions per delivery kind: file exists+fresh, DB rows delta, Telegram message read-back).</li>
-<li><strong>Delivery layer:</strong> named targets (<code>tg:thread</code>, <code>local:path</code>, <code>digest:family</code>, <code>lore:absorb</code>) — indirection so policy changes are one edit; B4&#x27;s digest becomes just another destination.</li>
-<li><strong>Escalation layer:</strong> failure→notify rules, auto-pause thresholds, quiet windows (fleet night hours), dedup (GAP-061 throttle discipline).</li>
+<li><strong>US-1 (the 08-29 replay):</strong> the archive pipeline exits 0 while the destination stops receiving rows; L3 catches it within one cycle instead of days.</li>
+<li><strong>US-2 (silence):</strong> a cron job that quietly stopped firing 3 days ago surfaces in digest — today nothing would ever report it.</li>
+<li><strong>US-3 (un-declared catch):</strong> a job that normally writes 4 MB starts writing nothing while still exiting 0 → baseline deviation flags it, with zero declarations from anyone.</li>
+<li><strong>US-4 (the skeptic):</strong> an operator unwraps a job they don&#x27;t trust relay with; the original line returns byte-identical, proven by diff.</li>
+<li><strong>US-5 (SPOF test):</strong> relay&#x27;s recorder is killed; wrapped jobs keep running and keep their exit codes — fail-open verified, not asserted.</li>
+<li><strong>US-6 (policy change):</strong> &quot;all ops notifications move to the ops thread&quot; is one edit to a named target, not 20 crontab edits.</li>
+<li><strong>US-7 (agent):</strong> a foreman asks <code>relay status &lt;job&gt;</code> before declaring a pipeline fixed, and gets last-run + destination receipt.</li>
+<li><strong>US-8 (inventory):</strong> <code>relay audit</code> reconciles every native surface against the registry and names what is NOT covered — coverage as a number, not a feeling.</li>
 </ul>
-<p><strong>Design rules:</strong></p>
-<ul>
-<li><strong>Destination truth, always:</strong> a green exit with a failed destination check is a FAILURE. The registry&#x27;s core invariant is the 08-29 law, enforced mechanically.</li>
-<li><strong>Transparent under the hood:</strong> it wraps existing cron/timers rather than replacing them; unwrapping is clean — no lock-in of the actual schedules.</li>
-<li><strong>Expectations are declarative and cheap:</strong> <code>--expect</code> starts with three verbs (exists/fresh/rows); more only as fleets ask.</li>
-<li><strong>Self-monitoring:</strong> relay&#x27;s own daemon reports into <code>relay status</code> (a monitor that can&#x27;t see itself is a liability — the sentinel doctrine applied inward).</li>
-</ul>
-<h2>Interface</h2>
-<pre><code>
-relay add &lt;name&gt; --cron|--timer &lt;spec&gt; --run &lt;cmd&gt; [--deliver &lt;target&gt;...] [--expect &lt;postcondition&gt;]
-relay status [&lt;name&gt;] [--json]
-relay audit                          # the whole-fleet matrix
-relay run &lt;name&gt; [--dry-run]         # immediate run + verification
-relay pause|resume &lt;name&gt; [--reason &quot;...&quot;]
-</code></pre>
 <h2>Success criteria</h2>
 <ol>
-<li><strong>Replay the 08-29 hole:</strong> with relay&#x27;s destination check on the archive pipeline, the gap alarms within one cycle of first missed destination coverage — instead of days.</li>
-<li>Consolidation proof: every scheduled job on this box (≥10 across crontab + timers) is registered within a week; <code>relay audit</code> reconciles 1:1 with the raw crontab/timer inventory (nothing running outside the registry).</li>
-<li>Escalation fidelity: injected failures on 3 jobs → exactly 3 Telegram escalations, deduped, with auto-pause after the configured threshold; zero noise after fix.</li>
-<li>Agent ergonomics: &quot;what runs here and is it healthy&quot; is answerable in one call by a fresh agent — verifiably false today.</li>
+<li><strong>08-29 replay:</strong> destination-gap alarm fires within one cycle of the first missed delivery; green-exit-with-missing-artifact classified as FAILURE.</li>
+<li><strong>Coverage:</strong> <code>relay audit</code> inventories all 7 surfaces on this box and reports a truthful coverage % (unmonitored items named).</li>
+<li><strong>Reversibility:</strong> wrap→unwrap round-trip is byte-identical (automated test), and no schedule is ever owned by relay.</li>
+<li><strong>No SPOF:</strong> with the recorder stopped, wrapped jobs still execute with correct exit codes (verified test).</li>
+<li><strong>Baseline catch:</strong> ≥1 real deviation caught on a job with <strong>no</strong> declared postconditions within the first month.</li>
+<li><strong>Precision:</strong> ≥95% alarm precision after a tuning week; noisy rules demoted, not tolerated.</li>
 </ol>
-<h2>Why get-h3 / why open</h2>
-<p>Every serious agent fleet grows ad-hoc automation until the automation itself needs a fleet. Cron has no destination semantics; timers have no escalation grammar; agent frameworks have schedulers with no delivery truth. The <strong>postcondition-verified job</strong> is the missing primitive — and it&#x27;s pure fleet scar tissue, distilled.</p>
-<h2>Risks</h2>
-<ul>
-<li>Wrapper drift (jobs edited outside relay) → <code>relay audit</code> reconciles against the live crontab/timer inventory and flags unregistered movers loudly (registry completeness is itself a verified expectation).</li>
-<li>Escalation noise → dedup windows + quiet hours + auto-pause-with-marker; the GAP-061 lesson is a design constraint, not a hope.</li>
-<li>Postcondition complexity creep → three verbs ship; anything fancier is a script the job author supplies, not relay grammar.</li>
-</ul>
-<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+<h2>Cost &amp; shape</h2>
+<p>Effort <strong>M (~2-3 weeks)</strong>: adapters (7, reading native state — the biggest chunk), shim + wrap/unwrap with byte-identical restore, baseline learner, target registry, escalation/dedup engine, rollup + CLI. Ships as <code>h3ops relay</code>, per-box; no daemon required for OBSERVE, tiny shim for WRAP.</p>
+<p><strong>Sequencing:</strong> nothing runs until LOGSEY-001 (repo/chain). Adopting hermes cron&#x27;s existing DBs is a v1 must (it&#x27;s the richest source and the cheapest win). Relay&#x27;s shim is what sentinel&#x27;s restart gate calls, so build them adjacent.</p>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · generated from markdown 2026-09-17</p>
 </body></html>
