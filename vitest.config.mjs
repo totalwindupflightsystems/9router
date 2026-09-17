@@ -12,6 +12,6 @@
 // itself fails before this message can load.
 throw new Error(
   "9Router's test suite lives in tests/ with its own vitest config. " +
-    "Run `npm test` from the repo root (or `cd tests && npx vitest run`) — " +
+    "Run `npm test` from the repo root (or `cd tests && ./node_modules/.bin/vitest run`) — "
     "a root-cwd run breaks @/ alias resolution and reports hundreds of false failures."
 );
