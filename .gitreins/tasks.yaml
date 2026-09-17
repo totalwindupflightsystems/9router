@@ -743,3 +743,14 @@ tasks:
   status: complete
   created_at: '2026-09-16T23:48:43.192265+00:00'
   completed_at: '2026-09-17T00:01:11.746338+00:00'
+- id: DF-9ROUTER-26
+  title: Usage tracking records nothing when the upstream omits token counts
+  criteria:
+  - 'A successful completion (streaming or not) whose upstream body carries no usage
+    is still recorded: usageHistory row + usageDaily aggregate + lifetime counter;
+    native Ollama prompt_eval_count/eval_count are extracted; tokens are estimated
+    and marked when the upstream is silent; a completion with no content and no usage
+    still persists nothing; focused vitest suites and eslint are green'
+  status: complete
+  created_at: '2026-09-17T10:35:56.403452+00:00'
+  completed_at: '2026-09-17T10:49:39.030342+00:00'
