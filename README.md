@@ -801,6 +801,12 @@ Seamless translation between formats:
 - Cost estimation and spending trends
 - Monthly reports and insights
 - Optimize your AI spending
+- Counts come from the provider's own usage metadata; when a provider reports
+  none and the response carried content, the tokens are **estimated** from the
+  request and response text and the row is stored marked `estimated` (shown as
+  `(estimated)` on the `📊 DONE` line) — so an upstream that omits counts no
+  longer leaves the Usage page at zero. A response with neither counts nor
+  content is not recorded.
 
 > **💡 IMPORTANT - Understanding Dashboard Costs:**
 >

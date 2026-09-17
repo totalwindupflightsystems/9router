@@ -1,6 +1,6 @@
 import { saveRequestUsage, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { COLORS } from "../../utils/stream.js";
-import { canonicalizeUsage } from "../../utils/usageTracking.js";
+import { canonicalizeUsage, estimateUsage } from "../../utils/usageTracking.js";
 
 const OPTIONAL_PARAMS = [
   "temperature", "top_p", "top_k",
@@ -61,7 +61,73 @@ export function extractUsageFromResponse(responseBody) {
     };
   }
 
+  // Ollama native. A non-streaming /api/chat answer carries no `usage` object at
+  // all — its counts ride on the TOP LEVEL (`done:true`, `prompt_eval_count`,
+  // `eval_count`) next to `message`; /api/generate answers `response` instead of
+  // `message` but with the same top-level counts. Guarded exactly like the
+  // streaming extractor (extractUsage() in utils/usageTracking.js): done === true
+  // AND a numeric count. Without this branch the request recorded nothing at all
+  // and /api/usage/stats stayed at zero for a successful completion
+  // (DF-9ROUTER-26).
+  if (responseBody.done === true && typeof responseBody.prompt_eval_count === "number") {
+    const promptTokens = responseBody.prompt_eval_count || 0;
+    const completionTokens = typeof responseBody.eval_count === "number" ? responseBody.eval_count : 0;
+    return {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens
+    };
+  }
+
   return null;
+}
+
+/**
+ * Character count of the assistant text carried by an upstream body — the input
+ * the token estimator needs for the "upstream stayed silent" case. Covers the
+ * same provider shapes `extractUsageFromResponse()` knows: Ollama native
+ * (`message.content` for /api/chat, `response` for /api/generate), OpenAI chat
+ * (`choices[].message.content`), Claude (`content[].text`) and Gemini
+ * (`candidates[].content.parts[].text`, including the `{response:{…}}` wrapper).
+ *
+ * Deliberately approximate: the value only feeds `estimateUsage()`, and anything
+ * derived from it is stored marked `estimated: true`.
+ */
+export function responseContentLength(responseBody) {
+  if (!responseBody || typeof responseBody !== "object") return 0;
+  const text = (v) => (typeof v === "string" ? v.length : 0);
+
+  let total = 0;
+  total += text(responseBody.message?.content);
+  total += text(responseBody.response);
+  total += text(responseBody.choices?.[0]?.message?.content);
+  for (const block of Array.isArray(responseBody.content) ? responseBody.content : []) {
+    if (block?.type === "text") total += text(block.text);
+  }
+  const candidates = responseBody.candidates || responseBody.response?.candidates;
+  for (const part of candidates?.[0]?.content?.parts || []) {
+    total += text(part?.text);
+  }
+  return total;
+}
+
+/**
+ * The usage a completion should be RECORDED with:
+ *   - the upstream's own counts when it reported any (always preferred),
+ *   - an ESTIMATE when the upstream stayed silent but the completion produced
+ *     content (`estimateUsage()` marks it `estimated: true` so nothing reads it
+ *     as provider-reported),
+ *   - null when there is neither — an empty response must never invent traffic.
+ *
+ * One implementation of that decision, shared by the caller that logs it and the
+ * one that stores it, so the "📊 DONE" line and the DB row can never disagree.
+ */
+export function resolveUsage({ tokens, body, contentLength }) {
+  const inTokens = tokens?.input_tokens ?? tokens?.prompt_tokens ?? 0;
+  const outTokens = tokens?.output_tokens ?? tokens?.completion_tokens ?? 0;
+  if (inTokens !== 0 || outTokens !== 0) return tokens;
+  if (!(contentLength > 0) || !body) return tokens || null;
+  return estimateUsage(body, contentLength);
 }
 
 export function buildRequestDetail(base, overrides = {}) {
@@ -97,29 +163,44 @@ export function formatDoneLine({ usage, latency }) {
     inStr += ` (CACHE ${parts.join(" ")})`;
   }
   const ttftStr = latency?.ttft ? ` · TTFT ${latency.ttft}ms` : "";
-  return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}`;
+  // An upstream that reported no counts leaves us with an estimate: say so, so a
+  // reader never takes a guessed number for a provider-reported one.
+  const estStr = u.estimated ? " · (estimated)" : "";
+  return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}${estStr}`;
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, label = "USAGE", silent = false }) {
-  if (!tokens || typeof tokens !== "object") return;
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, label = "USAGE", silent = false, body = null, contentLength = 0 }) {
+  // An upstream that reports no token counts (native Ollama, some
+  // OpenAI-compatible shims) costs us the whole record if we stop at "no
+  // tokens": fall back to an estimate when the completion produced content.
+  // resolveUsage() is a no-op for the empty-response case, so the guards below
+  // still drop a request that produced neither counts nor content.
+  const effective = (body && contentLength > 0) ? resolveUsage({ tokens, body, contentLength }) : tokens;
 
-  const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
-  const outTokens = tokens.output_tokens ?? tokens.completion_tokens ?? 0;
+  if (!effective || typeof effective !== "object") return;
+
+  const inTokens = effective.input_tokens ?? effective.prompt_tokens ?? 0;
+  const outTokens = effective.output_tokens ?? effective.completion_tokens ?? 0;
 
   if (inTokens === 0 && outTokens === 0) return;
 
   if (!silent) {
     const time = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const accountSuffix = connectionId ? ` | account=${connectionId.slice(0, 8)}...` : "";
-    console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${accountSuffix}${COLORS.reset}`);
+    const estSuffix = effective.estimated ? " (estimated)" : "";
+    console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${estSuffix}${accountSuffix}${COLORS.reset}`);
   }
 
   // Canonicalize to one storage convention (prompt_tokens cache-inclusive) so
   // cached/cache-creation tokens survive to cost calc + stats. See canonicalizeUsage.
-  const normalized = canonicalizeUsage(tokens) || {
-    prompt_tokens: tokens.prompt_tokens ?? tokens.input_tokens ?? 0,
-    completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0
+  const normalized = canonicalizeUsage(effective) || {
+    prompt_tokens: effective.prompt_tokens ?? effective.input_tokens ?? 0,
+    completion_tokens: effective.completion_tokens ?? effective.output_tokens ?? 0
   };
+
+  // canonicalizeUsage re-shapes into the storage convention and drops the flag;
+  // an estimated record must stay labelled as one in the DB.
+  if (effective.estimated) normalized.estimated = true;
 
   saveRequestUsage({
     provider: provider || "unknown",

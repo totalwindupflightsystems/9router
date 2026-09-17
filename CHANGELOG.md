@@ -95,6 +95,29 @@
   `tests/unit/api-reference-auth-claims.test.js` (DF-9ROUTER-9/14/19).
 
 ## Fixes
+- **Usage tracking**: a successful completion whose upstream omits token counts
+  was recorded nowhere (DF-9ROUTER-26). Non-streaming
+  `extractUsageFromResponse()` understood Claude/Responses, OpenAI and Gemini
+  bodies but not a NATIVE OLLAMA answer — `/api/chat` carries its counts on the
+  top level (`done:true`, `prompt_eval_count`, `eval_count`) with no `usage`
+  object, and `/api/generate` answers `response` with the same top-level counts —
+  so it returned null and `saveUsageStats()` stopped at its "no tokens" guard:
+  no `usageHistory` row, no `usageDaily` aggregate, no
+  `totalRequestsLifetime` bump, `/api/usage/stats` and the dashboard Usage page
+  at zero while the server logged `📊 DONE … IN 0 · OUT 0`. The same class of
+  hole sat in the streaming translate branch, which accumulated output length
+  for Claude (`delta.text`), OpenAI (`choices[].delta.content`) and Gemini
+  (`candidates[].parts`) chunks only — an Ollama-native NDJSON chunk
+  (`message.content` / `response`) counted 0 characters, so the existing
+  `estimateUsage()` fallback never fired and an upstream that omits counts ended
+  the stream on 0/0 and was dropped too. Both paths now fall back to an estimate
+  when the upstream reports no counts and the completion produced content,
+  stored marked `estimated: true` (and shown as `(estimated)` on the
+  `📊 DONE` line); provider-reported counts always win over the estimate, and a
+  response with neither counts nor content is still not recorded, so the
+  fallback cannot invent traffic. The new Ollama branch is guarded exactly like
+  the streaming extractor (`done === true` plus a numeric count). Pinned by
+  `tests/unit/usage-tracking-silent-upstream.test.js`.
 - **Streaming (Ollama)**: a native Ollama upstream's NDJSON stream is no longer
   blocked as a non-SSE response (DF-9ROUTER-24). `ollama-local` posts to
   Ollama's native `/api/chat`, which answers a `stream:true` request with

@@ -330,6 +330,21 @@ export function createSSEStream(options = {}) {
           }
         }
 
+        // Ollama native NDJSON — /api/chat streams `message.content`, /api/generate
+        // streams `response`. The translator above pivots either shape into the
+        // client's format, but without counting it here totalContentLength stayed
+        // 0 and the estimate fallback in finalizeStream() never fired: an Ollama
+        // upstream that omits prompt_eval_count/eval_count ended the stream on
+        // 0/0 and the usage guard dropped the whole request (DF-9ROUTER-26).
+        if (typeof parsed.message?.content === "string" && parsed.message.content) {
+          totalContentLength += parsed.message.content.length;
+          accumulatedContent += parsed.message.content;
+        }
+        if (typeof parsed.response === "string" && parsed.response) {
+          totalContentLength += parsed.response.length;
+          accumulatedContent += parsed.response;
+        }
+
         // Extract usage
         const extracted = extractUsage(parsed);
         if (extracted) state.usage = mergeUsage(state.usage, extracted); // Keep original usage for logging

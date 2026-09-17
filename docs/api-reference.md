@@ -262,7 +262,16 @@ cooldowns and are reported to clients as `429`/`503`.
 | `GET/POST /api/keys` | List / create API keys |
 | `GET/POST /api/combos` | List / create combos (model routing rules) |
 | `GET /api/settings` | Runtime settings |
+| `GET /api/usage/stats` | Token/cost aggregates + recent requests for the Usage page |
 | `GET /api/federation/status` | Federation mode status (edge/central) |
+
+`GET /api/usage/stats` takes `?period=today`, `24h`, `7d` (default), `30d`, `60d`
+or `all`, and only reports requests that completed: token counts come from the provider's
+own usage metadata (Claude/Responses, OpenAI, Gemini, and native Ollama's
+top-level `prompt_eval_count`/`eval_count`). When a provider reports no counts at
+all and the response carried content, the tokens are estimated from the request
+body and the response text and the stored row is marked `"estimated": true`; a
+response with neither counts nor content is not recorded.
 
 Dashboard routes (`/api/*`) are deny-by-default and need the `auth_token` session
 cookie or the host CLI token — an API key does not authorize them. The LLM

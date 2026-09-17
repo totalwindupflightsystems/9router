@@ -7,7 +7,7 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 import { claudeMessageFromChatCompletion } from "./clientFormatResponse.js";
 import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
-import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine } from "./requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, resolveUsage, responseContentLength, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
@@ -303,9 +303,18 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   // Decloak tool_use names once on raw Claude body, before any translation (INPUT side)
   responseBody = decloakToolNames(responseBody, toolNameMap);
 
-  const usage = extractUsageFromResponse(responseBody);
+  const upstreamUsage = extractUsageFromResponse(responseBody);
+  const contentLength = responseContentLength(responseBody);
+  // The usage this request is logged and recorded with: the upstream's own
+  // counts when it reports them, otherwise an ESTIMATE (marked `estimated`) —
+  // a native Ollama non-streaming body carries its counts on the TOP LEVEL and
+  // has no `usage` object at all, so without the fallback a successful
+  // completion recorded nothing and the "📊 DONE" line read "IN 0 · OUT 0"
+  // (DF-9ROUTER-26). One resolution feeds the log line AND the DB row, so the
+  // two can never disagree.
+  const usage = resolveUsage({ tokens: upstreamUsage, body, contentLength });
   appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+  saveUsageStats({ provider, model, tokens: upstreamUsage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true, body, contentLength });
   if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)
