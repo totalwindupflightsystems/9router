@@ -704,3 +704,42 @@ tasks:
   status: complete
   created_at: '2026-09-16T05:40:26.681967+00:00'
   completed_at: '2026-09-16T05:55:29.446425+00:00'
+- id: DF-9ROUTER-9
+  title: Align API authentication documentation with runtime behavior
+  criteria:
+  - docs/api-reference.md and the README REQUIRE_API_KEY row state the real auth model
+    (dashboard /api/* deny-by-default with JWT login cookie; /v1 key required only
+    for remote clients when effective requireApiKey is true; loopback trusted; REQUIRE_API_KEY=false
+    allows keyless remote /v1); the documented POST /api/keys example is executable
+    as written (login + cookie jar -> 201, unauthenticated -> 401); a new tests/unit
+    suite pins each documented claim against dashboardGuard path classes and settingsRepo
+    defaults and is RED against the pre-fix docs; full suite verify-no-regression
+    passes; git show --stat touches docs/README/CHANGELOG/tests only with zero src/
+    or open-sse/ changes
+  status: complete
+  created_at: '2026-09-16T06:40:03.532866+00:00'
+  completed_at: '2026-09-16T07:07:51.041438+00:00'
+- id: DF-9ROUTER-24
+  title: NDJSON upstream streams must reach SSE clients (ollama-local ndjson blocked
+    by the non-SSE gate)
+  criteria:
+  - A streaming request whose upstream answers application/x-ndjson is translated
+    to client-format SSE with content and a terminal, while an HTML/text upstream
+    error stays blocked; new unit test RED-proves the gate fix; full suite no-regression;
+    eslint clean on touched files
+  status: complete
+  created_at: '2026-09-16T14:39:58.755216+00:00'
+  completed_at: '2026-09-16T14:56:25.784971+00:00'
+- id: DF-9ROUTER-25
+  title: Anthropic clients must receive an Anthropic body from /v1/messages (non-streaming)
+    for every upstream format
+  criteria:
+  - A non-streaming POST /v1/messages (sourceFormat claude) whose upstream answers
+    in Ollama or Gemini/Antigravity/Vertex shape returns an Anthropic message object
+    (type=message, content[] blocks, usage.input_tokens/output_tokens), never object=chat.completion/choices[];
+    OpenAI-format clients keep receiving chat.completion unchanged; a new unit test
+    proves the defect RED against the pre-fix code and GREEN after; full suite verify-no-regression
+    PASS; eslint clean on touched files
+  status: complete
+  created_at: '2026-09-16T23:48:43.192265+00:00'
+  completed_at: '2026-09-17T00:01:11.746338+00:00'
