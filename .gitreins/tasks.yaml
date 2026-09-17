@@ -754,3 +754,38 @@ tasks:
   status: complete
   created_at: '2026-09-17T10:35:56.403452+00:00'
   completed_at: '2026-09-17T10:49:39.030342+00:00'
+- id: DF-9ROUTER-27
+  title: FEDERATION.md commands must reproduce and the example compose must coexist
+    with an existing 9router
+  criteria:
+  - docker compose -f docker-compose.federation.yml config with no override env renders
+    the same topology as today (container_name 9router-central/9router-edge-a/9router-edge-b,
+    host ports 20128/20129/20130), and with the newly documented override env vars
+    it renders the overridden container names + host ports, so the documented stack
+    is runnable on a host already serving 9router on 20128
+  - docs/FEDERATION.md verify steps include the API-key prerequisite and an exact
+    authenticated curl, so a reader following the doc no longer gets 401 API key required
+    for remote API access from src/dashboardGuard.js on the degraded /v1/models check;
+    no doc command addresses a hostname that cannot resolve (edge:20128 vs edge-a:20128
+    vs localhost:<published port>)
+  - docs/FEDERATION.md documents the override usage and a wrong-server 401 diagnosis
+    (a federation status curl that 401s with your own token means you are not talking
+    to the compose central); no src/, open-sse/ or cli/ source file is modified; full-suite
+    verify-no-regression PASS and eslint clean
+  status: complete
+  created_at: '2026-09-17T12:24:38.747151+00:00'
+  completed_at: '2026-09-17T12:41:10.962440+00:00'
+- id: DF-9ROUTER-28
+  title: CLI launcher must honor the PORT env var instead of hardcoding 20128
+  criteria:
+  - PORT=<valid> node cli/cli.js starts the server on that port and passes it to the
+    child; --port/--p wins over PORT; an invalid PORT falls back to 20128 with a warning;
+    --help documents the PORT env var
+  - A vitest unit+spawn test proves all four behaviors against the real cli/cli.js
+  - README/cli docs state the precedence and the collision remedy, plus the dev:webpack
+    escape hatch and the credential-free headless recipe
+  - Full suite verify-no-regression PASS with no new known-fail beyond the catalogued
+    baseline
+  status: complete
+  created_at: '2026-09-17T13:40:04.003687+00:00'
+  completed_at: '2026-09-17T14:03:35.969915+00:00'
