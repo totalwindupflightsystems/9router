@@ -126,6 +126,20 @@ required by `NSStatusItem`; use the tray **Quit** action there as well.
 9router --help             # Show all options
 ```
 
+**Port precedence** (highest first): `--port/-p` → `PORT` env var → `20128`.
+The launcher reads the process environment only (it does not load `.env`), so a
+host that already runs 9router on `20128` can be given a different port either way:
+
+```bash
+PORT=20129 9router --skip-update --no-browser   # env fallback
+9router --port 20129 --skip-update --no-browser # --port overrides PORT
+```
+
+An unusable `PORT` (empty, non-numeric, `0`, negative, `>65535`) is ignored with a
+one-line warning naming the value and the port actually used; an unusable `--port`
+argument falls back the same way. An occupied port is refused with an
+`EADDRINUSE` message that names both `--port <other port>` and `PORT=<other port>`.
+
 **Dashboard**: `http://localhost:20128/dashboard`
 
 ---

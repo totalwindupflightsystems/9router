@@ -6,14 +6,18 @@ const fs = require("fs");
 const https = require("https");
 const os = require("os");
 
-// Startup readiness/failure detection (DF-9ROUTER-18) lives in
-// ./src/cli/utils/serverStartup so it is unit-testable: an occupied port is
-// refused BEFORE spawning, readiness requires the 9router identity probe (not
-// just an open socket), and an early child exit is a hard failure.
+// Startup readiness/failure detection (DF-9ROUTER-18) and port resolution
+// (DF-9ROUTER-28) live in ./src/cli/utils/serverStartup so they are
+// unit-testable: an occupied port is refused BEFORE spawning, readiness requires
+// the 9router identity probe (not just an open socket), an early child exit is a
+// hard failure, and the port comes from `--port/-p` → `PORT` → the default
+// (DEFAULT_PORT is imported — this file no longer holds the port literal).
 const {
+  DEFAULT_PORT,
   checkPortAvailable,
   describeOccupiedPort,
   describeStartupFailure,
+  resolvePort,
   waitForServerReady,
 } = require("./src/cli/utils/serverStartup");
 
@@ -83,7 +87,6 @@ try { ensureTrayRuntime({ silent: true }); } catch {}
 const APP_NAME = pkg.name; // Use from package.json
 const INSTALL_CMD_LATEST = `npm i -g ${APP_NAME}@latest --prefer-online`;
 
-const DEFAULT_PORT = 20128;
 const DEFAULT_HOST = "0.0.0.0";
 
 // First non-internal IPv4 — the address remote peers actually reach when bound to 0.0.0.0.
@@ -106,8 +109,10 @@ const PROCESS_IDENTIFIERS = [
   '9router'  // Only package name - avoid killing other apps
 ];
 
-// Parse arguments
-let port = DEFAULT_PORT;
+// Parse arguments. The port is only COLLECTED here — what it means (flag beats
+// env beats default, and what an unusable value does) is decided by
+// resolvePort() right below (DF-9ROUTER-28).
+let argPort = null;
 let host = DEFAULT_HOST;
 let noBrowser = false;
 let skipUpdate = false;
@@ -116,7 +121,7 @@ let trayMode = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" || args[i] === "-p") {
-    port = parseInt(args[i + 1], 10) || DEFAULT_PORT;
+    argPort = args[i + 1];
     i++;
   } else if (args[i] === "--host" || args[i] === "-H") {
     host = args[i + 1] || DEFAULT_HOST;
@@ -144,6 +149,10 @@ Options:
   -h, --help          Show this help message
   -v, --version       Show version
 
+Environment:
+  PORT                Port to run the server when --port/-p is not given
+                      (precedence: --port/-p → PORT → ${DEFAULT_PORT})
+
 Commands:
   xai video --prompt "..." --output video.mp4
                       Generate a Grok Imagine video via the running gateway
@@ -155,6 +164,15 @@ Commands:
     process.exit(0);
   }
 }
+
+// Resolve the port (DF-9ROUTER-28) — `--port/-p` → `PORT` → the default
+// (DEFAULT_PORT, imported from the same module). `port` is the single source of
+// truth from here on: it seeds the tray relaunch, the pre-flight probe, the
+// child's env, and every URL printed.
+// An unusable PORT is reported (never silently overridden); an unusable --port
+// falls through (its legacy behavior — never an error).
+const { port, warning: portWarning } = resolvePort({ argPort });
+if (portWarning) console.error(portWarning);
 
 // Auto-relaunch after update: detached process has no TTY → fallback to tray
 if (skipUpdate && !trayMode && !process.stdin.isTTY) {

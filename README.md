@@ -144,6 +144,13 @@ npm ci   # reproducible install from the tracked package-lock.json (`npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
+> ⚠️ In a copied or relocated tree `npm run dev` can fail before the server
+> starts, with Turbopack complaining `Symlink [project]/node_modules/... points
+> out of the filesystem root`. `package.json` already carries the escape hatch:
+> `npm run dev:webpack` runs the same dev server on webpack instead of Turbopack
+> and is unaffected —
+> `PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev:webpack`.
+
 No `DATA_DIR` override is needed: `.env.example` leaves `DATA_DIR` unset, so the
 app stores everything under the per-user default `~/.9router` (SQLite at
 `~/.9router/db/data.sqlite`; Windows: `%APPDATA%\9router`) — a directory your own
@@ -169,6 +176,25 @@ node cli/cli.js --skip-update --no-browser
 (If your own `.env` sets a `DATA_DIR` the current user cannot write, the pack step
 fails fast with the DATA_DIR error — point it at a writable path, or unset it, and
 re-run.)
+
+**Port precedence.** The launcher reads the port from, in order: the explicit
+`--port/-p` flag, then the `PORT` env var, then the default `20128`. The launcher
+does not read `.env` — only the process environment. On a host that already runs
+9router on the default port, the quick-start command above therefore needs a port
+override, and both spellings work (the launcher refuses an occupied port with an
+`EADDRINUSE` message and a non-zero exit rather than starting a doomed child):
+
+```bash
+PORT=20129 node cli/cli.js --skip-update --no-browser   # env fallback
+node cli/cli.js --skip-update --no-browser -p 20129     # --port overrides PORT
+```
+
+A `PORT` that is not a usable port number (empty, non-numeric, `0`, negative,
+`>65535`) is ignored with a one-line warning naming the value and the port actually
+used, instead of crashing or silently serving somewhere else; an unusable `--port`
+argument falls back the same way (unchanged legacy behavior). The occupied-port
+refusal names both remedies, and `node cli/cli.js --help` documents `PORT` under
+`Environment:`.
 
 The pack command writes `9router-<version>.tgz` at the repository root; it is a
 package artifact, not the source launcher to execute. The launcher entrypoint is
@@ -218,6 +244,66 @@ Default URLs:
 
 - Dashboard: `http://localhost:20128/dashboard`
 - OpenAI-compatible API: `http://localhost:20128/v1`
+
+### Credential-free headless bring-up (no dashboard)
+
+Every `POST /api/providers` needs a credential — except for `ollama-local`.
+Verified in source AND live against a fresh instance (2026-09-17):
+
+- `src/app/api/providers/route.js:119` — `if (!apiKey && provider !== "ollama-local")`
+  → `400 {"error":"API Key is required"}`. `ollama-local` is the single create-path
+  exemption. Live control: keyless `openai` → `HTTP 400 {"error":"API Key is
+  required"}`; keyless `ollama-local` → `HTTP 201` with the connection object.
+- `src/app/api/providers/validate/route.js:91-92` is slightly wider — it also
+  exempts providers whose registry entry declares `noAuth: true`
+  (`const isNoAuth = AI_PROVIDERS[provider]?.noAuth === true;`). That exemption is
+  on VALIDATION only, and it is not a key-free registration path.
+- Both routes sit behind the deny-by-default `/api/*` policy
+  (`src/dashboardGuard.js` `PROTECTED_API_PATHS`), so they need a session cookie or
+  the on-host `x-9r-cli-token` header. Without one, both answer
+  `401 {"error":"Unauthorized"}` (confirmed live). The dashboard UI is never needed.
+- Passwords: with `INITIAL_PASSWORD` unset and no stored password, the built-in
+  default is `123456` for a loopback session. `.env.example` ships
+  `INITIAL_PASSWORD=change-me`, which replaces that default — posting `123456` then
+  answers `401 {"error":"INITIAL_PASSWORD is set — the default password (123456) is
+  disabled."}` (`src/app/api/auth/login/route.js:99-106`). Send your
+  `INITIAL_PASSWORD` value instead.
+- Start the server the way the launcher / `npm start` does (through
+  `custom-server.js`): the loopback-locality that login relies on comes from the
+  per-process peer token `custom-server.js` stamps
+  (`src/lib/auth/trustedPeer.js:5-6`). A bare `node .next/standalone/server.js`
+  never stamps it, so every request — loopback included — looks remote, and the
+  default-password login is refused with `403 {"success":false,"error":"Default
+  password must be changed before remote access…","mustChangePassword":true}`
+  (observed live).
+
+```bash
+# 1. Start the server on a free port (see the port precedence above)
+PORT=20129 node cli/cli.js --skip-update --no-browser -t &
+#    from a built tree: PORT=20129 HOSTNAME=0.0.0.0 npm start   (= custom-server.js)
+
+# 2. Log in — the auth_token JWT cookie lands in cookies.txt
+curl -s -c cookies.txt -X POST http://localhost:20129/api/auth/login \
+  -H "Content-Type: application/json" -d '{"password":"123456"}'
+# → 200 {"success":true,"mustChangePassword":false}   (INITIAL_PASSWORD unset —
+#    send that value instead when .env sets it, e.g. "change-me")
+
+# 3. Register a local Ollama provider — the one provider that needs no credential
+curl -s -b cookies.txt -X POST http://localhost:20129/api/providers \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"ollama-local","name":"local-ollama"}'
+# → 201 {"connection":{"id":"…","provider":"ollama-local","name":"local-ollama",…}}
+
+# 4. Create the API key your CLI tools authenticate with
+curl -s -b cookies.txt -X POST http://localhost:20129/api/keys \
+  -H "Content-Type: application/json" -d '{"name":"my-tool"}'
+# → 201 {"key":"sk-…","name":"my-tool","id":"…","machineId":"…"}
+```
+
+`ollama-local` talks to `http://localhost:11434/api/chat` (the registry default), so
+Ollama itself must be running for those models to answer. Every other provider needs
+its own real credential in the same `POST /api/providers` call — no keyless
+registration path exists for them.
 
 ---
 
