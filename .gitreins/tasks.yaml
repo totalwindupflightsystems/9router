@@ -830,3 +830,16 @@ tasks:
   status: complete
   created_at: '2026-09-17T17:57:21.059185+00:00'
   completed_at: '2026-09-17T18:15:51.982819+00:00'
+- id: HYG-9ROUTER-3
+  title: Documented test commands must use the pinned tests-local vitest, not a bare
+    npx vitest
+  criteria:
+  - README.md:326, docs/FEDERATION.md:525 and tests/README.md:24 no longer instruct
+    a bare npx vitest; each documented test command resolves the tests-local pinned
+    runner (or npm test from the repo root) and states the cd tests && npm install
+    prerequisite; zero bare npx vitest citations remain in those three tracked docs;
+    the full-suite regression gate ./scripts/gitreins-guard-tests.sh exits 0 with
+    'No regression'; the commit touches docs only (no src/ or open-sse/ change).
+  status: complete
+  created_at: '2026-09-17T19:07:40.065092+00:00'
+  completed_at: '2026-09-17T19:17:25.852253+00:00'
