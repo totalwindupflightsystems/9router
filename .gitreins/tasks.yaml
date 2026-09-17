@@ -789,3 +789,15 @@ tasks:
   status: complete
   created_at: '2026-09-17T13:40:04.003687+00:00'
   completed_at: '2026-09-17T14:03:35.969915+00:00'
+- id: DF-9ROUTER-1
+  title: Refresh the stale committed regression snapshot so the documented gate passes
+  criteria:
+  - node tests/__baseline__/verify-no-regression.mjs tests/__baseline__/current.json
+    exits 0
+  - the refreshed snapshot has zero non-passed assertions for rtk.test.js, antigravity-mitm.test.js
+    and kiro-model-slots.test.js
+  - exactly one file tests/__baseline__/current.json is committed and the commit exists
+    on branch federation
+  status: complete
+  created_at: '2026-09-17T15:07:56.149998+00:00'
+  completed_at: '2026-09-17T15:14:44.477490+00:00'
