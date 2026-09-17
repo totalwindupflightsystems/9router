@@ -323,9 +323,14 @@ node tests/__baseline__/verify-no-regression.mjs <vitest-results.json>
 Run the suite with a JSON reporter to feed the regression gate:
 
 ```bash
-cd tests && npx vitest run --reporter=json --outputFile=/tmp/vitest-results.json && cd ..
+cd tests && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/vitest-results.json && cd ..
 node tests/__baseline__/verify-no-regression.mjs /tmp/vitest-results.json
 ```
+
+`tests/` is its own npm package, so `cd tests && npm install` is a one-time
+prerequisite before the first run — that is what puts the pinned vitest in
+`tests/node_modules` (the root `npm test` entry fails fast and names this when
+it is missing).
 
 **Judge regressions with `verify-no-regression.mjs`, never a raw run.** The gate
 fails only when a test that PASSED in the baseline now FAILS — new tests are

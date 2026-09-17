@@ -93,6 +93,11 @@
   spells out the `true`/`false`/**unset** semantics (unset falls back to the stored
   setting, default `true`). No runtime behavior changed. Pinned by
   `tests/unit/api-reference-auth-claims.test.js` (DF-9ROUTER-9/14/19).
+- **Tests**: the three documented commands that still used a bare `npx vitest`
+  (README, `docs/FEDERATION.md`, `tests/README.md`) now resolve the pinned
+  tests-local runner (`./node_modules/.bin/vitest`, `tests/package.json` pins
+  `vitest ^4.0.0`) and state the one-time `cd tests && npm install` prerequisite
+  next to it. Docs only — no runtime or test-source change (HYG-9ROUTER-3).
 
 ## Fixes
 - **Tests (root entry)**: `npm test` now runs the vitest pinned by the independent

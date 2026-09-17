@@ -522,9 +522,12 @@ Prints a PASS/FAIL summary; exit code reflects the result.
 The unit suite (from `tests/`) is gated by the regression baseline:
 
 ```bash
-cd tests && npx vitest run --reporter=json --outputFile=/tmp/results.json
+cd tests && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/results.json
 node tests/__baseline__/verify-no-regression.mjs /tmp/results.json
 ```
+
+`tests/` is its own npm package, so run `cd tests && npm install` once before the
+first run — that installs the pinned vitest into `tests/node_modules`.
 
 ---
 
