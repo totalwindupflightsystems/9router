@@ -15,7 +15,7 @@
     "start:bun": "bun ./.next/standalone/custom-server.js",
     "cli:pack": "npm --prefix cli run pack:cli",
     "cli:publish": "npm --prefix cli run publish:cli",
-    "test": "cd tests && npx vitest run",
+    "test": "node scripts/check-test-deps.mjs && cd tests && ./node_modules/.bin/vitest run",
     "test:e2e": "node tests/federation/e2e.mjs"
   },
   "dependencies": {

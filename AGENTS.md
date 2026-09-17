@@ -51,9 +51,11 @@ npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev    # dev (port 20128 default via package.json scripts; FEDERATION_MODE=edge NOT supported — FATAL exit, use production path)
 npm run build && PORT=20128 HOSTNAME=0.0.0.0 npm run start            # production
 npm run cli:pack                                                      # CLI launcher package (cli/)
-# Tests (independent ESM package in tests/):
-npm install && cd tests && npm install && cd ..
-npm test                                                              # from repo root (cds into tests/; vitest MUST run from tests/ — root cwd breaks @/ alias resolution)
+# Tests (independent ESM package in tests/ — its OWN dependency tree; pins vitest ^4.0.0):
+npm install                                                           # root deps (tests/ imports from src/, which needs open/undici/…)
+cd tests && npm install && cd ..                                      # REQUIRED once: installs the pinned vitest into tests/node_modules
+npm test                                                              # from repo root — deterministic entry: runs the tests-local vitest, never a bare `npx vitest`; when tests deps are missing it fails fast naming `cd tests && npm install`. It cds into tests/ because a root cwd breaks @/ alias resolution
+npm test -- unit/fresh-install-model-catalog-339.test.js              # single file — args are forwarded to vitest (path relative to tests/)
 node tests/__baseline__/verify-no-regression.mjs <vitest-json-results>  # regression gate (known-fails baseline)
 npx eslint .                                                          # lint
 ```

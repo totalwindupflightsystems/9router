@@ -95,6 +95,20 @@
   `tests/unit/api-reference-auth-claims.test.js` (DF-9ROUTER-9/14/19).
 
 ## Fixes
+- **Tests (root entry)**: `npm test` now runs the vitest pinned by the independent
+  `tests/` package instead of a bare `npx vitest`. The root `package.json`
+  declares no vitest, so a root-cwd `npx vitest` resolved whatever major the
+  registry/npx cache held — measured live at `e141a786` (2026-09-17):
+  `npx vitest --version` printed `vitest/5.0.1` while
+  `tests/node_modules/.bin/vitest --version` printed `vitest/4.1.10` — and on a
+  tree where the documented prerequisite (`cd tests && npm install`) had not been
+  run, the entry died with a misleading `CACError` (e.g. `Unknown option
+  --runInBand`) instead of naming the missing install. The root script is now
+  `node scripts/check-test-deps.mjs && cd tests && ./node_modules/.bin/vitest run`:
+  the new dependency-free preflight exits non-zero with an actionable message
+  naming `cd tests && npm install` when the tests dependency tree is absent, and
+  never downloads a runner. `npm test -- <path>` still forwards its argument to
+  vitest. No test sources changed; `tests/package.json` keeps `vitest ^4.0.0`.
 - **Providers (OpenCode Free)**: the credentialless opencode provider is no
   longer advertised as usable from this router (DF-9ROUTER-1). Live probe of the
   executor-shaped request (2026-09-17): `GET https://opencode.ai/zen/v1/models`

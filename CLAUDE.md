@@ -31,13 +31,19 @@ npm run cli:pack       # build + npm pack from root
 cd cli && npm run dev  # nodemon watch
 ```
 
-Tests (vitest, in `tests/` — an **independent** ESM package, wired into root `npm test` since FED-019):
+Tests (vitest, in `tests/` — an **independent** ESM package with its own dependency tree, driven from the root by `npm test` since FED-019):
 ```bash
 npm install                             # ROOT deps first — tests import from src/ which needs `open`, `undici`, etc.
-cd tests && npm install                 # then tests' own deps (vitest) → tests/node_modules (allowed by tests/.gitignore)
-npx vitest run                          # all tests; auto-discovers tests/vitest.config.js
-npx vitest run unit/capabilities.test.js   # single file (path relative to tests/)
+cd tests && npm install                 # then tests' own deps (vitest ^4.0.0) → tests/node_modules (allowed by tests/.gitignore)
+npm test                                # from the repo root — runs the tests-local vitest (scripts/check-test-deps.mjs preflights it)
+npm test -- unit/capabilities.test.js   # single file (path relative to tests/); args are forwarded to vitest
 ```
+> The root `test` script never uses a bare `npx vitest`: the root package declares
+> no vitest, so npx resolves an arbitrary major from the registry/npx cache
+> (measured: vitest/5.0.1 against the pinned 4.1.10) and the run dies with a
+> misleading `CACError`. When `tests/node_modules` is missing, `npm test` exits
+> non-zero with a message naming `cd tests && npm install` and downloads nothing.
+
 > **The suite is NOT expected to be all-green on a plain checkout.** Baseline (re-verified 2026-08-22): ~1988 pass, ~84 fail, ~59 skip (2131 total). Judge regressions with `tests/__baseline__/verify-no-regression.mjs`, not a raw run. Expected red:
 > - 89 catalogued in `tests/__baseline__/known-fails.txt` (rtk, oauth-cursor-auto-import, translator-request-normalization, …).
 > - `unit/embeddings.cloud.test.js` imports `cloud/src/handlers/embeddings.js` — the `cloud/` worker dir is **not in this repo**, so it always fails here.
