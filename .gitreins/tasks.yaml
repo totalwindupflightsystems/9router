@@ -814,3 +814,19 @@ tasks:
   status: complete
   created_at: '2026-09-17T16:38:42.314768+00:00'
   completed_at: '2026-09-17T16:47:03.711208+00:00'
+- id: QA-9ROUTER-9-PINTEST
+  title: Pin the root test entry to the tests-local vitest and fail fast when tests
+    deps are missing
+  criteria:
+  - Root package.json test script no longer relies on unpinned npx vitest resolution
+    and invokes the tests-local vitest binary
+  - With tests dependencies installed, npm test -- unit/fresh-install-model-catalog-339.test.js
+    runs under vitest 4.x and passes
+  - With tests/node_modules absent, npm test exits non-zero with an actionable message
+    naming 'cd tests && npm install' and performs no npx download
+  - Only intentional files change (package.json entry, a minimal preflight script
+    or guard, AGENTS.md and CHANGELOG); tests/package.json vitest pin unchanged; no
+    test sources modified
+  status: complete
+  created_at: '2026-09-17T17:57:21.059185+00:00'
+  completed_at: '2026-09-17T18:15:51.982819+00:00'
