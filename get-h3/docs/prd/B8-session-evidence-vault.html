@@ -1,74 +1,130 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>h3 agent-ops: Session Evidence Vault</title>
+<title>B8 Session Evidence Vault</title>
 <style>
 :root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
 font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
 h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
 h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
-h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+h3{font-size:1.05rem;color:#fff;margin:1.2rem 0 .3rem}
+h4{font-size:1rem;color:#cfe3ff;margin:1rem 0 .2rem}
 p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
 padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
 pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
 pre code{border:none;background:none;padding:0;color:#c9e2a8}
 ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
 hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
-strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+strong{color:#fff} a{color:#5eb0ef} .tag{color:var(--mut);font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:.6rem 0}
+th,td{text-align:left;padding:.45rem;border-bottom:1px solid #2a3140;vertical-align:top}
+th{color:#8b93a1;font-weight:600}
 </style></head><body>
-<h1>PRD: <code>h3-evidence</code> — Session Evidence Vault &amp; Agent Scoreboard</h1>
-<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B8 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
-<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M–L (~3 weeks) · <strong>Depends on:</strong> B1 (logsey) for session-log mining · <strong>Feeds:</strong> B3 lore (absorb source), B4 digest (scoreboard section)</p>
+<h1>PRD (deep): <code>h3-evidence</code> — Session Evidence Vault &amp; the Improvement Loop</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B8 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed (v2 — value-extraction focus, per Bane&#x27;s question) · <strong>Effort:</strong> M–L (~3 weeks) · <strong>Relates to:</strong> rabbit-hole (sibling project — see §5)</p>
 <hr>
-<h2>The one-liner</h2>
-<p>A per-session, per-agent evidence store that captures <strong>what each agent actually did</strong> — tool calls, outputs produced, artifacts landed, claims vs receipts — and turns it into the scoreboard every fleet needs but nobody builds: <strong>which agents, models, and lanes actually ship verified work.</strong></p>
-<h2>The problem, measured</h2>
-<p><strong>Case file 1 — the outcome lie (quorum finding, 09-16):</strong> the scheduler&#x27;s tick records stamped <code>outcome=&#x27;committed&#x27;</code> on <strong>1,701 zero-output ticks per week</strong> — agents that claimed completion with nothing on disk to show. The fleet had no mechanical way to separate &quot;says done&quot; from &quot;evidences done.&quot; The quorum only caught it because someone hand-joined two data stores.</p>
-<p><strong>Case file 2 — the verification gap in workers:</strong> the fleet&#x27;s own ops doctrine records worker sessions that produced identical tool calls in a loop (288 identical calls observed in <code>state.db</code>), or committed test-file-only changes against fix-claims. Each was caught by hand, after the fact, by a human reading raw logs.</p>
-<p><strong>Case file 3 — the model-value question:</strong> &quot;is lane X actually better than lane Y for foreman work?&quot; is unanswerable today — session costs live in one store, outcomes in another, tool-call quality nowhere. The value quorum needed a week of hand-built joins to say &quot;valuable but reckless.&quot; Fleets without a quorum culture just… keep paying.</p>
-<p>The raw material already exists — every session&#x27;s tool calls and outputs flow through the harness. What&#x27;s missing is the <strong>evidence-shaped capture</strong> and the joins.</p>
-<h2>User stories</h2>
-<p><strong>US-1 (the evidence hook):</strong> As a harness developer, I register an evidence sink (<code>evidence attach --harness hermes --stream tool-calls</code>) and every session gets a structured vault record: calls made, outputs&#x27; hashes, files written, commits landed, tests run — append-only, tamper-evident, redacted at write time.</p>
-<p><strong>US-2 (the scoreboard reader):</strong> As Bane deciding where to spend, I run <code>evidence score --window 30d --by model</code> and see per-model/per-lane: verified-ship rate (commits whose claims match artifacts), evidence-coverage (sessions with complete receipts), claim-vs-receipt delta, cost per <em>verified</em> outcome — the quorum report as a standing query.</p>
-<p><strong>US-3 (the loop-catcher):</strong> As the fleet&#x27;s quality gate, <code>evidence watch --rule &#x27;identical_calls &gt; 50&#x27;</code> or <code>&#x27;claimed_files_absent&#x27;</code> flags degenerate sessions <em>while they run</em> — the 288-identical-calls spin becomes a 10-minute-old alert, not a post-mortem finding.</p>
-<p><strong>US-4 (the audit reply):</strong> As the operator asked &quot;prove lane X earned its cost this month,&quot; <code>evidence report --lane xkiro --window 30d</code> emits the evidence-linked answer: sessions, verified landings, cost per verified outcome, failure classes — one artifact, every number drillable (grain doctrine).</p>
-<h2>What it captures (per session)</h2>
-<p>| Layer | Content |</p>
-<p>|---|---|</p>
-<p>| identity | session id, agent/foreman, model, provider lane, harness |</p>
-<p>| calls | tool name, args hash (args redacted), duration, outcome |</p>
-<p>| products | files written (hashes), commits (sha + verified-tree match), tests run (verdicts), messages sent (delivery receipts) |</p>
-<p>| claims | board-row flips, <code>outcome</code> stamps, completion messages |</p>
-<p>| joins | cost rows (from state surfaces), guard results, verify verdicts |</p>
-<p><strong>Design rules:</strong></p>
-<ul>
-<li><strong>Claims and receipts live in the same row-shape</strong> so <code>claims minus receipts</code> is a query, not an investigation — the 1,701-lie becomes <code>SELECT sessions WHERE claimed_committed AND artifacts_empty</code>.</li>
-<li><strong>Write-time redaction</strong> (gitleaks pattern set) — an evidence vault must never become a leak surface (B1&#x27;s rule, inherited).</li>
-<li><strong>Tamper-evidence:</strong> hash-chained appends; the vault can be wrong about the world but provably about itself.</li>
-<li><strong>Honesty labels all the way down:</strong> absent capture renders &quot;not captured,&quot; never zero — partial harness coverage is visible, not smoothed over.</li>
-</ul>
-<h2>Interface</h2>
+<h2>The question, taken seriously</h2>
+<p>&gt; <em>&quot;How are we going to use that data to make improvements to the system?&quot;</em></p>
+<p>Capture is not value. <strong>Value = a decision that changed, with a measurable delta.</strong> Observability dies at exactly one place: the data exists, dashboards render, and nobody changes what they do. So this PRD is organized backwards from the decisions — every score below names its <strong>decision consumer, cadence, artifact, and the metric that must move</strong>. Anything that can&#x27;t name those gets retired (the sunset rule, §6).</p>
+<hr>
+<h2>1. What the data actually is (one paragraph)</h2>
+<p>Per session: identity (agent, model, lane, harness), <strong>tool calls</strong> (name, args hash, duration, outcome), <strong>products</strong> (files written w/ hashes, commits w/ verified-tree match, tests run w/ verdicts, messages sent w/ delivery receipts), <strong>claims</strong> (board flips, <code>outcome</code> stamps, completion messages), and <strong>cost rows</strong> joined from the state surfaces. Claims and receipts share one row-shape, so <code>claims − receipts</code> is a query:</p>
 <pre><code>
-evidence attach --harness &lt;name&gt; [--stream tool-calls|commits|all]
-evidence score --by model|lane|agent [--window 30d] [--format table|json|html]
-evidence report --session &lt;id&gt; | --lane &lt;lane&gt; --window ...
-evidence watch --rule &lt;expr&gt; [--notify tg:...]
-evidence doctor                     # capture coverage per harness/source
+-- the 1,701-lie, as a standing query
+SELECT lane, count(*) FROM sessions
+WHERE claimed_committed AND artifacts_empty GROUP BY lane;
 </code></pre>
-<h2>Success criteria</h2>
-<ol>
-<li><strong>Quorum replay:</strong> <code>evidence score --by lane --window 90d</code> reproduces the scheduler quorum&#x27;s headline findings (verified-vs-claimed gap, cost per verified outcome) as a standing query — the week of hand-joins becomes one command.</li>
-<li><strong>Spin detection:</strong> a deliberately injected degenerate session (looped identical calls) alerts via <code>watch</code> within 10 minutes.</li>
-<li>Capture coverage ≥95% of fleet session starts within two weeks on this box (<code>doctor</code> reports honestly).</li>
-<li>Scoreboard adoption: the weekly lane/model spending review consumes <code>evidence score</code> output as its primary artifact (digest B4 cites it).</li>
-</ol>
-<h2>Why get-h3 / why open</h2>
-<p>Agent frameworks show you <em>what agents said</em>; none show you <strong>what agents proved</strong>. The claims-vs-receipts join, the verified-ship scoreboard, and the live degeneracy watch are novel, buildable purely from harness streams, and instantly valuable to any fleet paying real money per session. This is the capstone of the agent-ops line: logsey proves the <em>box</em>, pulse proves the <em>moment</em>, forge proves the <em>lanes</em>, lore proves the <em>lessons</em> — evidence proves the <em>work</em>.</p>
-<h2>Risks</h2>
+<h2>2. The improvement loops (this is the answer)</h2>
+<p>Each loop: <strong>data → query → decision surface → owner → cadence → metric that must move.</strong></p>
+<h3>Loop A — Provider &amp; lane portfolio <em>(weekly)</em></h3>
+<p><strong>Data:</strong> verified-ship rate, cost per <em>verified</em> outcome, retry/degenerate rate per lane/model.</p>
+<p><strong>Query:</strong> <code>evidence score --by lane --window 30d</code> → {verified_ship_rate, usd_per_verified_outcome, claim_receipt_delta, degenerate_rate}.</p>
+<p><strong>Decision:</strong> which lanes serve which capability, plan amortization (the &quot;30× usage plan&quot; normalization), and <strong>retirement</strong> of lanes that cost more per verified outcome than their replacement.</p>
+<p><strong>Metric that moves:</strong> usd per verified outcome, down; verified-ship share of the cheap lane, up. <em>Anatomy: this is the 09-16 quorum (sticker 131× cash, &quot;valuable but reckless&quot;) turned into a standing, weekly decision instead of a one-off investigation.</em></p>
+<h3>Loop B — Harness &amp; tool craftsmanship <em>(per failure fingerprint)</em></h3>
+<p><strong>Data:</strong> tool-call failure classes, loops (N identical calls), wasted-call ratios, edit-verify cycles per landed change.</p>
+<p><strong>Query:</strong> <code>evidence fingerprints --top 20 --window 7d</code> → ranked causes of wasted work.</p>
+<p><strong>Decision:</strong> which coding-hermes tool fix to build next — and it files itself: a fingerprint becomes a CHT board row automatically (the 288-identical-calls spin would have filed &quot;loop-breaker guard&quot; on day one instead of surfacing in a post-mortem).</p>
+<p><strong>Metric that moves:</strong> wasted calls per landed change, down. <em>This loop is how the tool suite evolves from evidence instead of intuition.</em></p>
+<h3>Loop C — Scheduler policy <em>(per tuning window)</em></h3>
+<p><strong>Data:</strong> per-project tick outcomes joined to cost and to verified landings; stall events; zero-output ticks.</p>
+<p><strong>Query:</strong> <code>evidence score --by project --window 30d</code> + scheduler API state.</p>
+<p><strong>Decision:</strong> cooldown/weight/budget changes, load-gate thresholds, auto-disable thresholds — each justified by data rather than anecdote (the GAP-125 gate got armed at 12 on vibes; this loop makes the next such call measured).</p>
+<p><strong>Metric that moves:</strong> verified landings per scheduled hour, up; zero-output tick rate, down.</p>
+<h3>Loop D — Guard &amp; quality-gate calibration <em>(monthly)</em></h3>
+<p><strong>Data:</strong> which guard failures preceded <em>real</em> breaks vs which merely added latency (join guard failures to post-merge incident/rollback evidence).</p>
+<p><strong>Decision:</strong> retire or soften guards that never earned their latency; strengthen the ones that caught real breaks; adjust the diff-mode skip policy (the data-only-commit friction is a live example).</p>
+<p><strong>Metric that moves:</strong> guard-caught-real-breaks per guard-minute.</p>
+<h3>Loop E — Skill, prompt &amp; brief efficacy <em>(monthly)</em></h3>
+<p><strong>Data:</strong> outcome deltas by skill/brief/AGENTS.md version — sessions running procedure X vs not, controlling for project and lane.</p>
+<p><strong>Decision:</strong> which instructions earn their tokens; which skills get rewritten or deleted. (jnsq quality law says depth+boundaries+tests; now you can <em>measure</em> whether a skill revision improved outcomes.)</p>
+<p><strong>Metric that moves:</strong> verified-ship rate per token of instruction.</p>
+<h3>Loop F — Spend portfolio <em>(monthly)</em></h3>
+<p><strong>Data:</strong> metered vs sticker spend (the re-stamping problem), misroute signatures (ledger rows for models the provider never served), plan-vs-PAYG crossover per workload.</p>
+<p><strong>Decision:</strong> which subscriptions renew, which plans to stack, where PAYG is genuinely cheaper.</p>
+<p><strong>Metric that moves:</strong> effective $ per verified outcome per lane class; unaccounted-spend %, down.</p>
+<h3>Loop G — Incident → guard/runbook conversion <em>(event-driven)</em></h3>
+<p><strong>Data:</strong> incident trails + the failure classes that recurred.</p>
+<p><strong>Decision:</strong> which guard/pin/runbook to write (feeds lore B3 and sentinel B5); &quot;recurrence is a design smell with an exit&quot;.</p>
+<p><strong>Metric that moves:</strong> repeat-incident rate per class.</p>
+<h3>Loop H — Experiment (A/B) discipline <em>(on demand)</em></h3>
+<p><strong>Data:</strong> before/after verified-ship and cost for a deliberate change (model swap, prompt change, tool change).</p>
+<p><strong>Decision:</strong> keep or revert, with a number instead of a feeling — the fleet&#x27;s &quot;dry-run before real, read logs not prompts&quot; doctrine applied to its own configuration.</p>
+<p><strong>Metric that moves:</strong> decision quality (reverted-change rate, down).</p>
+<h3>The joining layer</h3>
+<p>One <strong>scoreboard artifact per cadence</strong> (weekly lanes; monthly spend/skills/guards; per-event fingerprints) that digest (B4) carries to humans and that machines read to auto-file board rows. Both consume the same rollup — no parallel reporting.</p>
+<h2>3. The scoring model (what &quot;good&quot; means, and the anti-gaming rules)</h2>
+<table>
+<tr><td>Score</td><td>Definition</td><td>Games it must resist</td></tr>
+<tr><td>verified-ship rate</td><td>landed changes with receipts ÷ attempted</td><td>inflating attempts, or farming trivial &quot;verified&quot; landings</td></tr>
+<tr><td>cost per verified outcome</td><td>metered cost ÷ verified landings</td><td>shifting work to unmetered paths; <em>meter is authoritative, not the agent&#x27;s report</em></td></tr>
+<tr><td>evidence coverage</td><td>sessions with complete receipts ÷ sessions</td><td>claiming capture that doesn&#x27;t exist → <strong>absent = &quot;not captured&quot;, never zero</strong></td></tr>
+<tr><td>claim−receipt delta</td><td>claimed completions minus artifacts</td><td>the literal 1,701-lie detector</td></tr>
+<tr><th>degenerate rate</th><th>loops/identical-call sessions ÷ sessions</th><th>hiding retries by re-badging sessions</th></tr>
+<tr><td>escalation precision</td><td>true incidents ÷ alarms</td><td>alarm inflation → the demote-don&#x27;t-tolerate rule</td></tr>
+</table>
+<p><strong>Two structural anti-gaming guarantees:</strong> (1) receipts require real artifacts/tests — you cannot farm a receipt that requires a passing test (the verify-harness honesty law, reused); (2) scores are computed from store-side joins (commits, files, meters), never from agent self-reports alone.</p>
+<h2>4. The honest trap, and the rule that kills it</h2>
+<p><strong>Trap:</strong> measurement culture. Nice dashboards, no behavior change, real cost. Every fleet that ever adopted &quot;observability&quot; has died here.</p>
+<p><strong>Rule — the sunset clause:</strong> every score names its decision consumer at creation. <strong>A score that hasn&#x27;t driven a decision in 90 days gets retired, loudly</strong> (the retirement appears in the digest as a small notice). The scoreboard&#x27;s own relevance is measured — this is the accuracy loop&#x27;s discipline applied to the analytics layer itself.</p>
+<h2>5. rabbit-hole — the sibling, and what we reuse</h2>
+<p><strong>What rabbit-hole is</strong> (paused, <code>~/rabbit-hole</code>, Go, 6 axiom specs, DB at <code>~/.rabbit-hole/rabbit-hole.db</code>): a <em>legibility</em> layer — COLLECT (eBPF/strace, zero-SDK, works on closed-source agents) → CLASSIFY (deterministic patterns + pluggable ML) → EXPRESS (chat: <em>&quot;What did helios do at 3am?&quot;</em>, context-window retrieval).</p>
+<p><strong>The overlap is real and reusable:</strong></p>
 <ul>
-<li>Capture overhead on hot paths → async appends, bounded queue, drop-oldest with a visible gap counter (never block a session for bookkeeping).</li>
-<li>Privacy/redaction at scale → redact-at-write with the guardian&#x27;s pattern set; vaults get the same secret-scan audits as any output.</li>
-<li>Metric gaming (agents optimizing the scoreboard) → score <em>verified outcomes</em>, not activity volume; the verify-harness honesty law is the anti-gaming mechanism — you can&#x27;t farm receipts that require real tests to pass.</li>
+<li><strong>Session model</strong> (attach/detach, persisted, survives invocations) → the vault adopts the same lifecycle shape.</li>
+<li><strong>Classification tiering</strong> (fast deterministic patterns first, ML for the tail) → the vault&#x27;s behavior fingerprints follow it.</li>
+<li><strong>Storage data model</strong> (spec S05) → a validated design we don&#x27;t redo.</li>
+<li><strong>Express layer</strong> (natural-language questions over sessions) → the vault&#x27;s <em>query surface for humans</em>; instead of building a new chat UI, rabbit-hole&#x27;s expression layer could read the vault&#x27;s rows.</li>
 </ul>
-<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+<p><strong>The division of labor (this is the important part):</strong></p>
+<table>
+<tr><td></td><td>rabbit-hole</td><td>evidence vault</td></tr>
+<tr><td>Question</td><td><strong>What did the agent DO?</strong></td><td><strong>What did the agent PROVE — and what did it cost?</strong></td></tr>
+<tr><td>Altitude</td><td>kernel/syscall, agent-agnostic, zero-SDK</td><td>harness-level: artifacts, commits, tests, receipts, meters</td></tr>
+<tr><td>Output</td><td>behavioral narrative, classification, chat</td><td>verified outcomes, cost-per-outcome, scoreboard</td></tr>
+<tr><td>Fails at</td><td>rich <em>semantics</em> without an outcome model (a beautiful trail that can&#x27;t tell you if the work was real)</td><td>behavior detail below the harness (why a call was slow, what the process did)</td></tr>
+</table>
+<p><strong>Together they answer the questions neither can alone:</strong> <em>&quot;Which lane burns the most time on retries, what did that cost, and which tool fix removes it?&quot;</em> — rabbit-hole supplies the behavior, the vault supplies the outcome and the price, and Loop B is where the answer becomes a board row.</p>
+<p><strong>Recommendation:</strong> keep rabbit-hole paused <em>as a product</em>, but harvest its specs as the vault&#x27;s design input now (S05 storage, session lifecycle, classification tiering) — and treat &quot;revive rabbit-hole as the vault&#x27;s expression layer&quot; as a <em>separate</em> decision to make once the vault&#x27;s rollups exist. Do not build two collectors; the vault consumes harness streams, rabbit-hole consumes kernel streams, and they meet at the join.</p>
+<h2>6. What we deliberately do NOT do</h2>
+<ul>
+<li>No per-keystroke surveillance beyond what the harness already records (privacy boundary: aggregate-first, redact-at-write; content is not the product, outcomes are).</li>
+<li>No second reporting stack (digest/lore consume the same rollups).</li>
+<li>No scores without consumers (sunset clause).</li>
+<li>No self-reported metrics as truth (store-side joins only).</li>
+</ul>
+<h2>7. Success criteria</h2>
+<ol>
+<li><strong>Loop A:</strong> within 30 days, one lane is <strong>demoted or retired</strong> with a published comparison (verified-ship vs cost-per-verified-outcome) — a decision the sticker-price-era view could not have justified.</li>
+<li><strong>Loop B:</strong> within 30 days, ≥2 tool fixes are shipped whose originating fingerprint was auto-filed as a board row, with before/after wasted-call evidence.</li>
+<li><strong>Loop C:</strong> one scheduler tuning change (cooldown/weight/gate) lands with its data justification attached — replacing the vibes-based version.</li>
+<li><strong>Claim−receipt detector:</strong> the standing query reproduces the quorum&#x27;s zero-output finding on live data (no hand joins).</li>
+<li><strong>Sunset clause works:</strong> at least one score is retired by the rule within the first quarter (proving the meta-discipline isn&#x27;t decorative).</li>
+<li><strong>Join with behavior:</strong> one question answered end-to-end from both channels (vault outcome + rabbit-hole behavior) on a real case.</li>
+</ol>
+<h2>8. Cost &amp; shape</h2>
+<p>Effort <strong>M–L (~3 weeks)</strong>: capture hooks + joins (≈1w), scoring/rollups + scoreboard artifacts (≈1w), loops wiring (auto-filing to boards, digest sections, decision cadence docs) (≈1w). Ships as <code>h3ops evidence</code> (harness-side capture + store-side joins), no daemon beyond the existing harness; storage = append-only JSONL + DuckDB rollups, riding the same backup chain as the rest of the line.</p>
+<p><strong>Sequencing:</strong> nothing runs until LOGSEY-001 (repo/chain). Loop A/B/C are the highest-value first three; the rabbit-hole spec harvest is a reading task that can start immediately and costs no build time.</p>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · generated from markdown 2026-09-17</p>
 </body></html>
