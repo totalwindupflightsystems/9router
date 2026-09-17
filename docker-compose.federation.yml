@@ -6,6 +6,27 @@
 #
 #   docker compose -f docker-compose.federation.yml up -d --build
 #
+# Running alongside an existing 9router (e.g. a live install already serving
+# 20128): every container name and published host port is overridable, so a
+# second stack can coexist with it:
+#
+#   FEDERATION_STACK_PREFIX=9r-fed \
+#   FEDERATION_CENTRAL_PORT=21128 \
+#   FEDERATION_EDGE_A_PORT=21129 \
+#   FEDERATION_EDGE_B_PORT=21130 \
+#   docker compose -f docker-compose.federation.yml up -d --build
+#
+#   FEDERATION_STACK_PREFIX   container-name prefix      (default 9router)
+#   FEDERATION_CENTRAL_PORT   central published port     (default 20128)
+#   FEDERATION_EDGE_A_PORT    edge-a published port      (default 20129)
+#   FEDERATION_EDGE_B_PORT    edge-b published port      (default 20130)
+#
+# Only the HOST side moves: the container-side port stays 20128 on all three
+# instances, and FEDERATION_CENTRAL_URL stays http://central:20128 (an
+# in-network service name + container port — host port overrides never touch
+# intra-network traffic). Add `-p <project>` to keep the second stack's
+# project name / volumes separate from the first. See docs/FEDERATION.md §6.1.
+#
 # Topology:
 #   central  — authoritative writer; serves its own dashboard + /v1 + the
 #              federation API (snapshot/delta/verify/status/replay)
@@ -66,9 +87,9 @@ x-federation-common: &federation-common
 services:
   central:
     <<: *federation-common
-    container_name: 9router-central
+    container_name: ${FEDERATION_STACK_PREFIX:-9router}-central
     ports:
-      - "20128:20128"
+      - "${FEDERATION_CENTRAL_PORT:-20128}:20128"
     environment:
       <<: *federation-env
       FEDERATION_MODE: central
@@ -77,9 +98,9 @@ services:
 
   edge-a:
     <<: *federation-common
-    container_name: 9router-edge-a
+    container_name: ${FEDERATION_STACK_PREFIX:-9router}-edge-a
     ports:
-      - "20129:20128"
+      - "${FEDERATION_EDGE_A_PORT:-20129}:20128"
     environment:
       <<: *federation-env
       FEDERATION_MODE: edge
@@ -92,9 +113,9 @@ services:
 
   edge-b:
     <<: *federation-common
-    container_name: 9router-edge-b
+    container_name: ${FEDERATION_STACK_PREFIX:-9router}-edge-b
     ports:
-      - "20130:20128"
+      - "${FEDERATION_EDGE_B_PORT:-20130}:20128"
     environment:
       <<: *federation-env
       FEDERATION_MODE: edge

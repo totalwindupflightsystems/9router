@@ -119,6 +119,19 @@ All `FEDERATION_*` vars are optional. Defaults live in
 | `MACHINE_ID_SALT` | Share if machine-id-derived values (e.g. default `FEDERATION_EDGE_ID`) must be stable across instances. |
 | `BASE_URL` / `NEXT_PUBLIC_BASE_URL` | Per-instance public URL (used by internal sync jobs / UI links). |
 
+> **Remote `/v1` calls need an API key.** The public LLM API prefixes
+> (`/v1`, `/v1beta`, `/api/v1`, `/api/v1beta`, `/codex`, `/responses` — `PUBLIC_PREFIXES` in
+> `src/dashboardGuard.js`) are public at the *dashboard* layer but authenticate
+> separately: a request from a non-loopback peer with no valid key gets
+> `401 {"error":"API key required for remote API access"}` unless the effective
+> `requireApiKey` setting is exactly `false` (set `REQUIRE_API_KEY=false` — the
+> `.env.example` default, honored on remote routes since QA-9ROUTER-5). Keys are
+> derived from `API_KEY_SECRET` above, so **one key works on central and on
+> every edge**. "Remote" here means any caller that is not loopback as seen by
+> the instance — including a `curl` from the host into a published container
+> port (`§5.2`, `§6.1`). See `docs/api-reference.md` for the two auth surfaces
+> and the login + `POST /api/keys` recipe.
+
 > **Mismatch warning:** `/api/federation/status` reports role + schemaVersion
 > + revision. A JWT/API_KEY_SECRET mismatch does not break the federation
 > protocol itself (it uses `FEDERATION_TOKEN`), but it breaks cross-instance
@@ -208,23 +221,71 @@ of a false green "Federation linked".
 3. A proxy-side 502/timeout while LINKED flips immediately (no waiting for
    the threshold).
 
-**Verify:** `curl http://edge:20128/api/federation/local-status` →
-`"last_state": "degraded"` (token-less, local only).
+**Verify** (token-less, local only — the payload never carries the token, the
+lease/fencing material or any central data):
+
+```bash
+# Host → edge-a's published port (the default 20129; see §6.1 for the port
+# override variables when the stack runs alongside another 9router):
+curl http://localhost:20129/api/federation/local-status
+# → "role":"edge" … "last_state":"degraded"
+
+# From inside the stack's network (federation_net) the same call is:
+#   curl http://edge-a:20128/api/federation/local-status
+# NOTE: the compose services are `central` / `edge-a` / `edge-b` — `edge`
+# alone is not a hostname anywhere in the stack.
+```
 
 ### 5.2 Degraded serving
 
 - `/v1/*` is served from the local replica through the unchanged chat
   pipeline (accounts, combos, keys, aliases read from local tables).
-- Dashboard reads resolve from the local replica; responses carry
-  `X-Federation-State: degraded`.
+- Dashboard reads resolve from the local replica; those **dashboard API** reads
+  carry `X-Federation-State: degraded`. The header is a dashboard-data signal,
+  not a transport signal: `/v1/*` responses do not carry it
+  (`src/lib/federation/proxy.js` → `isDashboardApiPath`).
 - Mutating dashboard API calls are queued to `pendingWrites` and respond
   `202 Accepted` with `X-Federation-State: degraded` +
   `X-Federation-Queued-Write-Id`. When the queue is full
   (`FEDERATION_QUEUE_MAX`), new writes get `503`.
 - The dashboard banner shows DEGRADED (red) + revision lag.
 
-**Verify:** `curl -i http://edge:20128/v1/models` → `source: local-replica`
-+ `X-Federation-State: degraded` header.
+**Verify** (the live calls target edge-a — from the host use its published port,
+default 20129, or your override from §6.1; from inside `federation_net` use
+`http://edge-a:20128`):
+
+```bash
+# a) The edge's own state, token-less (§5.1):
+curl http://localhost:20129/api/federation/local-status
+# → "last_state":"degraded"
+
+# b) /v1 keeps serving from the local replica. /v1 is a REMOTE API surface:
+#    a non-loopback caller with no valid key gets
+#    401 {"error":"API key required for remote API access"}.
+#    Prerequisite — create ONE key (dashboard → Endpoint → API Keys, or the
+#    login + POST /api/keys recipe in docs/api-reference.md) and use it
+#    everywhere: keys are derived from the shared API_KEY_SECRET (§3), so
+#    central and both edges accept the same key.
+KEY=sk-...   # a key created on central or on any edge
+curl -i http://localhost:20129/v1/models -H "Authorization: Bearer $KEY"
+# → 200, the model list built from edge-a's LOCAL replica:
+#   {"object":"list","data":[{"id":"<model>","object":"model",...}, ...]}
+#   While DEGRADED nothing proxies upstream — the model aliases, providers and
+#   combos come from the edge's replicated tables.
+# Other key carriers are accepted too: `x-api-key: $KEY`, `x-goog-api-key: $KEY`
+# or `?key=$KEY` (src/dashboardGuard.js → extractApiKey).
+
+# c) Keyless alternative: an instance running with requireApiKey: false
+#    (REQUIRE_API_KEY=false — the .env.example default, honored on remote
+#    routes since QA-9ROUTER-5) accepts (b) with no key header at all.
+#    If your install still 401s here, you are in the keyed case — or the
+#    running image predates that fix; rebuild it.
+```
+
+> The `source: local-replica` marker comes from the federation E2E harness
+> (`tests/federation/e2e.mjs`, which boots three stand-in instances) — the
+> production `/v1` routes return the standard provider shape shown above, and
+> the degraded-state proof is the `local-status` call in (a).
 
 ### 5.3 Recovery / reconcile
 
@@ -253,7 +314,9 @@ of a false green "Federation linked".
 | Edge reports `"last_state": "uninitialized"` (never-started) | Federation loops never started: `FEDERATION_MODE=edge` missing at boot, the custom-server wrapper didn't boot, or the federation modules are absent from the image. Check logs for `[federation] replication + failover loops started`; an edge that is actually running flips to `linked`/`degraded` within seconds. |
 | `npm run dev` / `next dev` with `FEDERATION_MODE=edge` exits FATAL | **Expected (FED-018).** The edge proxy + DEGRADED intercept live only in `custom-server.js`, which the Next.js dev server never loads — a dev-mode edge would silently serve zero federation behavior. Use the production path: `npm run build && npm start` (or `docker compose -f docker-compose.federation.yml up`). Central/standalone dev is unaffected. |
 | Edge stays LINKED but `/v1` 502s | `FEDERATION_CENTRAL_URL` unreachable from the edge (firewall, DNS, TLS). Check `curl https://central/api/federation/verify` with the token. |
-| Federation API calls 401 | `FEDERATION_TOKEN` mismatch. Regenerate once and set identically everywhere. |
+| **`/api/federation/status` (or any federation API call) 401s with your own token** | Two causes, in this order. **(1) You are not talking to the compose central** — something else already serves that host port (an existing 9router install, a stale stack), so its `FEDERATION_TOKEN` is a different secret and every call 401s while the container you meant to hit is fine. Check what is published (`docker compose -f docker-compose.federation.yml ps`) and what is actually listening (`ss -tlnp \| grep <port>`), then either re-run the stack on override ports (§6.1) or stop the other instance. **(2) The container was booted with a different `FEDERATION_TOKEN` than your shell's** — compare `docker compose -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN` with `$FEDERATION_TOKEN`; fix `.env` and `docker compose -f docker-compose.federation.yml up -d` again (a re-`up` recreates the containers with the corrected value). Only after both are ruled out is regenerating the token (§6.5) the fix. |
+| `curl: (6) Could not resolve host: edge` | There is no `edge` service. The compose services are `central` / `edge-a` / `edge-b`: from the host use `localhost:<published port>` (defaults 20128 / 20129 / 20130), from inside `federation_net` use `http://edge-a:20128`. |
+| `/v1` 401 `{"error":"API key required for remote API access"}` | The caller is remote (not loopback as the instance sees it) and presented no valid API key. Create one (dashboard → Endpoint → API Keys, or the login + `POST /api/keys` recipe in `docs/api-reference.md`) and send it as `Authorization: Bearer <key>`, `x-api-key`, `x-goog-api-key` or `?key=` — a key from any instance works on all of them (§3 shares `API_KEY_SECRET`). Only `requireApiKey: false` (`REQUIRE_API_KEY=false`) allows the remote call keyless. See §5.2. |
 | Dashboard sessions break across instances | `JWT_SECRET` mismatch. |
 | `/v1` keys invalid on edges | `API_KEY_SECRET` mismatch. |
 | Edge never catches up (`revisionLag` grows) | `FEDERATION_SYNC_INTERVAL_MS` too high, or central overloaded. Check central logs for slow delta builds. |
@@ -293,7 +356,9 @@ $EDITOR .env   # replace the placeholder values (never commit .env)
 # 2. Build + start central + 2 edges:
 docker compose -f docker-compose.federation.yml up -d --build
 
-# Check status:
+# Check status (these curls assume the DEFAULT published ports below; if you
+# override them — see "Running alongside an existing 9router" — substitute your
+# values, e.g. 21128 / 21129 / 21130):
 docker compose -f docker-compose.federation.yml ps
 curl http://localhost:20128/api/federation/status -H "Authorization: Bearer $FEDERATION_TOKEN"
 curl http://localhost:20129/api/federation/local-status   # edge-a
@@ -301,7 +366,8 @@ curl http://localhost:20130/api/federation/local-status   # edge-b
 
 # Simulate a central outage:
 docker compose -f docker-compose.federation.yml stop central
-# ...edges flip DEGRADED after the threshold; /v1 keeps working on 20129/20130...
+# ...edges flip DEGRADED after the threshold; /v1 keeps working on 20129/20130
+# (with an API key — see §5.2)...
 
 # Recover:
 docker compose -f docker-compose.federation.yml start central
@@ -312,6 +378,59 @@ The example uses `Dockerfile.federation` (the standalone Dockerfile plus the
 `src/` tree and `@/` alias the federation runtime modules need — Next's file
 tracing does not follow custom-server.js's dynamic imports). If you publish
 a federation image, swap `build:` for `image:`.
+
+#### Running alongside an existing 9router
+
+The example's container names and published host ports are overridable, so the
+stack can run on a host that already serves 9router on 20128 (or that already
+runs this example stack) without a port collision:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `FEDERATION_STACK_PREFIX` | `9router` | container names: `${PREFIX}-central`, `-edge-a`, `-edge-b` |
+| `FEDERATION_CENTRAL_PORT` | `20128` | central's published host port |
+| `FEDERATION_EDGE_A_PORT` | `20129` | edge-a's published host port |
+| `FEDERATION_EDGE_B_PORT` | `20130` | edge-b's published host port |
+
+```bash
+# Same stack, non-colliding names + host ports:
+FEDERATION_STACK_PREFIX=9r-fed \
+FEDERATION_CENTRAL_PORT=21128 \
+FEDERATION_EDGE_A_PORT=21129 \
+FEDERATION_EDGE_B_PORT=21130 \
+docker compose -f docker-compose.federation.yml up -d --build
+```
+
+Only the **host** side moves. The container-side port is 20128 on all three
+instances and `FEDERATION_CENTRAL_URL` stays `http://central:20128` (a service
+name + container port inside `federation_net`), so replication and proxying are
+unaffected by a host-port override. Add `-p <project>`
+(e.g. `docker compose -p 9r-fed -f docker-compose.federation.yml up -d --build`)
+to keep the second stack's project name and named volumes separate from the
+first one's.
+
+Then run the status checks against the overridden ports:
+
+```bash
+curl http://localhost:21128/api/federation/status -H "Authorization: Bearer $FEDERATION_TOKEN"
+curl http://localhost:21129/api/federation/local-status   # edge-a
+```
+
+**If that first curl 401s with your own token, determine which server answered
+before touching the token.** `docker compose -f docker-compose.federation.yml ps`
+shows the ports the stack actually published, and `ss -tlnp | grep <port>` shows
+every listener on them; a port owned by an existing 9router (or any other
+process) means your request never reached the compose central — re-run the stack
+on override ports or stop the other instance (§5.5). If the stack does own the
+port, the second cause is a token mismatch: compare
+`docker compose -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN`
+with your shell's `$FEDERATION_TOKEN`, fix `.env`, then `up -d` again.
+
+> ⚠️ Do **not** start this example stack with `up` on a host whose 20128 is
+> already served by a live 9router: the `central` service publishes `20128:20128`
+> by default and the bind fails (or, worse, you end up probing the other
+> instance and blaming the token). Start with the overrides above, or stop the
+> other instance first.
 
 ### 6.2 Bare-metal / VM
 
