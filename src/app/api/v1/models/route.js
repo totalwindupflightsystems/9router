@@ -250,6 +250,22 @@ function providerIsCredentialless(providerId) {
   return AI_PROVIDERS[providerId]?.noAuth === true;
 }
 
+// `noAuth` alone can overstate usability: a provider may declare a
+// credentialless path that only works from the VENDOR's own client
+// (`requiresVendorClient`, e.g. opencode). Live probe 2026-09-17: opencode's
+// /zen/v1/models answers 200 — so the catalog looks healthy — while
+// /zen/v1/responses answers 403 FreeTierError "OpenCode's free tier can only be
+// used from within OpenCode" even with the executor's own header set, and
+// /zen/v1/chat/completions answers 401 "Missing API key.". No completion can be
+// produced from this process, so such a provider is NOT usable without a stored
+// connection and must not be advertised as retrievable on a fresh install.
+// Both the list endpoint and the exact-model endpoint build their catalog
+// through this module, so the refinement holds for both automatically.
+function providerIsUsableWithoutCredentials(providerId) {
+  return providerIsCredentialless(providerId)
+    && AI_PROVIDERS[providerId]?.requiresVendorClient !== true;
+}
+
 // Combo matches kindFilter when its `kind` field is in the list.
 // Combos with no kind are treated as LLM.
 function comboMatchesKinds(combo, kindFilter) {
@@ -334,9 +350,11 @@ export async function buildModelsList(kindFilter, options = {}) {
   if (connections.length === 0) {
     // Two very different states land here:
     //  - the lookup SUCCEEDED and found nothing (fresh install) -> advertise
-    //    only providers that genuinely need no credentials. Listing the whole
-    //    static catalog here is what advertised ~1000 models that immediately
-    //    fail chat with 404 "No active credentials for provider".
+    //    only providers that genuinely need no credentials (and whose
+    //    credentialless path is usable from this process — see
+    //    providerIsUsableWithoutCredentials). Listing the whole static catalog
+    //    here is what advertised ~1000 models that immediately fail chat with
+    //    404 "No active credentials for provider".
     //  - the lookup FAILED (DB unavailable) -> keep the legacy all-static
     //    fail-open catalog so a transient error cannot erase discovery.
     const failOpen = !connectionsLoaded;
@@ -346,7 +364,9 @@ export async function buildModelsList(kindFilter, options = {}) {
     for (const [alias, providerModels] of Object.entries(PROVIDER_MODELS)) {
       const providerId = aliasToProviderId[alias] || alias;
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
-      if (!failOpen && !providerIsCredentialless(providerId)) continue;
+      // Credential-required AND vendor-client-only providers are both unusable
+      // from this process until a connection exists.
+      if (!failOpen && !providerIsUsableWithoutCredentials(providerId)) continue;
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
         if (isDisabled(alias, model.id)) continue;
@@ -364,9 +384,10 @@ export async function buildModelsList(kindFilter, options = {}) {
       if (!kindFilter.includes(LLM_KIND)) continue;
       const providerAlias = customModel.providerAlias;
       if (!providerAlias) continue;
-      // A custom model on a credential-required provider is just as unusable as
-      // its provider's static models until a connection exists.
-      if (!failOpen && !providerIsCredentialless(aliasToProviderId[providerAlias] || providerAlias)) continue;
+      // A custom model on a credential-required (or vendor-client-only)
+      // provider is just as unusable as its provider's static models until a
+      // connection exists.
+      if (!failOpen && !providerIsUsableWithoutCredentials(aliasToProviderId[providerAlias] || providerAlias)) continue;
 
       const modelId = String(customModel.id).trim();
       if (!modelId) continue;

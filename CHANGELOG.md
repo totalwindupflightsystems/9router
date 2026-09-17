@@ -95,6 +95,24 @@
   `tests/unit/api-reference-auth-claims.test.js` (DF-9ROUTER-9/14/19).
 
 ## Fixes
+- **Providers (OpenCode Free)**: the credentialless opencode provider is no
+  longer advertised as usable from this router (DF-9ROUTER-1). Live probe of the
+  executor-shaped request (2026-09-17): `GET https://opencode.ai/zen/v1/models`
+  answers 200 — so the provider looked healthy — while
+  `POST https://opencode.ai/zen/v1/responses` answers 403
+  `FreeTierError: OpenCode's free tier can only be used from within OpenCode`
+  (even with `OpenCodeExecutor`'s own header set) and
+  `POST /zen/v1/chat/completions` answers 401 `Missing API key.`: no completion
+  can be produced from 9router's own process. The provider entry now declares
+  `requiresVendorClient: true`, which the fresh-install catalog honours — its
+  models (`oc/muse-spark-1.2|1.3-contributor-free`) are no longer listed by
+  `GET /v1/models`, the exact-model lookup answers 404 `model_not_found`, and
+  the dashboard card shows an amber `OpenCode client only` badge instead of a
+  green `Ready`. Providers that are genuinely credentialless (edge-tts, …) are
+  unaffected, and both the failed-lookup fail-open catalog and the
+  configured-connection path are unchanged. Pinned by
+  `tests/unit/provider-free-tier-honesty.test.js` and the updated
+  `tests/unit/fresh-install-model-catalog-339.test.js`.
 - **Usage tracking**: a successful completion whose upstream omits token counts
   was recorded nowhere (DF-9ROUTER-26). Non-streaming
   `extractUsageFromResponse()` understood Claude/Responses, OpenAI and Gemini
