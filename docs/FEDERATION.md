@@ -522,9 +522,13 @@ Prints a PASS/FAIL summary; exit code reflects the result.
 The unit suite (from `tests/`) is gated by the regression baseline:
 
 ```bash
-cd tests && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/results.json
+(cd tests && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/results.json)
 node tests/__baseline__/verify-no-regression.mjs /tmp/results.json
 ```
+
+Both lines are repo-root relative and safe to paste into one shell: the subshell
+returns to the repo root even though the run ends red by design (exit 1) — the
+verify step is the gate. The vitest binary must be the `tests/`-local pinned one.
 
 `tests/` is its own npm package, so run `cd tests && npm install` once before the
 first run — that installs the pinned vitest into `tests/node_modules`.

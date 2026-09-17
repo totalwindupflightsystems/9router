@@ -310,7 +310,7 @@ registration path exists for them.
 ## 🧪 Testing
 
 **The suite is NOT all-green by design** — don't chase a red run as a regression.
-The baseline is ~1988 pass / ~84 fail / ~59 skip (2131 total, verified 2026-08-22), with every
+The baseline is ~2629 pass / ~85 fail / ~59 skip (2773 total, verified 2026-09-17), with every
 known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
 Some failures are live-network tests (`real/*.real.test.js`, `mimo-free.live.*`)
 that need real credentials and are expected to fail locally — skip them.
@@ -323,9 +323,13 @@ node tests/__baseline__/verify-no-regression.mjs <vitest-results.json>
 Run the suite with a JSON reporter to feed the regression gate:
 
 ```bash
-cd tests && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/vitest-results.json && cd ..
+(cd tests && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/vitest-results.json)
 node tests/__baseline__/verify-no-regression.mjs /tmp/vitest-results.json
 ```
+
+Both lines are repo-root relative and safe to paste into one shell: the subshell
+returns to the repo root even though the run ends red by design (exit 1) — the
+verify step is the gate.
 
 `tests/` is its own npm package, so `cd tests && npm install` is a one-time
 prerequisite before the first run — that is what puts the pinned vitest in
