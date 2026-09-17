@@ -1,76 +1,108 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>h3 agent-ops: Lane-Health Authority</title>
+<title>B7 Lane Health Authority</title>
 <style>
 :root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
 font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
 h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
 h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
-h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+h3{font-size:1.05rem;color:#fff;margin:1.2rem 0 .3rem}
+h4{font-size:1rem;color:#cfe3ff;margin:1rem 0 .2rem}
 p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
 padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
 pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
 pre code{border:none;background:none;padding:0;color:#c9e2a8}
 ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
 hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
-strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+strong{color:#fff} a{color:#5eb0ef} .tag{color:var(--mut);font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:.6rem 0}
+th,td{text-align:left;padding:.45rem;border-bottom:1px solid #2a3140;vertical-align:top}
+th{color:#8b93a1;font-weight:600}
 </style></head><body>
-<h1>PRD: <code>h3-forge</code> — Provider Key Rotation &amp; Lane-Health Authority</h1>
-<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B7 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
-<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> B1 (logsey) for failure-signal mining · <strong>Feeds:</strong> B4 digest (lane health), B3 runbooks</p>
+<h1>PRD (deep): <code>h3-forge</code> — Lane-Health &amp; Credential-Custody Boundary</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B7 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed (v2 — security-boundary rewrite) · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> nothing · <strong>Feeds:</strong> digest (lane health), sentinel (rotation-overdue pins)</p>
 <hr>
-<h2>The one-liner</h2>
-<p>The single place that knows every provider lane a fleet talks to — key age, quota posture, failure signals, rotation state — and does the two things fleets always postpone: <strong>rotate keys before they expire, and prove lanes healthy before the fleet needs them.</strong></p>
-<h2>The problem, measured</h2>
-<p><strong>Case file 1 — the expired key that kept &quot;working&quot; (2026-09):</strong> an OpenRouter key shipped in a project expired mid-flight; the first symptom was a 401 deep inside a scheduled run (<code>API key expired.</code>), and the working fallback only survived because someone had wired it <em>earlier, by hand, after another expiry</em>. Key inventory lived in six <code>.env</code> files and one person&#x27;s memory.</p>
-<p><strong>Case file 2 — the dead-lane month:</strong> SambaNova keys went 401 across the board; the lanes stayed &quot;configured&quot; but dead for weeks because nothing distinguished <em>configured</em> from <em>proven-healthy</em> — the fleet mandates &quot;test EVERY model live&quot; but enforcement was a human reading usage pages.</p>
-<p><strong>Case file 3 — the misroute tell:</strong> rows in the billing surface for a model the provider&#x27;s own usage page never showed — caught by hand during a value quorum. The signature (ledger rows for models absent from the provider&#x27;s usage page = misroute) was documented, then left as prose.</p>
-<p><strong>Case file 4 — the rotation scramble:</strong> every real key-compromise/expiry event triggers the same ad-hoc dance: find every copy, update six <code>.env</code> files, restart three daemons, hope nothing hardcodes the old value. The fleet&#x27;s own doctrine says &quot;rotation &gt; purge&quot; — but nothing makes rotation <em>cheap</em>.</p>
-<h2>User stories</h2>
-<p><strong>US-1 (the registrar):</strong> As the fleet operator, I register a lane once: <code>forge add xkiro --base-url ... --env XKIRO_API_KEY --plan 200usd --test &#x27;ping z-ai/glm-5.3-flash&#x27;</code> — and forge answers &quot;what lanes exist, what are they for, when did each last prove healthy.&quot;</p>
-<p><strong>US-2 (the prover):</strong> As the agent about to wire a project to a lane, I run <code>forge check xkiro</code> — a live probe runs <em>now</em> (the registered test command), and the result with latency is appended to the lane&#x27;s health log. Configured ≠ healthy; only a receipt proves healthy.</p>
-<p><strong>US-3 (the rot watcher):</strong> As the fleet, scheduled probes (daily? per-lane cadence) catch rot before consumers do: a lane failing its probe N consecutive times flips <code>degraded</code> in <code>forge status</code> and fires one escalation — B4&#x27;s digest carries the flag; the 401-at-2am class dies.</p>
-<p><strong>US-4 (the rotator):</strong> As the responder to &quot;key X is compromised/expiring&quot;, I run <code>forge rotate xkiro --from XKIRO_API_KEY --to XKIRO_API_KEY_2</code> — forge updates the registered env files, runs the probe, flips the lane, and reports per-consumer rewiring status. The six-file scramble becomes one audited transaction.</p>
-<p><strong>US-5 (the misroute hunter):</strong> As the cost auditor, <code>forge reconcile --provider xkiro --window 7d</code> diffs observed lane usage against the provider&#x27;s own usage surface and flags ledger rows for models the provider never served — the quorum&#x27;s hand-found signature, mechanized.</p>
-<h2>What it tracks (per lane)</h2>
-<p>| Field | Source |</p>
-<p>|---|---|</p>
-<p>| base URL, auth dialect, env-file locations | registration |</p>
-<p>| key metadata: created, last-rotated, expiry-if-known, copies (grep of registered paths) | forge inventory |</p>
-<p>| health log: probe receipts (ts, model, latency, verdict) | scheduled + on-demand probes |</p>
-<p>| plan posture: quota windows, usage limits as declared | registration (honest labels: declared vs measured) |</p>
-<p>| consumers: which projects/daemons reference the lane | registered consumer list |</p>
-<p><strong>Design rules:</strong></p>
-<ul>
-<li><strong>Receipts, not config:</strong> a lane&#x27;s status is derived from its last <em>probe receipt</em>, never from &quot;it&#x27;s in the .env&quot; — the configured-vs-healthy distinction is the product&#x27;s spine.</li>
-<li><strong>Rotation is a transaction:</strong> env files updated → probe on new key → flip → report; abort on failed probe (old key restored). Atomicity doctrine from CHT-004 applied to credentials.</li>
-<li><strong>Declared vs measured, labeled:</strong> plan quotas are whatever the operator declared; forge never guesses billing posture — it only measures reachability and latency (the cost-truth doctrine: never fabricate cost figures).</li>
-<li><strong>Secrets discipline:</strong> keys are referenced by env-var name and file path, never stored, displayed, or logged by forge (0600 profiles, redaction pass on all output).</li>
-</ul>
-<h2>Interface</h2>
+<h2>The concern, taken seriously</h2>
+<p>&gt; <em>&quot;That is going to require a lot of rebuilding tools like 1Password. I assume there are open-source ones but of course managing people&#x27;s creds is critical and also an attack vector.&quot;</em></p>
+<p>Both halves are correct, and together they force the design: <strong>forge must not become a credential store.</strong> Building custody means owning encryption-at-rest, key derivation, recovery, sharing, rotation semantics, audits, and — the part people underestimate — <em>a new crown jewel to defend</em>. A half-built secrets manager is worse than 0600 env files, because it concentrates everything and adds a false sense of safety.</p>
+<p>So v2 draws a hard line and names both sides of it.</p>
+<hr>
+<h2>1. What forge is NOT (the boundary)</h2>
+<table>
+<tr><td>forge does</td><td>forge never does</td></tr>
+<tr><td>store <strong>references</strong>: env-var names, file paths, manager item IDs, provider/lane metadata</td><td>store, copy, cache, or transmit credential <strong>material</strong></td></tr>
+<tr><td><strong>probe</strong> lanes and record health receipts</td><td>read a key&#x27;s value into its own process</td></tr>
+<tr><td><strong>orchestrate</strong> rotation across registered consumers</td><td>generate, derive, or escrow keys</td></tr>
+<tr><td>track key <strong>age/quota/plan</strong> metadata (declared + measured)</td><td>claim custody, backup, or recovery of secrets</td></tr>
+<tr><td>prove a lane is healthy/unhealthy with evidence</td><td>decide a secret is &quot;safe&quot; without a receipt</td></tr>
+</table>
+<p><strong>Architectural consequence:</strong> compromising forge yields <em>no credentials</em> — only the map of which lanes exist and how healthy they are. That is a materially smaller prize than today&#x27;s state, where a single readable <code>.env</code> (93 keys in one file on this box) is the whole kingdom.</p>
+<h2>2. What exists today (measured, this box, 2026-09-17)</h2>
+<table>
+<tr><td>Layer</td><td>Reality</td></tr>
+<tr><td>secret stores installed</td><td><strong>none</strong> of <code>op</code>, <code>bw</code>, <code>sops</code>, <code>age</code>, <code>vault</code>, <code>pass</code>, <code>keepassxc-cli</code>; <code>gpg</code> present</td></tr>
+<tr><td>OS keystore</td><td>GNOME Keyring running (<code>login.keyring</code>, <code>user.keystore</code>)</td></tr>
+<tr><td>Hermes vault pattern</td><td><code>~/.hermes/vault/</code> exists (tokens, wg keys); <code>browser_vault_*</code> tool family already implements the <strong>reference-and-fill</strong> pattern incl. 1Password/Bitwarden detection; <code>agent/credential_pool.py</code> handles OAuth pools</td></tr>
+<tr><td>fleet reality</td><td><code>~/.hermes/.env</code> = <strong>93 keys</strong>, 0600; <code>9router/.env</code> = 0600; services consume via env / systemd <code>EnvironmentFile</code></td></tr>
+</table>
+<p><strong>Design implication:</strong> the fleet already has the <em>reference</em> pattern (Hermes vault tools) and the <em>consumption</em> pattern (env files). What it lacks is the <strong>management plane</strong> — knowing which lane is healthy, which key is old, which consumers depend on it. That plane needs no plaintext, which is exactly why forge is buildable without becoming 1Password.</p>
+<h2>3. Trust tiers — forge works at every tier, and upgrades transparently</h2>
+<table>
+<tr><td>Tier</td><td>Storage</td><td>forge sees</td><td>When appropriate</td></tr>
+<tr><td><strong>T0 (today)</strong></td><td>0600 <code>.env</code> files, systemd <code>EnvironmentFile</code>, <code>~/.hermes/vault/</code> files</td><td>paths + var names only</td><td>current fleet; single-operator; already the status quo</td></tr>
+<tr><td><strong>T1</strong></td><td>OS keystore (GNOME Keyring) or a self-hosted manager — <strong>Bitwarden</strong> (self-host, open source), <strong>1Password</strong> (CLI), <strong>HashiCorp Vault</strong>, <strong>SOPS+age</strong></td><td>item references (<code>op://…</code>, <code>bw://…</code>, sops-encrypted file paths)</td><td>when ≥2 humans share custody, or compliance demands access logs</td></tr>
+<tr><td><strong>T2</strong></td><td>hardware/KMS-backed (YubiKey + age, cloud KMS, systemd-creds w/ TPM)</td><td>key handles only</td><td>when a real adversary model exists</td></tr>
+</table>
+<p><strong>Adoption rule:</strong> forge&#x27;s registry is the same at every tier — only the <em>reference type</em> changes. Moving from T0→T1 is a per-lane edit + a re-probe, not a forge rewrite. <strong>We do not build T1/T2 ourselves</strong>; we adopt existing open-source custody when the sharing/compliance need actually appears.</p>
+<h2>4. Threat model (who attacks what, and what they get)</h2>
+<table>
+<tr><td>Compromise</td><td>Attacker gains</td><td>Blast radius</td></tr>
+<tr><td><strong>forge&#x27;s registry/DB</strong></td><td>lane names, provider + plan metadata, env-var <em>names</em>, health receipts</td><td><strong>no credential material</strong>; reveals which lanes exist (low value given rate limits + provider-side revocation)</td></tr>
+<tr><td><strong>forge&#x27;s probe output/logs</strong></td><td>model names, latencies, status codes</td><td>none — redaction pass + no-plaintext rule enforced at write time (the argv-leak doctrine, GAP-038)</td></tr>
+<tr><td><strong>a 0600 <code>.env</code> (today&#x27;s reality)</strong></td><td><strong>all 93 keys</strong></td><td><strong>full fleet compromise</strong> — this is the actual attack vector, and the one that motivates everything else</td></tr>
+<tr><th><strong>a T1 manager</strong></th><th>whatever the item&#x27;s policy exposes; audited</th><th>bounded by per-item access policy + audit trail (the reason T1 exists)</th></tr>
+<tr><td><strong>a rotated-out key</strong></td><td>nothing</td><td>inert by doctrine — <strong>rotation &gt; purge</strong>; no history rewriting, ever</td></tr>
+</table>
+<p><strong>Honest conclusion:</strong> forge does not <em>reduce</em> the attack surface of messy <code>.env</code> files by itself — it makes the <em>inventory</em> visible so the human can decide when T1 custody is warranted. Its security win is (a) never holding secrets, (b) making rotation cheap enough that &quot;rotate, don&#x27;t purge&quot; is practical, and (c) producing the audit trail that shows when a lane&#x27;s key changed and every consumer that was rewired.</p>
+<h2>5. Rotation choreography (the operation nobody does because it&#x27;s scary)</h2>
+<p>Forge makes rotation a <strong>transaction</strong>, and the plaintext never enters forge:</p>
 <pre><code>
-forge add &lt;lane&gt; --base-url URL --env VAR --test &lt;probe-cmd&gt; [--plan &quot;...&quot;] [--consumers ...]
-forge check &lt;lane&gt; [--model M]            # live probe now, receipt appended
-forge status [--lane ...] [--json]        # healthy | degraded | unproven | rotated-out
-forge rotate &lt;lane&gt; --to VAR [--test ...] # audited key rotation transaction
-forge reconcile &lt;provider&gt; --window 7d    # usage-vs-ledger misroute diff
-forge audit                               # whole-fleet lane matrix (B4 digest section)
+1. ISSUE      operator issues a new key at the provider (human + MFA — forge never holds account creds)
+2. REGISTER   forge records the new reference (var name / manager item) — a NAME, not a value
+3. INJECT     the value moves manager→target via the manager&#x27;s own tooling:
+              op run / bw get --raw / sops exec-env / systemd-creds — injected by the tool, never printed
+4. PROBE      forge runs the lane probe with the NEW key  → must pass
+5. FLIP       forge marks the lane&#x27;s active reference = new; old key enters overlap window
+6. REWIRE     each registered consumer is updated (env file line, unit EnvironmentFile, container env)
+              and the consumer&#x27;s own health check must pass before the lane is considered migrated
+7. VERIFY     forge re-probes end-to-end through the consumers (not just direct) — a receipt per consumer
+8. RETIRE     after the overlap window the old key is revoked at the provider; forge records the retirement
+ABORT anywhere → the old reference stays active; the transaction is recorded as failed with the exact step
 </code></pre>
-<h2>Success criteria</h2>
-<ol>
-<li><strong>Expiry replay:</strong> a lane whose key reaches expiry/invalid status is <code>degraded</code> within one scheduled probe cycle — before any consumer hits the 401 (verified by injecting an invalid key on a test lane).</li>
-<li>Rotation drill: rotating a test lane across three registered env files completes with zero plaintext key exposure in forge output/logs, and aborts cleanly on a failed probe.</li>
-<li>Misroute detection: seeded ledger rows referencing a never-served model are flagged by <code>reconcile</code> within one window.</li>
-<li>Fleet adoption: ≥6 lanes registered on this box in week one (xkiro ×2, opencode-go ×2, commandcode ×2 at minimum), each with a probe receipt trail.</li>
-</ol>
-<h2>Why get-h3 / why open</h2>
-<p>Agent fleets are multi-provider by nature — lanes are their blood supply, and every fleet manages key rot with grep and luck. The product isn&#x27;t key storage (1Password et al. own that); it&#x27;s <strong>lane-health truth</strong>: probe receipts, rotation transactions, misroute reconciliation. That&#x27;s operational intelligence only a running fleet generates, and it&#x27;s missing from every stack.</p>
-<h2>Risks</h2>
+<p><strong>Overlap window is the point:</strong> both keys valid during migration means rotation never causes downtime — the difference between &quot;we should rotate&quot; and &quot;we actually rotate quarterly&quot;.</p>
+<h2>6. What forge still needs from humans (not automated, and shouldn&#x27;t be)</h2>
 <ul>
-<li>Probe cost/limits (probes consume quota) → per-lane cadence + tiny registered probe payloads; probes are declared, honest, and budgeted.</li>
-<li>Env-file write risk (rotation touches secrets) → file updates are the only writes forge ever makes, path-registered, diff-audited, abort-on-fail; keys never pass through forge&#x27;s stdout/logs.</li>
-<li>Stale consumer lists → <code>reconcile</code> cross-checks declared consumers against observed usage; unregistered consumers surface (the registry-completeness law from B6, reused).</li>
+<li>issuing/revoking keys at providers (account + MFA);</li>
+<li>approving a rotation transaction (default: propose, human confirms — the fleet&#x27;s proposal-not-write doctrine);</li>
+<li>choosing custody tier per lane when sharing/compliance appears;</li>
+<li>account recovery. Forge never becomes the thing you can&#x27;t get back into.</li>
 </ul>
-<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+<h2>7. Requirements &amp; anti-patterns</h2>
+<p><strong>Requirements:</strong> no plaintext in argv, logs, DB, or crash dumps (write-time redaction + test); probes are declared, budgeted, and tiny; registry is append-only JSONL (auditable); per-lane access policy for who may trigger rotation; kill-switch (remove forge → lanes keep working; nothing depends on it at runtime).</p>
+<p><strong>Anti-patterns (rejected explicitly):</strong> storing values &quot;just for convenience&quot;; becoming the backup/recovery authority; auto-rotating without operator confirmation; inventing our own crypto; a single registry file that concentrates every lane&#x27;s metadata <em>and</em> a value cache — never.</p>
+<h2>8. Success criteria</h2>
+<ol>
+<li><strong>Invalid-key replay:</strong> a lane whose key is revoked at the provider flips to <code>degraded</code> within one probe cycle — before any consumer 401s (inject a dead key on a test lane).</li>
+<li><strong>Rotation drill, zero plaintext:</strong> a full 8-step rotation completes across 3 registered consumers with <strong>no key value appearing in forge output, logs, or the registry</strong> — verified by grep of every artifact + a secrets scan.</li>
+<li><strong>Abort path:</strong> a rotation with a failing probe aborts cleanly, old reference stays active, and no consumer is left half-migrated (verified test).</li>
+<li><strong>Misroute detection:</strong> <code>forge reconcile --provider X --window 7d</code> flags ledger rows for models the provider never served (the hand-found quorum signature, mechanized).</li>
+<li><strong>Tier portability:</strong> one lane migrated T0→T1 (env var → manager reference) with <strong>no registry schema change</strong> and a passing re-probe.</li>
+<li><strong>Blast-radius visibility:</strong> <code>forge audit</code> reports every lane, its custody tier, key age, and consumer count — the inventory that today lives in one person&#x27;s head.</li>
+</ol>
+<h2>9. Recommendation (the decision this PRD actually asks for)</h2>
+<p><strong>Build forge as the management plane only (refs + health + rotation orchestration), at T0 today.</strong> Do <strong>not</strong> build custody. When custody needs appear — and the real trigger is <strong>sharing credentials between people</strong>, not technology — adopt a self-hosted open-source manager (Bitwarden self-host is the natural first candidate: open source, self-hostable, CLI + API, audit log) and point forge&#x27;s references at it. If a <em>personal</em> 1Password/Keychain need appears for Bane&#x27;s own accounts, that&#x27;s the existing Hermes vault pattern (<code>browser_vault_*</code>), already shipped, and <strong>orthogonal</strong> to this tool.</p>
+<p><strong>Net security effect:</strong> fewer secrets in agent-readable files over time (rotation becomes routine), one visible inventory instead of a hand-managed <code>.env</code>, and no new crown jewel for an attacker to target — because forge has nothing worth stealing.</p>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · generated from markdown 2026-09-17</p>
 </body></html>
