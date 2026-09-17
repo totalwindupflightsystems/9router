@@ -55,6 +55,60 @@ Those questions are the system. This version specifies them.
 
 ---
 
+## Detecting STALE_PROCESS: the process file-binding probe *(Bane mechanism, 2026-09-17)*
+
+**Why this beats env-only detection.** `/proc/<pid>/environ` covers *only* exec-time environment variables. Config files read at startup by libraries (yaml/toml/, `.env` loaders), certificates, credentials and key files are invisible to it — yet those are exactly the surfaces where "running old config" happens. The FD view sees **what the process actually has bound**, which is the ground truth.
+
+**How the probe works:**
+
+1. **Enumerate candidate processes** — every registered service: systemd unit → `MainPID`; containers → host PID via `docker inspect State.Pid`; explicit pid-file fallback.
+2. **Walk `/proc/<pid>/fd/*`** — resolve each symlink; keep regular files only (`S_IFREG`), skip `/dev`, `/sys`, `/proc`, sockets, pipes, `anon_inode`; match against registered config surfaces (exact paths, registered dirs, config extensions, cert stores).
+3. **Record the binding tuple** for each matched FD: `(st_dev, st_ino, st_mtime, st_size)` — read by statting `/proc/<pid>/fd/N` (which resolves to the *bound* inode, not the path) — plus the symlink's `(deleted)` marker.
+4. **Compare against `stat(path)`:**
+   - FD `(deleted)`, nothing at path → `REMOVED_UNDER_PROCESS`
+   - FD `(deleted)`, new file at path → `REPLACED_ATOMIC` — *the classic case: rotate/`mv`+create; the service still holds the old inode*
+   - dev/ino differ → `REPLACED_ATOMIC`
+   - same ino, path mtime newer → `IN_PLACE_MODIFIED` — process sees it only if it re-reads
+   - tuple matches path and path matches declared → `BOUND_CURRENT` (healthy)
+5. **mmap sweep** — `/proc/<pid>/maps` for mmap'd config/cert/secret files: mmap binds the old inode exactly like an FD (CA bundles and certs commonly mmap'd).
+6. **Reread policy per surface** — declared per registered config: `restart_only` (systemd `EnvironmentFile`, most daemons), `sighup_reload` (HUP/exec-style reload), `watch_reread` (hot-reloading apps). This converts detection into correct severity *and* the correct reconcile action (restart vs reload vs nothing).
+7. **Severity:** `latent` (bound old, difference semantically inert), `pending` (bound old, behavioral difference, reload path exists), `active` (bound config is now invalid/insecure — placeholder corruption while running, expired cert on a live service).
+8. **Unprivileged primary rule — config mtime vs process start time.** Most configs (`.env`, `.yaml`) are read-then-closed at startup and therefore leave *no FD binding*. For those, the cheap fleet-wide rule is: `config mtime > process starttime` + a `restart_only` reread policy → `STALE_PROCESS (pending)`. Process start time comes from `/proc/<pid>/stat` field 22, which is world-readable — so **this rule covers every process on the box, including root-owned ones, with no privileges at all.** The FD probe is then the high-fidelity *addition* where permissions allow, not the only path.
+9. **Filter `memfd:` and shm.** `memfd_create` objects and `/dev/shm` files appear as regular files in the FD table but are not disk payloads — exclude them from disk-leak accounting and classify separately (shm is reclaimable only when the holder dies). Learned from the live probe: a single `memfd:doublemapper` reported a 2 TiB apparent size and poisoned the reclaimable total until filtered.
+
+**Live probe, this box, 2026-09-17 (proof the mechanism works and its real coverage profile):**
+
+| Measurement | Result | What it means |
+|---|---|---|
+| processes scanned | 1,615 | full walk of `/proc` |
+| permission-limited dirs | 1,469 | **91% unreadable unprivileged** — root-owned services (docker, containers, system daemons) need a narrow privilege for FD-level coverage; the mtime-vs-starttime rule (step 8) covers them anyway |
+| deleted-but-open regular files | 87 | the `DELETED_BUT_OPEN` class is real and common (chrome/lm-studio shm today; misrotated logs and sqlite WAL tomorrow) |
+| config FDs bound for our candidate paths | 0 | **confirms read-then-close**: our own gateway/hermes configs leave no binding → step 8 is not optional, it is the primary rule |
+| false positive caught | 1 (`memfd:` 2 TiB) | drove rule 9 |
+
+**Reconcile verification:** after reload/restart, re-probe and require `bound_inode == path_inode` (or, for read-then-close surfaces, pattern start-time newer than config mtime) — an unproven reconcile does not close (the same "converge then prove" rule as Loop 3).
+
+**Rule 8 live findings, this box, 2026-09-17 — three real STALE_PROCESS cases on a healthy box:**
+
+| Service | Process started | Config mtime | Verdict |
+|---|---|---|---|
+| hermes-gateway (pid 3153878) | 09-17 04:08:08 | `~/.hermes/config.yaml` 09-17 **05:14:58** | **pending stale** — the `max_concurrent_runs=24` + provider edits are on disk but not in the running process |
+| schedulerd (pid 1897520) | 09-17 01:10:03 | `~/.hermes/fleet.toml` 09-17 **04:02:54** | **pending stale** — fleet.toml regenerated after the daemon started |
+| 9router-central (container) | 09-16 14:28:09 | `.env` 09-16 **18:53:14**, compose 09-17 **07:26:31** | **stale** — container runs the env it started with, predating the on-disk repair |
+
+None of these are incidents *yet* — they are exactly the latent state that becomes one at the next restart if nobody looks. Nothing on the box reports them today; sentinel's second loop (restart gate) exists to catch precisely this. **`DELETED_BUT_OPEN` after memfd/shm filtering: 9 files, ~0 MiB** — the class is real but bursty (it matters during incident windows like the 09-10 disk day, not in steady state).
+
+
+**Bonus class this probe unlocks — `DELETED_BUT_OPEN`:** any deleted-but-open regular file is a disk-space leak (misrotated logs, sqlite WAL, DB files) and feeds the disk-pressure class directly. Nearly free: the FD table walk is already happening. The 2026-09-10 disk-pressure day is the case file.
+
+**Explicit limits (not hidden):** `/proc/<pid>/fd` requires same-uid or root (ptrace-scope rules) — root services are covered only with a narrow privilege, otherwise the coverage loop reports them as *visibly unmonitored*; inode numbers can be reused after unlink — always compare the full tuple plus the `(deleted)` marker, never `ino` alone; files opened-then-closed at startup leave no binding — for those, the environ + startup-log adapters remain the fallback and the surface is marked `detection: partial`.
+
+**Cost:** trivial — hundreds of FDs per box, polled on mutation events plus a 60s cadence.
+
+---
+
+
+
 ## The feedback loops (the part v1 was missing)
 
 ### Loop 1 — **Mutation loop** (seconds): observe → classify → notify → resolve → verify
@@ -100,7 +154,8 @@ Every state transition is an append-only JSONL event (git-friendly, the fleet's 
 | SQLite cells | SELECT value at path | pin + cross-store classes |
 | systemd | `systemctl cat`, effective config | drop-in/effective-config classes |
 | containers | `docker inspect` env vs disk | cross-store (the 9router case) |
-| process env | `/proc/<pid>/environ` (unprivileged: own-uid; root services need a narrow privilege — documented limitation, not hidden) | STALE_PROCESS class |
+| process env | `/proc/<pid>/environ` — exec-time env only | STALE_PROCESS (env subset) |
+| **process file binding** | `/proc/<pid>/fd/*` symlink + FD stat tuple (dev, ino, mtime, size) vs `stat(path)`, `(deleted)` markers, `/proc/<pid>/maps` for mmap'd config/creds | **STALE_PROCESS (the general case — Bane mechanism)** |
 | git-tracked config | HEAD blob vs working tree | unauthorized-writer + repo/deployed divergence |
 | secrets (via forge) | key age/quota refs | rotation-overdue |
 
