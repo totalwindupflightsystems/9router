@@ -1,74 +1,144 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>h3 agent-ops: Config-Drift Sentry</title>
+<title>B5 Config Drift Sentry</title>
 <style>
 :root{--bg:#0f1115;--fg:#d7dae0;--mut:#8b93a1;--acc:#5eb0ef;--card:#161a22}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);
 font:17px/1.65 -apple-system,'Segoe UI',Roboto,sans-serif;padding:1.1rem;max-width:46rem;margin-inline:auto}
 h1{font-size:1.45rem;line-height:1.3;color:#fff;margin:.2rem 0 .6rem}
 h2{font-size:1.15rem;color:var(--acc);border-bottom:1px solid #2a3140;padding-bottom:.3rem;margin:1.6rem 0 .5rem}
-h3{font-size:1.02rem;color:#fff;margin:1.2rem 0 .3rem}
+h3{font-size:1.05rem;color:#fff;margin:1.2rem 0 .3rem}
+h4{font-size:1rem;color:#cfe3ff;margin:1rem 0 .2rem}
 p{margin:.55rem 0} code{background:var(--card);border:1px solid #2a3140;border-radius:5px;
 padding:.08em .35em;font-size:.86em;font-family:ui-monospace,Menlo,monospace;color:#9ecbff}
 pre{background:var(--card);border:1px solid #2a3140;border-radius:8px;padding:.8rem;overflow-x:auto}
 pre code{border:none;background:none;padding:0;color:#c9e2a8}
 ul,ol{margin:.4rem 0 .8rem;padding-left:1.3rem} li{margin:.3rem 0}
 hr{border:none;border-top:1px solid #2a3140;margin:1.4rem 0}
-strong{color:#fff} .tag{color:var(--mut);font-size:.85rem}
+strong{color:#fff} a{color:#5eb0ef} .tag{color:var(--mut);font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin:.6rem 0}
+th,td{text-align:left;padding:.45rem;border-bottom:1px solid #2a3140;vertical-align:top}
+th{color:#8b93a1;font-weight:600}
 </style></head><body>
-<h1>PRD: <code>h3-sentinel</code> — Config-Drift Sentry</h1>
-<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B5 (added) · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
-<p><strong>Status:</strong> proposed · <strong>Effort:</strong> M (~2 weeks) · <strong>Depends on:</strong> nothing · <strong>Feeds:</strong> B4 digest (drift section), B3 runbooks</p>
+<h1>PRD (deep): <code>h3-sentinel</code> — Config Custody &amp; Drift Feedback System</h1>
+<p><strong>Project:</strong> get-h3 · agent-ops line · <strong>Item:</strong> B5 · <strong>Author:</strong> Kara-agent · <strong>Date:</strong> 2026-09-17</p>
+<p><strong>Status:</strong> proposed (v2 — supersedes the v1 file-differ framing) · <strong>Effort:</strong> M–L (~3 weeks) · <strong>Depends on:</strong> nothing · <strong>Feeds:</strong> lore (runbook classes), digest (drift section), relay (pre-restart gate), forge (secret configs)</p>
 <hr>
-<h2>The one-liner</h2>
-<p>A registry of every config file that <em>matters</em> on a fleet box — with provenance, expected-drift rules, and tripwires — that catches the moment a config diverges from what the operator last blessed, <strong>before</strong> the next restart turns drift into an outage.</p>
-<h2>The problem, measured</h2>
-<p><strong>Case file 1 — the <code>.env</code> wipe (2026-09-16):</strong> 9router&#x27;s repo <code>.env</code> was overwritten by its <code>.env.example</code> twin (byte-identical size, same mtime — a stray <code>cp</code>). All four federation secrets became placeholders <em>on disk</em> while the running container kept the real ones. Discovery was pure luck (a 401 during unrelated wiring). <strong>One restart would have broken central↔edge auth fleet-wide, silently, with no error pointing at the cause.</strong> The repair — pulling secrets back out of the running container — was hand-crafted, unreproducible, and is now only recorded in a chat log.</p>
-<p><strong>Case file 2 — the cooldown-pin drift (SCHED-GAP-121):</strong> an operator set a 900s cooldown in the live DB; the policy regenerator kept rewriting 7200 from <code>fleet.toml</code>. Two stores, one truth-shaped lie — the pin silently reverted on every restart until the dual-store <code>--verify</code> tripwire was hand-built. Cost: weeks of a project running at 8× its intended cooldown with nobody able to say why.</p>
-<p><strong>Case file 3 — the sibling revert:</strong> a shared <code>.gitreins/config.yaml</code> evaluator pin was silently reverted by a sibling foreman&#x27;s merge; the wrong model served until noticed days later. Config changes have <strong>no ownership trail</strong> in git — the log says a merge touched the file, not that a <em>semantic pin</em> was undone.</p>
-<p>The pattern: fleet boxes carry dozens of load-bearing configs (env files, TOML, YAML, unit drop-ins), mutations come from agents, siblings, upgrades, and stray <code>cp</code>s, and <strong>the failure only surfaces at restart — the worst possible moment.</strong></p>
-<h2>User stories</h2>
-<p><strong>US-1 (the operator&#x27;s blessing):</strong> As Bane, after fixing the <code>.env</code> mess I run <code>sentinel bless /home/kara/9router/.env --class secrets</code> — the file&#x27;s current content-hash is registered. Any later change without a fresh bless is <em>drift</em>, reported with a unified diff at next check-in.</p>
-<p><strong>US-2 (the restart insurance):</strong> As the agent about to <code>systemctl restart</code> a daemon, I run <code>sentinel check --unit 9router-central</code> first: it diffs every registered config feeding that unit against blessed state and blocks/warns <em>before</em> the restart bakes the drift in.</p>
-<p><strong>US-3 (the semantic-pin guardian):</strong> As the fleet, I declare pins beyond raw hashes: <code>sentinel pin scheduler.db projects.cooldown_s --where name=h3 --expect 21600</code> — value-level, store-level expectations (the SCHED-GAP-121 tripwire generalized to any SQLite/TOML pair), verified on schedule.</p>
-<p><strong>US-4 (the archaeologist):</strong> As the responder asking &quot;who changed this and when?&quot;, <code>sentinel history /home/kara/9router/.env</code> shows every observed mutation with timestamp, mtime evidence, and the diff — even when git isn&#x27;t watching the file (env files never are).</p>
-<h2>What it registers</h2>
-<p>| Class | Examples | Check |</p>
-<p>|---|---|---|</p>
-<p>| secret-env | 9router/.env, gateway env files | hash + required-keys-present + placeholder-detector (<code>.env.example</code>-twin detection: entropy + <code>changeme</code>-class values) |</p>
-<p>| daemon-toml/yaml | fleet.toml, schedulerd.toml, .gitreins configs | hash + semantic pins (declared values at declared paths) |</p>
-<p>| dual-store pairs | DB column ↔ toml key | value agreement per pin (both directions) |</p>
-<p>| unit drop-ins | systemd overrides | hash + effective-unit diff (<code>systemctl cat</code>) |</p>
-<p><strong>Design rules:</strong></p>
+<h2>Why v1 was too narrow (honest self-critique)</h2>
+<p>The first PRD described <strong>a differ with a registry</strong>: hash the file, compare, alert. That answers one question — &quot;did this file change?&quot; — and nothing else. It had no answer for:</p>
 <ul>
-<li><strong>Blessing is explicit; observation is ambient.</strong> File watching (inotify) records mutations continuously; drift is only <em>declared</em> against blessed state. No blessing = monitor-only, so adoption is zero-risk.</li>
-<li><strong>Placeholders are their own alarm class:</strong> the <code>.env.example</code> clobber is detectable <em>without</em> a prior bless (placeholder heuristics) because it&#x27;s the highest-severity, most-recurring failure in fleet history.</li>
-<li><strong>Restart-coupled checks:</strong> a tiny exec shim (or documented pre-restart hook) makes &quot;check before you restart&quot; the path of least resistance for agents.</li>
-<li><strong>Provenance is the product:</strong> every observed change is appended (JSONL, git-friendly) — the fleet&#x27;s append-only doctrine applied to config.</li>
+<li>What if the file changed <em>legitimately</em> and the blessed state is now the stale one?</li>
+<li>What if the file on disk is correct but the <strong>running daemon is using an old copy</strong>?</li>
+<li>Who changed it, and should they have?</li>
+<li>Once alerted… then what? Who confirms the fix actually landed?</li>
+<li>What happens the fifth time the same drift recurs — do we just alert five times forever?</li>
 </ul>
-<h2>Interface</h2>
+<p>Those questions are the system. This version specifies them.</p>
+<hr>
+<h2>The core insight: config truth is three states, not one</h2>
+<table>
+<tr><th>State</th><th>What it is</th><th>How we read it</th></tr>
+<tr><th><strong>DECLARED</strong></th><th>What the operator/system says should be true: blessed snapshot, policy rule, semantic pin, cross-store invariant</th><th>registry + policy files</th></tr>
+<tr><th><strong>ON DISK</strong></th><th>What the files/DB cells/unit drop-ins actually contain right now</th><th>hash + parse + SQL</th></tr>
+<tr><th><strong>IN PROCESS</strong></th><th>What the <em>running</em> service actually loaded when it started</th><th><code>/proc/&lt;pid&gt;/environ</code>, effective unit config, container env, startup logs</th></tr>
+</table>
+<p><strong>Every serious incident we&#x27;ve had lives in the gap between two of these three.</strong> The <code>.env</code> clobber: disk ≠ declared (and ≠ in-process — the container still held the <em>real</em> secrets, which is why nothing broke <em>yet</em>). The cooldown-pin drift: declared (toml) ≠ declared (db) — two stores both claiming to be truth. The generic upgrade hazard: disk changed at 02:00, process still running yesterday&#x27;s config — silent until the next restart. A file-differ sees one of three states and calls it truth. Sentinel&#x27;s job is <strong>the triangle</strong>, plus what to do about each edge.</p>
+<hr>
+<h2>Drift taxonomy (what &quot;drift&quot; actually means — 12 classes)</h2>
+<p><strong>Content-class drift</strong></p>
+<ol>
+<li><code>CONTENT_DRIFT</code> — registered file&#x27;s content changed vs blessed (with diff + attribution).</li>
+<li><code>PLACEHOLDER_CORRUPTION</code> — content matches a template/example file, or carries placeholder-shaped values (<code>changeme</code>, empty secrets, <code>.example</code> twins). <em>Highest severity / most recurring class in fleet history.</em> Detected <strong>without</strong> a prior bless (heuristics: entropy, key-presence, twin-file comparison).</li>
+<li><code>MISSING_REQUIRED</code> — a key/field/env var the consumers require is absent.</li>
+</ol>
+<p><strong>Value-class drift</strong></p>
+<ol>
+<li><code>PIN_VIOLATION</code> — a declared value expectation fails (e.g. <code>projects.cooldown_s where name=h3 == 21600</code>).</li>
+<li><code>CROSS_STORE_DIVERGENCE</code> — two stores that must agree don&#x27;t (db ↔ toml, disk ↔ container env, repo config ↔ deployed copy).</li>
+<li><code>UNAUTHORIZED_WRITER</code> — content changed by something outside the path&#x27;s declared writer set (script X, agent Y, human Z).</li>
+</ol>
+<p><strong>Runtime-class drift</strong></p>
+<ol>
+<li><code>STALE_PROCESS</code> — on-disk truth ≠ in-process truth: the running service is using an older/other config than what&#x27;s on disk. <em>The silent-restart hazard.</em></li>
+<li><code>EFFECTIVE_CONFIG_DRIFT</code> — a unit drop-in / include / env-file chain changes the <em>effective</em> config without touching the primary file.</li>
+<li><code>UNDECLARED_EFFECTIVE_CHANGE</code> — effective config changed, but no registered file changed (the change came from outside the registry — a blind spot, surfaced as a coverage finding).</li>
+</ol>
+<p><strong>Lifecycle-class drift</strong></p>
+<ol>
+<li><code>STALENESS</code> — the blessed state itself is old relative to the system&#x27;s evolution (bless-then-forget); &quot;declared&quot; may now be wrong.</li>
+<li><code>ROTATION_OVERDUE</code> — a secret/key config declares an age policy and exceeds it (feeds forge).</li>
+<li><code>DRIFT_RECURRENCE</code> — the same class+path drifted N times in a window. <em>Not noise — a design smell with an exit: it should become a guard, a pin, or a runbook.</em></li>
+</ol>
+<hr>
+<h2>The feedback loops (the part v1 was missing)</h2>
+<h3>Loop 1 — <strong>Mutation loop</strong> (seconds): observe → classify → notify → resolve → verify</h3>
+<p>Ambient capture (inotify on files, polling on DB cells/units, <code>/proc</code> snapshots for in-process) classifies every mutation into the taxonomy above, with severity, dedup window, and attribution (mtime + owner + snoopy exec correlation + git blame when tracked). Notification goes to the <em>owning</em> channel, not a firehose.</p>
+<p><strong>Closure is explicit:</strong> a drift is <code>open</code> until either (a) a re-check shows convergence to declared, or (b) an operator accepts the new state (<code>accept</code> → bless, with a note) — and the acceptance is what makes it <code>closed</code>. <strong>Unresolved drift re-escalates on a timer</strong> rather than firing once into the void. This is the loop that makes the system trustworthy instead of noisy.</p>
+<h3>Loop 2 — <strong>Restart gate loop</strong>: check → block/allow → restart → verify</h3>
+<p>The pre-restart/deploy path (shared with relay&#x27;s job wrapper and any service-management operation in the fleet) runs a mandatory check for the target&#x27;s registered configs: unresolved high-severity drift <strong>blocks</strong> the restart with the diff and the three-state view (&quot;disk says X, the running service has Y, declared is Z — restarting will bake in X&quot;). After the restart, the loop <em>re-verifies in-process state</em> and records it as the new baseline observation. This is the loop that converts the <code>.env</code> near-miss class into a non-event: the copy is caught at write time, and even if missed, the restart gate catches it before the restart makes it real.</p>
+<h3>Loop 3 — <strong>Reconciliation loop</strong>: propose/execute converge action → verify → record</h3>
+<p>For classes with a mechanically known cure, sentinel carries a <strong>reconcile action</strong>: regenerate from policy (the fleet&#x27;s <code>fleet-cooldown-policy --apply</code> pattern), restore from the surviving store (the container-env recovery we did by hand — scripted), re-pin both stores, or re-bless. Approval policy decides auto vs propose (default: propose for anything mutating; auto only for reads). After execution: verify convergence, record the receipt, close the drift. &quot;Converge then prove&quot; — an alert without a converged end-state is an unfinished loop.</p>
+<h3>Loop 4 — <strong>Learning loop</strong> (weeks): history → recurrence → guard/pin/runbook</h3>
+<p>Drift history is analytics, not just audit: recurring classes/paths generate artifacts — a new <strong>pin</strong> (value expectation), a <strong>guard</strong> (e.g. a repo pre-commit that blocks <code>cp .env.example .env</code>-shaped operations), or a <strong>lore runbook</strong> (drift class → checks + recovery). Recurrence converts from &quot;the same alarm again&quot; into &quot;an exit taken&quot;. Measured as: recurrence→guard conversion count. This loop is what makes sentinel compound instead of nag.</p>
+<h3>Loop 5 — <strong>Coverage loop</strong>: discover → propose into registry → verify completeness</h3>
+<p>Sentinel audits its own blind spots: scan for load-bearing configs that exist but aren&#x27;t registered (systemd units + drop-ins, env files referenced by units, config dirs, DB cells consumed by daemons). Propose them into the registry; report coverage % of &quot;load-bearing config surfaces observed vs registered&quot;. Registry completeness is itself a verified expectation — the same law relay uses for cron jobs. An unregistered config is indistinguishable from a safe one, and that&#x27;s exactly how the next incident starts.</p>
+<h3>Loop 6 — <strong>Accuracy loop</strong>: precision tracking → tune → prove no-cry-wolf</h3>
+<p>Every alarm&#x27;s outcome is recorded (true drift / expected change / false positive). Precision is a published metric; below threshold the class is tuned (widen the writer allowlist, add a rule) or demoted. The GAP-061 lesson — 37 self-recoveries desensitized operators until alarms got ignored — is encoded: <strong>an alarm class that cannot hold ≥95% precision gets demoted, not tolerated.</strong></p>
+<hr>
+<h2>Lifecycle state machine (what a drift <em>is</em>, over time)</h2>
 <pre><code>
-sentinel register &lt;path|--unit name&gt; --class &lt;class&gt;
-sentinel bless &lt;path&gt; [--note &quot;...&quot;]
-sentinel check [&lt;path&gt;|--unit name|--all] [--json]
-sentinel pin &lt;store.path&gt; --expect &lt;value&gt;     # semantic, value-level pins
-sentinel history &lt;path&gt;
-sentinel daemon                                 # inotify watcher + scheduled pin checks
+observed → classified → notified ─┬─ accepted (bless + note)      → closed
+                                  ├─ reconciled (converge + verify) → closed
+                                  └─ unresolved ──(timer)──► re-escalated → escalated (owner paged)
+recurring (N in window) → flagged as design smell → guard/pin/runbook proposed → exit taken → closed
+stale (blessed state aging / process older than disk) → surfaced in audit, not alarmed
 </code></pre>
+<p>Every state transition is an append-only JSONL event (git-friendly, the fleet&#x27;s doctrine) — which is also what makes attribution and history answerable later.</p>
+<hr>
+<h2>Scope: adapters and coverage</h2>
+<table>
+<tr><th>Adapter</th><th>Reads</th><th>Answers</th></tr>
+<tr><td>files</td><td>hash + parse + diff</td><td>content/pin/placeholder classes</td></tr>
+<tr><td>SQLite cells</td><td>SELECT value at path</td><td>pin + cross-store classes</td></tr>
+<tr><td>systemd</td><td><code>systemctl cat</code>, effective config</td><td>drop-in/effective-config classes</td></tr>
+<tr><td>containers</td><td><code>docker inspect</code> env vs disk</td><td>cross-store (the 9router case)</td></tr>
+<tr><td>process env</td><td><code>/proc/&lt;pid&gt;/environ</code> (unprivileged: own-uid; root services need a narrow privilege — documented limitation, not hidden)</td><td>STALE_PROCESS class</td></tr>
+<tr><td>git-tracked config</td><td>HEAD blob vs working tree</td><td>unauthorized-writer + repo/deployed divergence</td></tr>
+<tr><td>secrets (via forge)</td><td>key age/quota refs</td><td>rotation-overdue</td></tr>
+</table>
+<p><strong>Out of scope (deliberate):</strong> config <em>management</em> (sentinel never authors content — it converges to declared or escalates), secret <em>storage</em>, fleet-wide config distribution (that&#x27;s a different product), alert routing infrastructure (delegates to relay/digest).</p>
+<hr>
+<h2>User stories (deepened)</h2>
+<ul>
+<li><strong>US-1</strong> <em>(the clobber)</em>: the stray <code>cp .env.example .env</code> is caught by PLACEHOLDER_CORRUPTION within seconds; the three-state view shows disk is now template garbage while the running container still holds truth; the reconcile action (restore from in-process env) is proposed with the exact commands, executed on approval, verified, and closed — with a note that becomes a lore runbook.</li>
+<li><strong>US-2</strong> <em>(the restart)</em>: an agent about to restart a daemon hits the gate; the diff and three-state view appear <em>before</em> the restart; the agent blesses or reconciles, then restarts. Restart can no longer bake in known drift.</li>
+<li><strong>US-3</strong> <em>(dual-store)</em>: h3&#x27;s cooldown is pinned in db and toml; divergence alarms with both values; reconcile re-pins both; the recurring class later generates the guard that prevents hand-editing one store.</li>
+<li><strong>US-4</strong> <em>(silent upgrade)</em>: an upgrade rewrites a config at 02:00 while the service keeps running old values; STALE_PROCESS is flagged as <em>latent</em> (not alarming — nothing is broken yet) and surfaces in the next digest as &quot;restart pending, drift will apply&quot;.</li>
+<li><strong>US-5</strong> <em>(audit)</em>: &quot;prove every load-bearing config on this box matches declared&quot; is one command with a coverage % and a named list of the unregistered surfaces.</li>
+<li><strong>US-6</strong> <em>(forensics)</em>: &quot;when did this change, who did it?&quot; → mutation history with attribution chain (mtime → exec log → session id when the evidence vault exists) even for files git never tracked.</li>
+<li><strong>US-7</strong> <em>(the fifth recurrence)</em>: drift history flags class+path recurrence, proposes the guard/pin, and — once taken — the alarm stops recurring. The operator sees the exit, not the same page again.</li>
+<li><strong>US-8</strong> <em>(coverage)</em>: an unregistered env file referenced by a unit shows up in the coverage proposal before it becomes an incident.</li>
+</ul>
+<hr>
 <h2>Success criteria</h2>
 <ol>
-<li><strong>Replay the <code>.env</code> clobber:</strong> with sentinel live, the <code>cp .env.example .env</code> fires a placeholder-class alarm within seconds of the write — hours before any restart could have baked it in.</li>
-<li><strong>Replay SCHED-GAP-121:</strong> the value-pin check reports <code>db=900 toml=7200 MISMATCH</code> on every scheduled run until reconciled — the tripwire exists without hand-building it per case.</li>
-<li>Fleet coverage: ≥15 load-bearing configs registered on this box within a week of install, with ≥3 live-class pins.</li>
-<li>Zero false alarms after the first tuning week (drift alarm precision ≥95% — the GAP-061 desensitization lesson: alarms that cry wolf get uninstalled).</li>
+<li><strong>Clobber replay:</strong> PLACEHOLDER_CORRUPTION fires within seconds of the write; the reconcile proposal contains working commands; the post-reconcile verification passes. Incident duration: log line → closed drift, no human archaeology.</li>
+<li><strong>Restart-gate proof:</strong> with the gate armed, a deliberately drifted config blocks a restart; after bless/reconcile the restart proceeds and post-restart in-process verification confirms the running state matches declared.</li>
+<li><strong>Three-state proof:</strong> STALE_PROCESS correctly identifies the container/env-vs-disk mismatch class in a live reproduction (the 9-16 scenario, scripted).</li>
+<li><strong>Coverage:</strong> ≥15 load-bearing configs registered on this box in week one; coverage report names every unregistered surface it found; ≥3 semantic pins live.</li>
+<li><strong>Precision:</strong> ≥95% alarm precision after one tuning week, with the accuracy loop recording every outcome; a class failing precision is demoted, not tolerated.</li>
+<li><strong>Compounding:</strong> within a month, ≥1 recurring drift class converts into a guard/pin/runbook (recurrence→exit measured, not claimed).</li>
 </ol>
-<h2>Why get-h3 / why open</h2>
-<p>Every multi-agent fleet has this wound: configs mutated by many hands, failures deferred to restart time. Existing tools (etcd, consul, chef) solve fleet-scale config <em>management</em>; nothing solves single-box config <em>custody</em> for heterogeneous files + DBs + units with provenance. The placeholder-detector heuristic and the dual-store pin pattern are fleet scar tissue — shipping them is the value.</p>
-<h2>Risks</h2>
+<h2>Risks &amp; failure modes</h2>
 <ul>
-<li>Hash churn from legitimate writers (installers, schedulers) → per-path &quot;expected writers&quot; allowlist; noisy paths get observation-only mode instead of alarms.</li>
-<li>Bless-staleness (blessed state itself becomes wrong) → bless requires <code>--note</code> and surfaces age; blessing is a moment of accountability, not a fire-and-forget.</li>
-<li>Scope creep toward full config management → hard line: sentinel never <em>writes</em> configs, only witnesses them.</li>
+<li><strong>Bless-staleness</strong> (declared becomes wrong) → bless requires a note + surfaces age; staleness class surfaces it in audit rather than silently trusting it.</li>
+<li><strong>Alarm fatigue</strong> → precision metric + demotion policy + re-escalation instead of repeat-firing; the loop structure itself is the antidote (every drift has a closure path).</li>
+<li><strong>Privilege limits</strong> (root-service env, kernel events) → documented per-adapter, surfaced in coverage as &quot;visibly unmonitored&quot; rather than silently absent.</li>
+<li><strong>Scope creep into config management</strong> → hard boundary: converge-or-escalate only; sentinel never authors new config content.</li>
+<li><strong>Watch-cost</strong> → inotify + low-frequency polling; DB/unit adapters poll on a cadence (default 60s) with jitter; measured against the same budget discipline as pulse.</li>
 </ul>
-<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · PRD · generated from markdown 2026-09-17</p>
+<h2>Cost &amp; shape</h2>
+<p>Effort <strong>M–L (~3 weeks)</strong>: registry + policy engine (~1w), adapters incl. the three-state <code>/proc</code> + container readers (~1w), loops (gate, reconcile, learning, coverage, accuracy) + CLI (~1w). Ships as <code>h3ops sentinel</code> with an append-only event log per box and optional central rollup via digest.</p>
+<p><strong>Sequencing:</strong> nothing runs until LOGSEY-001 (repo/chain) is decided. Reconcile actions depend on relay&#x27;s job wrapper for the restart gate; learning-loop artifacts (runbooks) depend on lore. The coverage loop and precision metric should ship in v1 — they&#x27;re what make the system self-correcting instead of just loud.</p>
+<p class="tag" style="margin-top:2rem">get-h3 · agent-ops line · generated from markdown 2026-09-17</p>
 </body></html>
