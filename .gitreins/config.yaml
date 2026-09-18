@@ -9,7 +9,17 @@ evaluator:
   model: deepseek-v4-flash
   max_iterations: 200
   max_time: "45m"
-  max_input_tokens: "8M"
+  # Rung ladder (measured, one raise per starved eval — never guessed):
+  #   1M -> 2M -> 4M (all starved) -> 8M PASSED 2026-09-15 (verdict 0a1573bb,
+  #   4 criteria / 4 files). 8M re-starved 2026-09-18 on DEPS-002 (5 criteria,
+  #   judged diff includes a 1329-line package-lock.json): INCOMPLETE at
+  #   'Input token budget (8.0M) exceeded (8.0M used)' verdict 2d9c8074
+  #   (8,018,608 tokens_in) and again on an unchanged --force re-run, verdict
+  #   51764b96 (8,052,073 tokens_in). Raised to 16M as an UNBLOCK PROBE.
+  #   If 16M also starves, the driver is the judged CONTEXT, not the rung:
+  #   shrink the criteria (drop the package-lock scope criterion) instead of
+  #   climbing further.
+  max_input_tokens: "16M"
   max_output_tokens: "384k"
   static_analysis_diagnostics: false
 history:
