@@ -40,6 +40,22 @@ function baselineColumns(table) {
   return Object.keys(TABLES[table].columns);
 }
 
+// ─── Host-contention timeout bound (FED-GAP-14) ──────────────────────────
+// Everything below drives REAL migration SQL against temp SQLite files, once per
+// available adapter (better-sqlite3 → node:sqlite → sql.js). That is pure
+// wall-clock work, and the suite default (5000 ms — vitest.config.js sets no
+// testTimeout) is not load-safe on a shared host: the heaviest test here measures
+// 204-248 ms in isolation (whole file 1.78-2.08 s), but at fleet load this file
+// inflated 24-35x and the heaviest test crossed 5000 ms on a ZERO-code-delta
+// board commit at tick 391 (guard log
+// .gitreins/logs/guard-20260918T230113.744957Z.log: duration 6010 ms ending in
+// `Error: STACK_TRACE_ERROR` at migration.test.js:90 — a timeout abort, not a
+// value mismatch; the identical untouched commit passed 28 s later).
+// 30 s = 14x the file's worst isolated wall time, ~3.5x the worst inflation
+// observed under load, so host contention can no longer flip this file while a
+// genuine hang still fails bounded instead of stalling the guard.
+const ADAPTER_LOOP_TIMEOUT_MS = 30_000;
+
 // ─── Per-adapter harness ──────────────────────────────────────────────────
 // Each adapter factory gets a fresh temp DB file. bun:sqlite is skipped
 // (Bun runtime only — this host runs Node v22.22.3).
@@ -87,7 +103,10 @@ afterEach(() => {
 });
 
 describe("migration 002 idempotency across adapters", () => {
-  it("re-applies cleanly on every available adapter (no-op second pass)", async () => {
+  it(
+    "re-applies cleanly on every available adapter (no-op second pass)",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     expect(factories.length).toBeGreaterThan(0);
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
@@ -122,7 +141,10 @@ describe("migration 002 idempotency across adapters", () => {
     }
   });
 
-  it("fresh chain (001 → 002) builds the full federation schema on every adapter", async () => {
+  it(
+    "fresh chain (001 → 002) builds the full federation schema on every adapter",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
     const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
@@ -147,7 +169,10 @@ describe("migration 002 idempotency across adapters", () => {
 });
 
 describe("migration 003 idempotency (last_state)", () => {
-  it("adds last_state to federation_meta and re-applies cleanly on every adapter", async () => {
+  it(
+    "adds last_state to federation_meta and re-applies cleanly on every adapter",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     expect(factories.length).toBeGreaterThan(0);
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
@@ -181,7 +206,10 @@ describe("migration 003 idempotency (last_state)", () => {
     }
   });
 
-  it("full chain 001 → 002 → 003 produces the complete federation schema", async () => {
+  it(
+    "full chain 001 → 002 → 003 produces the complete federation schema",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
     const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
@@ -204,7 +232,10 @@ describe("migration 003 idempotency (last_state)", () => {
 });
 
 describe("migration 005 idempotency (centralMaxVersion)", () => {
-  it("adds centralMaxVersion to federation_meta and re-applies cleanly on every adapter", async () => {
+  it(
+    "adds centralMaxVersion to federation_meta and re-applies cleanly on every adapter",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     expect(factories.length).toBeGreaterThan(0);
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
@@ -239,7 +270,10 @@ describe("migration 005 idempotency (centralMaxVersion)", () => {
     }
   });
 
-  it("full chain 001 → 002 → 003 → 004 → 005 produces the complete federation schema", async () => {
+  it(
+    "full chain 001 → 002 → 003 → 004 → 005 produces the complete federation schema",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
     const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
@@ -268,7 +302,7 @@ describe("migration 005 idempotency (centralMaxVersion)", () => {
 });
 
 describe("getEdgeState (FED-003 state reader)", () => {
-  it("defaults to LINKED when last_state is NULL/missing", async () => {
+  it("defaults to LINKED when last_state is NULL/missing", { timeout: ADAPTER_LOOP_TIMEOUT_MS }, async () => {
     const factories = await loadAdapterFactories();
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
     const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
@@ -297,7 +331,10 @@ describe("getEdgeState (FED-003 state reader)", () => {
     }
   });
 
-  it("defaults to LINKED when the table/column is absent (pre-003 schema)", async () => {
+  it(
+    "defaults to LINKED when the table/column is absent (pre-003 schema)",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     const factories = await loadAdapterFactories();
     const { default: m001 } = await import("@/lib/db/migrations/001-initial.js");
     const { default: m002 } = await import("@/lib/db/migrations/002-federation.js");
@@ -332,7 +369,10 @@ describe("standalone boot drift (FEDERATION_MODE unset)", () => {
     else process.env.DATA_DIR = originalDataDir;
   });
 
-  it("fresh standalone boot: baseline tables unchanged, only federation additions", async () => {
+  it(
+    "fresh standalone boot: baseline tables unchanged, only federation additions",
+    { timeout: ADAPTER_LOOP_TIMEOUT_MS },
+    async () => {
     process.env.DATA_DIR = tempDir;
     const { getAdapter } = await import("@/lib/db/driver.js");
     const { latestVersion } = await import("@/lib/db/migrations/index.js");
