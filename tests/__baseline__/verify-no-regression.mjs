@@ -5,7 +5,7 @@ import { readFileSync } from "fs";
 
 const knownFails = new Set(
   readFileSync(new URL("./known-fails.txt", import.meta.url), "utf8")
-    .split("\n").map(s => s.trim()).filter(Boolean)
+    .split("\n").map(s => s.trim()).filter(s => s && !s.startsWith("#"))
 );
 
 const resultsPath = process.argv[2];
