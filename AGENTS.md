@@ -57,7 +57,9 @@ cd tests && npm install && cd ..                                      # REQUIRED
 npm test                                                              # from repo root — deterministic entry: runs the tests-local vitest, never a bare `npx vitest`; when tests deps are missing it fails fast naming `cd tests && npm install`. It cds into tests/ because a root cwd breaks @/ alias resolution
 npm test -- unit/fresh-install-model-catalog-339.test.js              # single file — args are forwarded to vitest (path relative to tests/)
 node tests/__baseline__/verify-no-regression.mjs <vitest-json-results>  # regression gate (known-fails baseline)
-npx eslint .                                                          # lint
+npm run lint                                                          # repo-wide eslint over the FULL tree — RED BY DESIGN, see "Lint debt" below
+npm run lint:gate                                                     # lint debt gate — full-tree eslint vs the committed baseline; fails on NEW/INCREASED problems, on STALE entries, and ALWAYS on parse errors
+npm run lint:baseline                                                 # regenerate scripts/lint-baseline.json (commit it together with the paydown); REFUSES to write when any file has a parse error
 ```
 
 **The suite is NOT all-green by design**: ~2629 pass / ~85 fail / ~59 skip baseline (2773 total,
@@ -65,6 +67,29 @@ verified 2026-09-17) with a
 catalogued `tests/__baseline__/known-fails.txt`. Judge regressions with
 `verify-no-regression.mjs`, never a raw run. `real/*.real.test.js` need live
 credentials — skip them.
+
+**Lint is RED BY DESIGN** — the repo carries **135 errors / 204 warnings (339 problems) across
+218 files** with `npm run lint` (measured 2026-09-18 at HEAD `2897a645`, 1292 files linted).
+This is pre-existing debt, not a failure of the change under judgement: it is **frozen in
+`scripts/lint-baseline.json`** (keyed by exact identity `<file>|<ruleId>|<severity>`) and gated by
+`npm run lint:gate`, which is what the change must not break. The gate:
+
+- runs eslint over the **FULL tree** (`eslint .` from the repo root, root-local
+  `node_modules/eslint`) — never a file-scoped or partial run;
+- **FAILS on NEW/INCREASED problems** (printed `NEW/INCREASED <file> <rule> <before> -> <after>`);
+- **FAILS on STALE/orphan baseline entries** — a baselined problem that no longer exists means the
+  baseline no longer describes the tree and would hide the very regressions the gate exists to
+  catch. Paying debt down therefore requires `npm run lint:baseline` + committing the refreshed
+  baseline in the same commit as the paydown;
+- **ALWAYS fails on a parse error** (`fatal: true`), and `npm run lint:baseline` **refuses to
+  write** a baseline while one exists — a file that does not parse hides every other result for it,
+  so it must be repaired, never recorded.
+
+Gitignored build output is excluded so generated code is never linted: `eslint.config.mjs`'s
+`globalIgnores` covers `**/.next-cli-build/**` (the `**/` prefix is required — flat-config ignore
+patterns containing a slash are anchored to the config's base path, and without it the nested
+`cli/app/.next-cli-build/**` + `.next-cli-build/standalone/**` copies put 2166 generated files,
+63% of the tree, back into the lint scope).
 
 ## Architecture (the parts that matter for federation)
 
@@ -102,6 +127,11 @@ credentials — skip them.
   evaluator caps 100 iterations / 1M in / 384k out, deepseek-v4-flash judge.
 - Tier 2 judge runs against task criteria — create GitReins tasks per board task
   (`gitreins task create`), complete with `gitreins task complete` → judge verdict.
+- **Lint**: `guards.lint` stays **false** in `.gitreins/config.yaml` — `npm run lint` is
+  red by design (135 errors / 204 warnings of pre-existing debt, frozen in
+  `scripts/lint-baseline.json`). Judge lint changes with the full-tree
+  `npm run lint:gate` (fails on NEW/INCREASED problems, on STALE baseline entries, and always on
+  parse errors); pay debt down with `npm run lint:baseline`. Full status: see "Commands".
 - Commit style: Conventional Commits (`feat(federation): …`). Update
   `CHANGELOG.md` for user-visible changes.
 

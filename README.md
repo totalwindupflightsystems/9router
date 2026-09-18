@@ -346,7 +346,11 @@ Notes:
 - `tests/` is its own npm package — vitest must run from `tests/` (the root
   `npm test` script does this for you); running vitest from the repo root breaks
   the `@/` alias resolution.
-- Lint with `npx eslint .` from the repo root.
+- Lint with `npm run lint` from the repo root (full-tree eslint). Lint is **red by design**
+  at ~135 errors / ~204 warnings of pre-existing debt — that debt is frozen in
+  `scripts/lint-baseline.json`, so judge lint changes with `npm run lint:gate` (fails on
+  NEW/INCREASED problems, on STALE baseline entries, and always on parse errors) rather than a
+  raw run, and pay debt down with `npm run lint:baseline`.
 
 ---
 

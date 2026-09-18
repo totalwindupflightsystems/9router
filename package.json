@@ -16,7 +16,10 @@
     "cli:pack": "npm --prefix cli run pack:cli",
     "cli:publish": "npm --prefix cli run publish:cli",
     "test": "node scripts/check-test-deps.mjs && cd tests && ./node_modules/.bin/vitest run",
-    "test:e2e": "node tests/federation/e2e.mjs"
+    "test:e2e": "node tests/federation/e2e.mjs",
+    "lint": "eslint .",
+    "lint:gate": "node scripts/lint-baseline.mjs",
+    "lint:baseline": "node scripts/lint-baseline.mjs --update"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
