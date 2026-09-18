@@ -892,3 +892,19 @@ tasks:
   status: complete
   created_at: '2026-09-18T07:25:30.689371+00:00'
   completed_at: '2026-09-18T07:56:02.153163+00:00'
+- id: HYG-9ROUTER-5
+  title: 'Unblock the eslint-config-next 16.3.5 bump: fix the 7 relative-destination
+    navigations flagged by @next/next/no-location-assign-relative-destination'
+  criteria:
+  - npm run lint:gate exits 0 at 135 errors / 204 warnings with scripts/lint-baseline.json
+    unchanged; eslint-config-next is 16.3.5 in package.json and package-lock.json;
+    the 7 navigations (src/app/login/page.js:47,89,115,128,132; src/shared/components/Header.js:222;
+    src/app/(dashboard)/dashboard/profile/page.js:759) no longer report @next/next/no-location-assign-relative-destination
+    while preserving behaviour (login -> /dashboard, logout -> /login, OIDC/SAML ->
+    the /api/auth/*/start routes via full-document navigation); npm run build exits
+    0; the full vitest suite judged by tests/__baseline__/verify-no-regression.mjs
+    exits 0; eslint ^10 stays deferred and is re-measured (grep -c addGlobals on next's
+    vendored babel eslint-parser = 0).
+  status: complete
+  created_at: '2026-09-18T08:17:00.522469+00:00'
+  completed_at: '2026-09-18T08:28:41.524246+00:00'
