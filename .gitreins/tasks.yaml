@@ -908,3 +908,14 @@ tasks:
   status: complete
   created_at: '2026-09-18T08:17:00.522469+00:00'
   completed_at: '2026-09-18T08:28:41.524246+00:00'
+- id: QA-9ROUTER-23
+  title: Make the production Dockerfile reproducible and registry-neutral
+  criteria:
+  - Dockerfile copies package-lock.json and uses npm ci; removes hardcoded mirror
+    dependency from the production build path; Dockerfile syntax/config checks pass;
+    npm ci --dry-run remains clean; npm run build passes; relevant tests or static
+    assertions cover the lockfile/install contract; no regression against the repository
+    baseline.
+  status: complete
+  created_at: '2026-09-18T11:29:29.476400+00:00'
+  completed_at: '2026-09-18T11:41:14.681330+00:00'
