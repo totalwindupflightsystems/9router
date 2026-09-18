@@ -875,3 +875,20 @@ tasks:
   status: complete
   created_at: '2026-09-18T05:12:02.811946+00:00'
   completed_at: '2026-09-18T06:02:39.216130+00:00'
+- id: DEPS-002
+  title: Refresh root npm dependency set (15 outdated packages, 5 majors)
+  criteria:
+  - package.json ranges are refreshed to the target versions for better-sqlite3 13,
+    chalk 6, confbox 0.3, esbuild 0.28, eslint 10, eslint-config-next 16.3.5, http-proxy-middleware
+    4, material-symbols 0.47, open 11.0.4, react and react-dom 19.3, react-is 19.3,
+    socks-proxy-agent 10, undici 8, uuid 14; any package left at an older major is
+    documented in the commit body with the measured reason it was deferred
+  - npm run build exits 0 on the refreshed tree
+  - a fresh full vitest run judged by node tests/__baseline__/verify-no-regression.mjs
+    exits 0 with no pass->fail regressions beyond tests/__baseline__/known-fails.txt
+  - npm run lint:gate exits 0 with totals not worse than 135 errors / 204 warnings
+  - package-lock.json diff is limited to the refreshed packages and their transitive
+    dependencies
+  status: complete
+  created_at: '2026-09-18T07:25:30.689371+00:00'
+  completed_at: '2026-09-18T07:48:43.243312+00:00'
