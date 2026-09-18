@@ -919,3 +919,22 @@ tasks:
   status: complete
   created_at: '2026-09-18T11:29:29.476400+00:00'
   completed_at: '2026-09-18T11:41:14.681330+00:00'
+- id: QA-9ROUTER-8
+  title: Add local build fallback for standalone compose
+  criteria:
+  - Make the standalone Docker Compose deployment resilient when third-party image
+    pulls fail on clean/rootless hosts, with explicit local-build fallback behavior
+    and regression tests/docs; prove compose config and relevant tests.
+  status: complete
+  created_at: '2026-09-18T12:07:04.664668+00:00'
+  completed_at: '2026-09-18T12:26:37.167752+00:00'
+- id: QA-9ROUTER-17
+  title: Repair QA launch/collect evidence handoff
+  criteria:
+  - The bunker QA launch/collect flow must produce and consume a deterministic launch
+    metadata record for the same evidence path, and regression tests must prove a
+    successful launch is collectible plus a mismatched/missing metadata path is reported
+    explicitly; no false zero-evidence success.
+  status: complete
+  created_at: '2026-09-18T12:52:02.032554+00:00'
+  completed_at: '2026-09-18T12:59:46.409813+00:00'
