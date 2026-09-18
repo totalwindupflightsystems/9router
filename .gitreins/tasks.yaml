@@ -1047,3 +1047,11 @@ tasks:
   status: complete
   created_at: '2026-09-18T19:37:14.620056+00:00'
   completed_at: '2026-09-18T19:41:44.327747+00:00'
+- id: FED-GAP-04
+  title: Assert real health and free-tier completion in federation E2E
+  criteria:
+  - Federation E2E must exercise the real /api/health route and a free-tier completion,
+    with deterministic pass/fail checks and no standalone regression.
+  status: complete
+  created_at: '2026-09-18T19:58:50.864420+00:00'
+  completed_at: '2026-09-18T20:28:16.720379+00:00'
