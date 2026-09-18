@@ -2,8 +2,88 @@ import { Readable } from "stream";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 import { dbg } from "./debugLog.js";
 
-const originalFetch = globalThis.fetch;
+// ─── Global fetch patch idempotency (QA-9ROUTER-18) ─────────────────────────
+// This module patches globalThis.fetch. Re-evaluating the module — vitest
+// vi.resetModules(), dev/HMR, next worker threads — used to install a SECOND
+// wrapper whose "original fetch" was the FIRST wrapper, so every wrapper layer
+// re-attempted the (dead) proxy: ONE fetch produced 2^N-1 proxy attempts and
+// warnings after N evaluations.
+//
+// The wrapper is therefore tagged with a process-wide symbol and the real
+// inner fetch is resolved at CALL time by unwrapping every tagged wrapper —
+// never captured at module-evaluation time.
+const PATCH_MARK = Symbol.for("9router.proxyFetch.patched");
+const INNER_FETCH = Symbol.for("9router.proxyFetch.innerFetch");
+// Last-resort fetch captured at module evaluation. Only consulted when a tagged
+// wrapper cannot be unwrapped (foreign/older patch without an inner fetch).
+const fallbackFetch = globalThis.fetch;
+
 const proxyDispatchers = new Map();
+
+function isPatchedFetch(fn) {
+  return typeof fn === "function" && fn[PATCH_MARK] === true;
+}
+
+/**
+ * Unwrap a chain of tagged wrappers down to the first untagged function.
+ * Returns null when the chain is cyclic or a layer has no usable inner fetch.
+ */
+function unwrapFetch(fn) {
+  let current = fn;
+  const seen = new Set();
+  while (isPatchedFetch(current)) {
+    if (seen.has(current)) return null;
+    seen.add(current);
+    const inner = current[INNER_FETCH];
+    if (typeof inner !== "function") return null;
+    current = inner;
+  }
+  return typeof current === "function" ? current : null;
+}
+
+/**
+ * Resolve the fetch that actually performs the request, AT CALL TIME.
+ * An untagged function (native fetch, or a test stub installed via
+ * `globalThis.fetch = vi.fn()`) is respected as-is; a tagged wrapper is
+ * unwrapped so a stacked chain collapses to the real fetch. Never returns a
+ * tagged wrapper, so the wrapper can never recurse into itself.
+ */
+function resolveInnerFetch() {
+  const current = globalThis.fetch;
+  if (!isPatchedFetch(current)) return current;
+
+  const unwrapped = unwrapFetch(current);
+  if (unwrapped) return unwrapped;
+
+  // Degenerate chain (cyclic, or a foreign wrapper without an inner fetch):
+  // prefer the evaluation-time fetch when it is usable, otherwise fail loud
+  // instead of looping back into this wrapper forever.
+  const fallback = unwrapFetch(fallbackFetch);
+  if (fallback) return fallback;
+  return typeof fallbackFetch === "function" && !isPatchedFetch(fallbackFetch)
+    ? fallbackFetch
+    : undefined;
+}
+
+// ─── Proxy-failure warning dedupe (QA-9ROUTER-18) ───────────────────────────
+// Keyed by "<proxyUrl>|<message>" and stored on a process-wide symbol so the
+// dedupe SURVIVES module re-evaluation: one warning per distinct failure per
+// process instead of one per evaluation (the flood reached 262,143 lines).
+// Bounded so a pathological error message cannot grow the set without limit.
+const PROXY_WARN_SEEN = Symbol.for("9router.proxyFetch.warnedProxyFailures");
+const PROXY_WARN_MAX_KEYS = 500;
+if (!globalThis[PROXY_WARN_SEEN]) globalThis[PROXY_WARN_SEEN] = new Set();
+const warnedProxyFailures = globalThis[PROXY_WARN_SEEN];
+
+function warnProxyFailureOnce(fallbackLabel, proxyUrl, message) {
+  const key = `${proxyUrl}|${message}`;
+  if (warnedProxyFailures.has(key)) {
+    dbg("PROXY", `proxy failed, falling back to ${fallbackLabel} (already warned): ${message}`);
+    return;
+  }
+  if (warnedProxyFailures.size < PROXY_WARN_MAX_KEYS) warnedProxyFailures.add(key);
+  console.warn(`[ProxyFetch] Proxy failed, falling back to ${fallbackLabel}: ${message}`);
+}
 
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
@@ -293,6 +373,9 @@ async function createBypassRequest(parsedUrl, realIP, options) {
 
 export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
   const targetUrl = typeof url === "string" ? url : url.toString();
+  // Resolved per call, never at module-evaluation time: a re-evaluated module
+  // must not treat a previous wrapper as the "original" fetch.
+  const innerFetch = resolveInnerFetch();
 
   // Vercel relay: forward request via relay headers
   const vercelRelayUrl = normalizeString(proxyOptions?.vercelRelayUrl);
@@ -303,7 +386,7 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       "x-relay-target": `${parsed.protocol}//${parsed.host}`,
       "x-relay-path": `${parsed.pathname}${parsed.search}`,
     };
-    return originalFetch(vercelRelayUrl, { ...options, headers: relayHeaders });
+    return innerFetch(vercelRelayUrl, { ...options, headers: relayHeaders });
   }
 
   const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
@@ -316,12 +399,12 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       // Proxy resolves DNS externally (not affected by /etc/hosts) — use proxy directly
       try {
         const dispatcher = await getDispatcher(proxyUrl);
-        return await originalFetch(url, { ...options, dispatcher });
+        return await innerFetch(url, { ...options, dispatcher });
       } catch (proxyError) {
         if (proxyOptions?.strictProxy === true) {
           throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
         }
-        console.warn(`[ProxyFetch] Proxy failed, falling back to direct bypass: ${proxyError.message}`);
+        warnProxyFailureOnce("direct bypass", proxyUrl, proxyError.message);
       }
     }
     // No proxy — manually resolve real IP to bypass DNS spoof
@@ -337,20 +420,20 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
   if (proxyUrl) {
     try {
       const dispatcher = await getDispatcher(proxyUrl);
-      return await originalFetch(url, { ...options, dispatcher });
+      return await innerFetch(url, { ...options, dispatcher });
     } catch (proxyError) {
       // If strictProxy is enabled, fail hard instead of falling back to direct
       if (proxyOptions?.strictProxy === true) {
         throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
       }
-      console.warn(`[ProxyFetch] Proxy failed, falling back to direct: ${proxyError.message}`);
-      return originalFetch(url, options);
+      warnProxyFailureOnce("direct", proxyUrl, proxyError.message);
+      return innerFetch(url, options);
     }
   }
 
   // got-scraping disabled — use native fetch directly
   // (Re-enable per-host by wrapping with tryGotScrapingFetch when needed)
-  return originalFetch(url, options);
+  return innerFetch(url, options);
 }
 
 /**
@@ -360,8 +443,15 @@ async function patchedFetch(url, options = {}) {
   return proxyAwareFetch(url, options, null);
 }
 
-// Idempotency guard — only patch once to avoid wrapping multiple times
-if (globalThis.fetch !== patchedFetch) {
+// ─── Install at most once per global (QA-9ROUTER-18) ────────────────────────
+// Tag the wrapper with its inner fetch, then install it only when the current
+// global fetch is not already one of our wrappers. A re-evaluated module
+// (vi.resetModules, HMR, worker threads) therefore leaves the installed
+// wrapper in place instead of stacking another layer on top of it.
+patchedFetch[PATCH_MARK] = true;
+patchedFetch[INNER_FETCH] = resolveInnerFetch();
+
+if (!isPatchedFetch(globalThis.fetch)) {
   globalThis.fetch = patchedFetch;
 }
 
