@@ -27,6 +27,21 @@ const SPECIALIZED = new Set([
 function sanitize(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers)) {
+    // KEY-SCOPED normalization for kimi headers whose value is host/install
+    // identity, not part of the provider request contract:
+    //   X-Msh-Device-Name <- hostname()            (open-sse/config/appConstants.js buildKimiHeaders)
+    //   X-Msh-Version     <- package.json version  (getAppPackageVersion)
+    // Both are environment-dependent (differ per machine, and X-Msh-Version
+    // after every version bump), so recording them in a golden snapshot makes
+    // the case pass only on the host/version that captured it.
+    if (typeof v === "string" && k === "X-Msh-Device-Name") {
+      out[k] = "<HOST>";
+      continue;
+    }
+    if (typeof v === "string" && k === "X-Msh-Version") {
+      out[k] = "<APP-VER>";
+      continue;
+    }
     out[k] = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")
