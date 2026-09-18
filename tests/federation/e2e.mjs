@@ -7,8 +7,9 @@
 //
 //   standalone boot (all three boot clean with FEDERATION_MODE unset)
 //   → central starts, edges LINKED (heartbeat + replication sync)
+//   → /v1 completions (JSON and streamed SSE) proxied up to central
 //   → kill central → edges flip DEGRADED after the outage threshold
-//   → edges still serve /v1 from the local replica
+//   → edges still serve /v1 from the local replica, JSON and streamed
 //     (X-Federation-State: degraded + replicaRevision)
 //   → degraded writes are queued locally (202 + X-Federation-Queued-Write-Id)
 //   → restart central → edges RECOVERING → replay drain + delta catch-up
@@ -182,6 +183,43 @@ async function fetchJson(url, { method = "GET", token = null, body = null, heade
   return { status: res.status, headers: res.headers, json };
 }
 
+// Raw-text request — an SSE body is not JSON, so fetchJson's res.json() would
+// swallow the frames. Returns the body verbatim for frame parsing.
+async function fetchText(url, { method = "GET", token = null, body = null, headers = {} } = {}) {
+  const h = { ...headers };
+  if (token) h.authorization = `Bearer ${token}`;
+  if (body !== null && body !== undefined) h["content-type"] = "application/json";
+  const res = await fetch(url, {
+    method,
+    headers: h,
+    body: body !== null && body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, headers: res.headers, text: await res.text() };
+}
+
+// Parse an SSE body into its `data:` payloads (the terminal `[DONE]` included).
+// The delta payloads are JSON objects; a frame that does not parse is kept as
+// null so a malformed frame fails a check instead of being silently dropped.
+function parseSseFrames(text) {
+  return String(text || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => l.slice("data:".length).trim());
+}
+
+function parseSseDeltas(frames) {
+  return frames
+    .filter((f) => f !== "[DONE]")
+    .map((f) => {
+      try {
+        return JSON.parse(f);
+      } catch {
+        return null;
+      }
+    });
+}
+
 // ─── Scenario ───────────────────────────────────────────────────────────
 
 async function main() {
@@ -307,6 +345,50 @@ async function main() {
       `source=${proxied.json?.source}`
     );
 
+    // Edge proxy, product path: a completion travelling through the LINKED
+    // edge's proxy to central (proxy.js:49 forwards every /v1/* request, any
+    // method; relayResponse at proxy.js:136 pipes the reply back). The
+    // `source: "central"` marker is produced ONLY by the central child
+    // (e2e-child.mjs), so it proves the request traversed the proxy — the
+    // edge's own stand-in answers `local-replica`. X-Federation-State is a
+    // DEGRADED-only signal (headers.js / queue.js): a LINKED proxied response
+    // carries none, and that absence is asserted here.
+    const proxiedChat = await fetchJson(`${edgeAUrl}/v1/chat/completions`, {
+      method: "POST",
+      token: FED_TOKEN,
+      body: { model: "e2e-model", messages: [{ role: "user", content: "hi" }] },
+    });
+    check(
+      "edge proxy: LINKED completion via edge-a reaches central",
+      proxiedChat.status === 200 &&
+        proxiedChat.json?.source === "central" &&
+        proxiedChat.json?.choices?.[0]?.message?.content === "ok" &&
+        proxiedChat.headers.get("x-federation-state") === null,
+      `status=${proxiedChat.status} source=${proxiedChat.json?.source} state=${proxiedChat.headers.get("x-federation-state")}`
+    );
+
+    // Same hop, streaming body: the SSE relay must preserve the event-stream
+    // content type and relay every frame (two deltas + the terminal [DONE]),
+    // with the deltas still carrying the central marker.
+    const streamedChat = await fetchText(`${edgeAUrl}/v1/chat/completions`, {
+      method: "POST",
+      token: FED_TOKEN,
+      body: { model: "e2e-model", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    const streamedFrames = parseSseFrames(streamedChat.text);
+    const streamedDeltas = parseSseDeltas(streamedFrames);
+    check(
+      "edge proxy: LINKED streamed completion relays SSE from central",
+      streamedChat.status === 200 &&
+        (streamedChat.headers.get("content-type") || "").startsWith("text/event-stream") &&
+        streamedFrames[streamedFrames.length - 1] === "[DONE]" &&
+        streamedDeltas.length >= 2 &&
+        streamedDeltas.every((d) => d?.source === "central") &&
+        streamedChat.headers.get("x-federation-state") === null,
+      `status=${streamedChat.status} ct=${streamedChat.headers.get("content-type")} frames=${streamedFrames.length} ` +
+        `deltas=${streamedDeltas.length} sources=${[...new Set(streamedDeltas.map((d) => d?.source))].join(",")}`
+    );
+
     // ── Phase 2: kill central → DEGRADED
     log("phase 2: kill central");
     await killCentral(central);
@@ -344,6 +426,29 @@ async function main() {
         degradedChat.json?.source === "local-replica" &&
         degradedChat.headers.get("x-federation-state") === "degraded",
       `source=${degradedChat.json?.source} header=${degradedChat.headers.get("x-federation-state")}`
+    );
+
+    // Degraded streaming: the same streamed request is served by the local
+    // replica — SSE frames carry the `local-replica` marker and the response
+    // says the edge is degraded.
+    const degradedStream = await fetchText(`${edgeBUrl}/v1/chat/completions`, {
+      method: "POST",
+      token: FED_TOKEN,
+      body: { model: "e2e-model", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    const degradedFrames = parseSseFrames(degradedStream.text);
+    const degradedDeltas = parseSseDeltas(degradedFrames);
+    check(
+      "degraded serving: edge-b streams /v1/chat/completions from local replica",
+      degradedStream.status === 200 &&
+        (degradedStream.headers.get("content-type") || "").startsWith("text/event-stream") &&
+        degradedStream.headers.get("x-federation-state") === "degraded" &&
+        degradedFrames[degradedFrames.length - 1] === "[DONE]" &&
+        degradedDeltas.length >= 2 &&
+        degradedDeltas.every((d) => d?.source === "local-replica"),
+      `status=${degradedStream.status} ct=${degradedStream.headers.get("content-type")} ` +
+        `header=${degradedStream.headers.get("x-federation-state")} deltas=${degradedDeltas.length} ` +
+        `sources=${[...new Set(degradedDeltas.map((d) => d?.source))].join(",")}`
     );
 
     // Degraded writes: queued locally (202 + queued-write-id), NOT applied

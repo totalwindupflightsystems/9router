@@ -69,6 +69,28 @@ function tagDegraded(res) {
   if (!res.getHeader("x-federation-state")) res.setHeader("X-Federation-State", "degraded");
 }
 
+// Streaming stand-in (dependency-free): the real pipeline streams SSE deltas
+// as they arrive; this writes two delta frames + the terminal [DONE] so the
+// proxy's relay path (proxy.js relayResponse) is exercised with a real
+// event-stream body. Each delta carries the same `source` marker the JSON
+// branch uses, so a proxied stream (central) is distinguishable from one
+// served locally.
+function writeSse(res, revision) {
+  const source = ROLE === "central" ? "central" : "local-replica";
+  const delta = (content) => ({
+    choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }],
+    source,
+    replicaRevision: revision,
+  });
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+  });
+  for (const content of ["ok", "!"]) res.write(`data: ${JSON.stringify(delta(content))}\n\n`);
+  res.write("data: [DONE]\n\n");
+  res.end();
+}
+
 function safeJson(str, fallback = null) {
   if (str == null) return fallback;
   try {
@@ -87,6 +109,21 @@ async function toRequest(req) {
     headers: req.headers,
     body: body.length ? body : undefined,
   });
+}
+
+// Read (and drain) a request body as JSON. The local /v1 stand-in needs the
+// body to tell a streaming request from a non-streaming one. Returns null for
+// an absent/unparseable body — the non-streaming branch is the default.
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const buf = Buffer.concat(chunks);
+  if (!buf.length) return null;
+  try {
+    return JSON.parse(buf.toString("utf8"));
+  } catch {
+    return null;
+  }
 }
 
 // ─── Local /v1 stand-in (the real chat pipeline reads the same local
@@ -111,6 +148,11 @@ async function handleLocalV1(req, res) {
   }
 
   if (path === "/v1/chat/completions" || path === "/v1/responses") {
+    const body = await readJsonBody(req);
+    if (body?.stream === true) {
+      writeSse(res, revision);
+      return;
+    }
     writeJson(res, 200, {
       id: `e2e-${Date.now()}`,
       object: "chat.completion",
