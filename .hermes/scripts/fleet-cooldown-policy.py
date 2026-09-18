@@ -47,6 +47,7 @@ ELEVATED_PINS = {
     'h3-sdk-python-foreman': 43200,
     'h3-sdk-typescript-foreman': 43200,
     'h3-shim-foreman': 43200,
+    'h3-protocol-foreman': 43200,  # H3-PM-004 2026-09-18: 6th h3-family implementation lane (get-h3/protocol, the OpenAPI/JSON-Schema source of truth all three SDKs generate from) joins its siblings on the same 12h anti-flood pin
     'warpfs': 21600,  # Bane 2026-08-19: ALL projects to 6h window for now
 }
 
