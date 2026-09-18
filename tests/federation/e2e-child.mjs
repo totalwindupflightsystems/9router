@@ -6,12 +6,24 @@
 //     (src/lib/federation/server.js) with the same Bearer-token gate the
 //     Next.js route wrappers apply (roleGuard.js semantics, inlined here
 //     because next/server is not importable outside a Next build)
+//   - serves the REAL application route modules over this HTTP server through
+//     the Next route contract (web Request in → web Response out):
+//       GET/OPTIONS  /api/health      ← src/app/api/health/route.js (the file
+//                                        the packaged app routes to)
+//       POST /v1/chat/completions     ← src/app/api/v1/chat/completions/route.js
+//                                        for the app's credentialless
+//                                        FREE-TIER model only (FED-GAP-04)
+//     The free-tier provider's OUTBOUND transport is answered by the local
+//     fixture in free-tier-fixture.mjs, so the completion is deterministic and
+//     network-free while every other stage (auth, model resolution, free-tier
+//     credential injection, translation, SSE) is the app's real code.
 //   - runs the REAL edge proxy (proxy.js), DEGRADED write queue (queue.js),
 //     failover state machine (failover.js) and replication poll
 //     (edgeClient.js) — the same modules custom-server.js wires in
 //   - serves a minimal local /v1 stand-in that reads the local replica
 //     (the real chat pipeline reads the same local tables: accounts,
-//     combos, keys, aliases)
+//     combos, keys, aliases) for the synthetic `e2e-model` the federation
+//     lifecycle phases use
 //   - reports readiness on stdout as: E2E_READY {"role":...,"port":...}
 //
 // Env: 9ROUTER_E2E_SRC (repo src/), E2E_ROLE (central|edge|standalone),
@@ -20,11 +32,19 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto";
+import { resolveFreeTierTarget, installFreeTierFixture } from "./free-tier-fixture.mjs";
 
 const ROLE = process.env.E2E_ROLE || "edge";
 const EDGE_ID = process.env.E2E_EDGE_ID || process.env.FEDERATION_EDGE_ID || "edge";
 const PORT = Number(process.env.E2E_PORT || 0);
+
+// Captured BEFORE any app module loads (every app import below is dynamic):
+// the free-tier fixture must pass unrelated requests through to the NATIVE
+// fetch. Capturing later would pick up the app's patched proxy wrapper and
+// recurse (see installFreeTierFixture).
+const NATIVE_FETCH = globalThis.fetch;
 
 const { getAdapter } = await import("@/lib/db/driver.js");
 const {
@@ -49,6 +69,38 @@ const { getToken } = await import("@/lib/federation/config.js");
 // the same NOT_DELETED filter production applies (FED-GAP-01).
 const { getApiKeys } = await import("@/lib/db/repos/apiKeysRepo.js");
 const { DATA_DIR } = await import("@/lib/dataDir.mjs");
+
+// ─── REAL application routes (FED-GAP-04) ────────────────────────────────
+// The health route is the tracked module the packaged app serves; it is
+// loaded here and dispatched through the Next route contract below, so the
+// harness exercises the application's own route code (its status, its JSON
+// body and its CORS headers), never a hand-rolled copy. The chat route is
+// imported lazily: only instances that actually serve a free-tier completion
+// pay for loading the SSE pipeline.
+const healthRoute = await import("@/app/api/health/route.js");
+const healthRouteFile = (() => {
+  try {
+    return fileURLToPath(import.meta.resolve("@/app/api/health/route.js"));
+  } catch {
+    return path.join(String(process.env["9ROUTER_E2E_SRC"] || ""), "app", "api", "health", "route.js");
+  }
+})();
+// Provenance: the sha256 of the route source that is actually loaded. The E2E
+// compares it against the file in the repo, so the check cannot pass against a
+// re-implemented (harness-only) endpoint.
+const healthRouteSha256 = createHash("sha256").update(fs.readFileSync(healthRouteFile)).digest("hex");
+
+// The app's credentialless free-tier completion target + the deterministic
+// local transport fixture. The fixture is installed unconditionally: with it
+// in place the harness cannot reach the live free-tier endpoint at all.
+const FREE_TIER = await resolveFreeTierTarget();
+const freeTierFixture = installFreeTierFixture(FREE_TIER, { passthrough: NATIVE_FETCH });
+let chatRoute = null;
+async function getChatRoute() {
+  if (!chatRoute) chatRoute = await import("@/app/api/v1/chat/completions/route.js");
+  return chatRoute;
+}
+const isFreeTierModel = (model) => typeof model === "string" && model === FREE_TIER.model;
 
 // ─── Server-derived machine id (harness-side) ────────────────────────────
 // The REAL /api/keys route binds a new key to a server-derived machine id
@@ -153,13 +205,61 @@ async function toRequest(req) {
   });
 }
 
-// Read (and drain) a request body as JSON. The local /v1 stand-in needs the
-// body to tell a streaming request from a non-streaming one. Returns null for
-// an absent/unparseable body — the non-streaming branch is the default.
-async function readJsonBody(req) {
+// Read (and drain) a request body ONCE, returning the raw bytes. The raw
+// buffer is what the Next route contract needs (a Request re-built from the
+// bytes) and what the JSON branches parse, so a request that is dispatched to
+// a real route module is not consumed twice.
+async function readRawBody(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
-  const buf = Buffer.concat(chunks);
+  return Buffer.concat(chunks);
+}
+
+function requestFrom(req, buf) {
+  return new Request(`http://127.0.0.1${req.url}`, {
+    method: req.method,
+    headers: req.headers,
+    body: buf.length ? buf : undefined,
+  });
+}
+
+// ─── Next route contract adapter ─────────────────────────────────────────
+// Next dispatches an app-route module by handing it a web Request and writing
+// the returned web Response to the socket (status, headers, streamed body).
+// These helpers are that contract: the REAL route module runs and its REAL
+// Response is what the client receives. What the harness does not reproduce is
+// Next's own router/telemetry around the module — the route logic is the
+// app's.
+async function writeWebResponse(res, response) {
+  const headers = {};
+  for (const [k, v] of response.headers) headers[k] = v;
+  res.writeHead(response.status, headers);
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  const reader = response.body.getReader();
+  let clientGone = false;
+  res.on("close", () => {
+    clientGone = true;
+    reader.cancel().catch(() => {});
+  });
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done || clientGone) break;
+    if (!res.write(Buffer.from(value))) await new Promise((r) => res.once("drain", r));
+  }
+  if (!clientGone) res.end();
+}
+
+async function serveRoute(req, res, handler) {
+  const response = await handler(await toRequest(req));
+  await writeWebResponse(res, response);
+}
+
+// Read a request body as JSON. Returns null for an absent/unparseable body —
+// the non-streaming branch is the default.
+function bufToJson(buf) {
   if (!buf.length) return null;
   try {
     return JSON.parse(buf.toString("utf8"));
@@ -168,13 +268,24 @@ async function readJsonBody(req) {
   }
 }
 
-// ─── Local /v1 stand-in (the real chat pipeline reads the same local
-//     tables; this minimal handler proves replica-backed serving) ────────
+// ─── Local /v1 handlers ─────────────────────────────────────────────────
+// Two surfaces live behind /v1 on a child instance:
+//   * the REAL chat route module (FED-GAP-04) for the app's credentialless
+//     free-tier model — the full app pipeline runs, with only the free
+//     provider's outbound transport answered by the local fixture;
+//   * the minimal replica-backed stand-in for the synthetic `e2e-model` the
+//     federation lifecycle phases use (the real chat pipeline reads the same
+//     local tables: accounts, combos, keys, aliases).
 async function handleLocalV1(req, res) {
   const db = await getAdapter();
   const path = (req.url || "").split("?")[0];
   const meta = db.get(`SELECT lastAppliedRevision FROM federation_meta WHERE id = 1`);
   const revision = meta?.lastAppliedRevision ?? 0;
+
+  // The body is read exactly once: the free-tier branch re-builds a web
+  // Request from these bytes for the real route, the stand-in parses them.
+  const bodyBuf = await readRawBody(req);
+  const body = bufToJson(bodyBuf);
 
   if (path === "/v1/models" || path === "/v1/models/") {
     const rows = db.all(
@@ -189,8 +300,16 @@ async function handleLocalV1(req, res) {
     return;
   }
 
+  if (path === "/v1/chat/completions" && isFreeTierModel(body?.model)) {
+    // REAL route module, Next route contract. `source`/`replicaRevision` are
+    // stand-in markers and deliberately absent here: this response is the
+    // application's OpenAI-compatible completion, not the harness's.
+    const route = await getChatRoute();
+    await writeWebResponse(res, await route.POST(requestFrom(req, bodyBuf)));
+    return;
+  }
+
   if (path === "/v1/chat/completions" || path === "/v1/responses") {
-    const body = await readJsonBody(req);
     if (body?.stream === true) {
       writeSse(res, revision);
       return;
@@ -296,9 +415,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // The REAL application health route (src/app/api/health/route.js) through
+    // the Next route contract — GET and OPTIONS are the module's own exports.
+    // FED-GAP-04: this replaced the harness-only {ok, role, edgeId, state}
+    // body, which now lives on the harness-only /api/e2e/instance path below.
     if (path === "/api/health") {
-      const state = ROLE === "edge" ? getEdgeState(db) : null;
-      writeJson(res, 200, { ok: true, role: ROLE, edgeId: EDGE_ID, state });
+      await serveRoute(req, res, req.method === "OPTIONS" ? healthRoute.OPTIONS : healthRoute.GET);
+      return;
+    }
+
+    // Harness-only instance introspection. NOT an application route: it
+    // reports this child's role/edge id/edge state plus the provenance of the
+    // real route module it serves and the free-tier fixture evidence, so the
+    // E2E can assert that the completion really reached the free-tier
+    // provider's transport (instead of the replica stand-in).
+    if (path === "/api/e2e/instance") {
+      writeJson(res, 200, {
+        ok: true,
+        role: ROLE,
+        edgeId: EDGE_ID,
+        state: ROLE === "edge" ? getEdgeState(db) : null,
+        healthRoute: { file: healthRouteFile, sha256: healthRouteSha256 },
+        freeTier: {
+          providerId: FREE_TIER.providerId,
+          alias: FREE_TIER.alias,
+          model: FREE_TIER.model,
+          upstream: { ...freeTierFixture.state },
+        },
+      });
       return;
     }
 

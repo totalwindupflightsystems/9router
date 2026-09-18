@@ -15,6 +15,21 @@
 //   → restart central → edges RECOVERING → replay drain + delta catch-up
 //     → LINKED → writes reconcile (central sees the queued write)
 //
+// FED-GAP-04 adds the two REAL application-route boundaries the dogfood run
+// only covered by hand, and proves each one is load-bearing:
+//
+//   * GET/OPTIONS /api/health is served by the tracked route module
+//     (src/app/api/health/route.js) through the Next route contract, and a
+//     mutated copy of that module carrying the OLD harness-only body is shown
+//     to FAIL the same assertion (red-proof);
+//   * a completion for the app's credentialless FREE-TIER model travels the
+//     real /v1/chat/completions route (API-key gate, free-tier credential
+//     injection, provider selection, translation, SSE) with the free
+//     provider's outbound transport answered by a local fixture — including
+//     through a LINKED edge (relayed client key) and from a DEGRADED edge
+//     while central is down. The fixture records the request it served, so
+//     "the free-tier provider really ran" is asserted, not inferred.
+//
 // Standalone runnable: `node tests/federation/e2e.mjs` (no .test. suffix so
 // vitest does not auto-collect it). Prints a PASS/FAIL summary; exit code
 // reflects the result. Self-contained: temp dirs are cleaned up on exit.
@@ -23,10 +38,12 @@
 //   E2E_TIMEOUT_MS   overall budget (default 120000)
 //   E2E_KEEP_TMP     keep temp dirs on failure (default: clean up)
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { FIXTURE_TEXT, joinDeltaContent } from "./free-tier-fixture.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -40,6 +57,38 @@ const KEEP_TMP = process.env.E2E_KEEP_TMP === "1";
 const FED_TOKEN = "e2e-shared-federation-token";
 const JWT_SECRET = "e2e-jwt-secret-not-shared-with-browser";
 const API_KEY_SECRET = "e2e-api-key-secret";
+
+// ─── FED-GAP-04 constants ────────────────────────────────────────────────
+// The tracked health route the packaged app serves, and the pre-task
+// harness-only body it replaced (used to prove the real-route assertion is
+// load-bearing: a route module carrying this body must FAIL it).
+const HEALTH_ROUTE_FILE = path.join(SRC, "app", "api", "health", "route.js");
+const HARNESS_ONLY_HEALTH_ROUTE = `// MUTANT — the pre-FED-GAP-04 harness-only /api/health body.
+import { NextResponse } from "next/server";
+
+const ROLE = process.env.E2E_ROLE || "edge";
+const EDGE_ID = process.env.E2E_EDGE_ID || process.env.FEDERATION_EDGE_ID || "edge";
+
+export async function GET() {
+  return NextResponse.json({ ok: true, role: ROLE, edgeId: EDGE_ID, state: null });
+}
+`;
+
+// The real route's contract, asserted as properties of the HTTP response:
+// 200 + an application/json body that is exactly {"ok":true} + the module's
+// CORS headers. The old harness-only body ({ok, role, edgeId, state}) fails
+// on the key set, which is the point.
+function isRealHealthRouteResponse(res) {
+  const keys = res?.json && typeof res.json === "object" ? Object.keys(res.json) : [];
+  return (
+    res?.status === 200 &&
+    keys.length === 1 &&
+    keys[0] === "ok" &&
+    res.json.ok === true &&
+    (res.headers.get("content-type") || "").includes("application/json") &&
+    res.headers.get("access-control-allow-origin") === "*"
+  );
+}
 
 const results = [];
 let tmpRoot = null;
@@ -220,6 +269,69 @@ function parseSseDeltas(frames) {
     });
 }
 
+// ─── FED-GAP-04 helpers ─────────────────────────────────────────────────
+// The harness's own introspection path (never /api/health): role/edge id,
+// the provenance of the health route module the instance serves, and the
+// free-tier fixture evidence.
+async function instanceInfo(baseUrl) {
+  const r = await fetchJson(`${baseUrl}/api/e2e/instance`);
+  return { status: r.status, ...(r.json || {}) };
+}
+
+// A real client API key created through the app's own write path
+// (POST /api/keys → applyReplayMutation → createApiKey).
+async function createClientKey(baseUrl, name) {
+  const r = await fetchJson(`${baseUrl}/api/keys`, {
+    method: "POST",
+    token: FED_TOKEN,
+    body: { name },
+  });
+  return { status: r.status, key: r.json?.key ?? null, id: r.json?.id ?? null };
+}
+
+// One streamed completion for the free-tier model through the real route.
+async function freeTierCompletion(baseUrl, { key, model }) {
+  const res = await fetchText(`${baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    token: key,
+    body: {
+      model,
+      stream: true,
+      messages: [{ role: "user", content: "free-tier e2e probe" }],
+    },
+  });
+  const frames = parseSseFrames(res.text);
+  return {
+    status: res.status,
+    contentType: res.headers.get("content-type") || "",
+    federationState: res.headers.get("x-federation-state"),
+    frames,
+    deltas: parseSseDeltas(frames),
+    content: joinDeltaContent(res.text),
+    body: res.text,
+  };
+}
+
+// 200 + SSE + terminal [DONE] + exactly the fixture's delta content (the
+// fixture splits its text across two frames, so joining them proves the
+// pipeline re-emitted every frame rather than one blob).
+function freeTierCompletionOk(r) {
+  return (
+    r.status === 200 &&
+    r.contentType.startsWith("text/event-stream") &&
+    r.frames.length > 0 &&
+    r.frames[r.frames.length - 1] === "[DONE]" &&
+    r.content === FIXTURE_TEXT
+  );
+}
+
+function freeTierDetail(r, prefix = "") {
+  return (
+    `${prefix}status=${r.status} ct=${r.contentType} frames=${r.frames.length} ` +
+    `content=${JSON.stringify(r.content)}`
+  );
+}
+
 // ─── Scenario ───────────────────────────────────────────────────────────
 
 async function main() {
@@ -239,11 +351,148 @@ async function main() {
     const sa3 = spawnInstance({ role: "standalone", dataDir: path.join(tmpRoot, "sa3") });
     const saInfo = await Promise.all([sa1.ready, sa2.ready, sa3.ready]);
     check("standalone boot: 3 instances boot clean", saInfo.every((i) => i.role === "standalone"));
+
+    // ── FED-GAP-04 (a): the REAL application health route ────────────────
+    // GET /api/health is dispatched to src/app/api/health/route.js and its
+    // own Response is relayed, so the asserted contract is the application's:
+    // 200 + exactly {"ok":true} + the module's CORS headers. The pre-task
+    // harness-only body ({ok, role, edgeId, state}) would fail this.
+    const healthRouteSha = createHash("sha256").update(fs.readFileSync(HEALTH_ROUTE_FILE)).digest("hex");
     for (const info of saInfo) {
-      const h = await fetchJson(`http://127.0.0.1:${info.port}/api/health`);
-      check(`standalone health: role=standalone on :${info.port}`, h.status === 200 && h.json?.role === "standalone");
+      const base = `http://127.0.0.1:${info.port}`;
+      const h = await fetchJson(`${base}/api/health`);
+      check(
+        `real route: GET /api/health on :${info.port} returns 200 {ok:true} (src/app/api/health/route.js)`,
+        isRealHealthRouteResponse(h),
+        `status=${h.status} body=${JSON.stringify(h.json)} acao=${h.headers.get("access-control-allow-origin")}`
+      );
     }
+
+    const saBase = `http://127.0.0.1:${saInfo[0].port}`;
+    const preflight = await fetchJson(`${saBase}/api/health`, { method: "OPTIONS" });
+    check(
+      "real route: OPTIONS /api/health answers the module's 204 CORS preflight",
+      preflight.status === 204 && preflight.headers.get("access-control-allow-origin") === "*",
+      `status=${preflight.status} acao=${preflight.headers.get("access-control-allow-origin")}`
+    );
+
+    // Provenance: the route the instance serves is the tracked file itself —
+    // the instance reports the module it loaded and its sha256, and the run
+    // compares that against the repo's copy.
+    const saInstance = await instanceInfo(saBase);
+    check(
+      "real route: /api/health is served by the tracked module (file + sha256 provenance)",
+      saInstance.healthRoute?.file === HEALTH_ROUTE_FILE && saInstance.healthRoute?.sha256 === healthRouteSha,
+      `served=${saInstance.healthRoute?.file} sha=${String(saInstance.healthRoute?.sha256).slice(0, 12)} ` +
+        `expected=${HEALTH_ROUTE_FILE} sha=${healthRouteSha.slice(0, 12)}`
+    );
+
+    // The standalone lifecycle observation moved off /api/health (it is not
+    // the application's contract) onto the harness-only introspection path.
+    for (const info of saInfo) {
+      const inst = await instanceInfo(`http://127.0.0.1:${info.port}`);
+      check(
+        `standalone harness: /api/e2e/instance reports role=standalone on :${info.port}`,
+        inst.status === 200 && inst.role === "standalone",
+        `role=${inst.role} edgeId=${inst.edgeId}`
+      );
+    }
+
+    // ── FED-GAP-04 (b): a real FREE-TIER completion ──────────────────────
+    // The model comes from the instance's own catalog derivation (the app's
+    // credentialless free provider), and the request travels the REAL
+    // /v1/chat/completions route: API-key gate → free-tier virtual
+    // credential → provider selection → translation → SSE, with only the
+    // provider's outbound transport answered locally.
+    const FREE_MODEL = saInstance.freeTier?.model;
+    check(
+      "free-tier completion: the instance derives the model from the app's credentialless free catalog",
+      typeof FREE_MODEL === "string" && FREE_MODEL.includes("/"),
+      `provider=${saInstance.freeTier?.providerId} alias=${saInstance.freeTier?.alias} model=${FREE_MODEL}`
+    );
+
+    const saKey = await createClientKey(saBase, "e2e-free-tier-key");
+    check(
+      "free-tier completion: client API key created through the app's /api/keys path",
+      saKey.status === 201 && !!saKey.key,
+      `status=${saKey.status} id=${saKey.id ?? "none"}`
+    );
+
+    const freeCompletion = await freeTierCompletion(saBase, { key: saKey.key, model: FREE_MODEL });
+    check(
+      "free-tier completion: real /v1/chat/completions streams the free-tier model to a terminal [DONE]",
+      freeTierCompletionOk(freeCompletion),
+      freeTierDetail(freeCompletion)
+    );
+
+    // The fixture's own record is what makes "the free-tier provider really
+    // ran" an assertion instead of an inference: the app's executor called the
+    // provider's declared transport (bootstrap + chat), with the anti-abuse
+    // system marker its transformRequest injects, and nothing escaped to a
+    // live host.
+    let saEvidence = null;
+    try {
+      const after = await instanceInfo(saBase);
+      saEvidence = after.freeTier?.upstream ?? null;
+    } catch {
+      saEvidence = null;
+    }
+    check(
+      "free-tier completion: the app's free-tier executor drove the provider transport (fixture evidence, no live network)",
+      saEvidence?.chatRequests === 1 &&
+        saEvidence?.bootstrapRequests >= 1 &&
+        saEvidence?.offTargetBlocked === 0 &&
+        saEvidence?.lastChatRequest?.model === "mimo-auto" &&
+        saEvidence?.lastChatRequest?.stream === true &&
+        saEvidence?.lastChatRequest?.systemMessages === 1,
+      `evidence=${JSON.stringify(saEvidence)}`
+    );
+
+    // Negative control: the real route enforces the app's API-key gate. The
+    // replica stand-in never checks keys, so a 401 here is the discriminator
+    // between "the application answered" and "the harness answered".
+    const bogus = await fetchText(`${saBase}/v1/chat/completions`, {
+      method: "POST",
+      token: "sk-not-a-valid-key",
+      body: { model: FREE_MODEL, stream: true, messages: [{ role: "user", content: "hi" }] },
+    });
+    const afterBogus = await instanceInfo(saBase);
+    check(
+      "free-tier completion: an invalid API key is rejected 401 by the real route (the /v1 stand-in never checks keys)",
+      bogus.status === 401 &&
+        /invalid api key/i.test(bogus.text) &&
+        afterBogus.freeTier?.upstream?.chatRequests === 1,
+      `status=${bogus.status} body=${JSON.stringify(bogus.text.slice(0, 120))} ` +
+        `upstreamChatRequests=${afterBogus.freeTier?.upstream?.chatRequests}`
+    );
+
     await Promise.all([stopInstance(sa1), stopInstance(sa2), stopInstance(sa3)]);
+
+    // ── Phase 0b: red-proof — the real-route check is load-bearing ───────
+    // The same instance is booted with ONE route file overridden by the
+    // pre-task harness-only body (`9ROUTER_E2E_SRC_OVERLAY` serves that one
+    // file ahead of the repo source). If the assertion above still passed
+    // against this endpoint it would be asserting nothing.
+    log("phase 0b: route-boundary red-proof (mutated health route)");
+    const mutantSrc = path.join(tmpRoot, "mutant-src");
+    fs.mkdirSync(path.join(mutantSrc, "app", "api", "health"), { recursive: true });
+    fs.writeFileSync(path.join(mutantSrc, "app", "api", "health", "route.js"), HARNESS_ONLY_HEALTH_ROUTE);
+    const mutant = spawnInstance({
+      role: "standalone",
+      dataDir: path.join(tmpRoot, "mutant"),
+      extraEnv: { "9ROUTER_E2E_SRC_OVERLAY": mutantSrc },
+    });
+    const mutantInfo = await mutant.ready;
+    const mutantHealth = await fetchJson(`http://127.0.0.1:${mutantInfo.port}/api/health`);
+    check(
+      "red-proof: the old harness-only /api/health body FAILS the real-route assertion",
+      !isRealHealthRouteResponse(mutantHealth) &&
+        mutantHealth.json?.ok === true &&
+        mutantHealth.json?.role === "standalone" &&
+        !!mutantHealth.json?.edgeId,
+      `status=${mutantHealth.status} body=${JSON.stringify(mutantHealth.json)}`
+    );
+    await stopInstance(mutant);
 
     // ── Phase 1: central + edges LINKED
     log("phase 1: central + edges link");
@@ -366,6 +615,10 @@ async function main() {
       body: { name: KEY_NAME },
     });
     const centralKeyId = keyWrite.json?.id ?? null;
+    // The plaintext key value is what a real client would present; the
+    // free-tier completion checks reuse it so the federated request carries a
+    // genuine client credential (relayed by proxy.js to central).
+    const clientKey = keyWrite.json?.key ?? null;
     check(
       "api-key chain: edge-a write accepted (proxied to central)",
       keyWrite.status === 201 && !!centralKeyId && keyWrite.json?.name === KEY_NAME,
@@ -469,6 +722,36 @@ async function main() {
         `deltas=${streamedDeltas.length} sources=${[...new Set(streamedDeltas.map((d) => d?.source))].join(",")}`
     );
 
+    // ── FED-GAP-04 (b, federation path): a FREE-TIER completion through the
+    //    LINKED edge → central. Same real /v1/chat/completions route as the
+    //    standalone check, reached the way a client reaches a federated
+    //    deployment: the edge proxies /v1 with its federation token and
+    //    relays the client's own key in X-9r-Client-Authorization (proxy.js
+    //    buildUpstreamHeaders), central authenticates the END client (FED-011)
+    //    and runs the app pipeline. CENTRAL's fixture is the evidence that
+    //    central's process really drove the free-tier provider's transport.
+    const freeViaEdge = await freeTierCompletion(edgeAUrl, { key: clientKey, model: FREE_MODEL });
+    check(
+      "real free-tier completion: LINKED edge-a → central streams the free-tier model to a terminal [DONE]",
+      freeTierCompletionOk(freeViaEdge) && freeViaEdge.federationState === null,
+      freeTierDetail(freeViaEdge, "via edge-a ")
+    );
+    let centralEvidence = null;
+    try {
+      centralEvidence = (await instanceInfo(centralUrl)).freeTier?.upstream ?? null;
+    } catch {
+      centralEvidence = null;
+    }
+    check(
+      "real free-tier completion: central's own pipeline drove the free-tier transport (fixture evidence)",
+      centralEvidence?.chatRequests === 1 &&
+        centralEvidence?.bootstrapRequests >= 1 &&
+        centralEvidence?.offTargetBlocked === 0 &&
+        centralEvidence?.lastChatRequest?.model === "mimo-auto" &&
+        centralEvidence?.lastChatRequest?.systemMessages === 1,
+      `evidence=${JSON.stringify(centralEvidence)}`
+    );
+
     // ── Phase 2: kill central → DEGRADED
     log("phase 2: kill central");
     await killCentral(central);
@@ -529,6 +812,32 @@ async function main() {
       `status=${degradedStream.status} ct=${degradedStream.headers.get("content-type")} ` +
         `header=${degradedStream.headers.get("x-federation-state")} deltas=${degradedDeltas.length} ` +
         `sources=${[...new Set(degradedDeltas.map((d) => d?.source))].join(",")}`
+    );
+
+    // ── FED-GAP-04 (b, outage path): the free-tier completion survives a
+    //    central outage. The DEGRADED edge serves it from its OWN app
+    //    pipeline — the app's credentialless free provider needs nothing from
+    //    central — and its own fixture is the evidence that the free-tier
+    //    transport was driven on the edge, not proxied away.
+    const degradedFree = await freeTierCompletion(edgeAUrl, { key: clientKey, model: FREE_MODEL });
+    check(
+      "real free-tier completion: DEGRADED edge-a serves it from its own app pipeline (central down)",
+      freeTierCompletionOk(degradedFree) && degradedFree.federationState === "degraded",
+      freeTierDetail(degradedFree, `state=${degradedFree.federationState} `)
+    );
+    let edgeEvidence = null;
+    try {
+      edgeEvidence = (await instanceInfo(edgeAUrl)).freeTier?.upstream ?? null;
+    } catch {
+      edgeEvidence = null;
+    }
+    check(
+      "real free-tier completion: the DEGRADED edge's own free-tier transport handled it (fixture evidence)",
+      edgeEvidence?.chatRequests === 1 &&
+        edgeEvidence?.offTargetBlocked === 0 &&
+        edgeEvidence?.lastChatRequest?.model === "mimo-auto" &&
+        edgeEvidence?.lastChatRequest?.systemMessages === 1,
+      `evidence=${JSON.stringify(edgeEvidence)}`
     );
 
     // Degraded writes: queued locally (202 + queued-write-id), NOT applied
