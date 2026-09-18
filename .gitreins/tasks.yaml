@@ -1014,3 +1014,17 @@ tasks:
   status: complete
   created_at: '2026-09-18T18:02:39.979165+00:00'
   completed_at: '2026-09-18T18:11:30.374105+00:00'
+- id: DF-9ROUTER-10
+  title: Map the federation value claims to their automated proofs (DF-9ROUTER-10)
+  criteria:
+  - docs/dogfood/2026-09-18-federation-value-claims.md exists as the only changed
+    file; every claim row cites a source file:line and every cited proof cites a real
+    test file + test/check name; the three f65977c7 e2e checks (LINKED proxied completion,
+    LINKED streamed completion, DEGRADED streamed completion) are quoted by name with
+    the run's pass/fail count; all claims from DF-9ROUTER-10/15/20 appear in the matrix;
+    the 20-40% token-savings claim is classified OUT-OF-FORK-SCOPE with README line
+    citations; a Gaps table lists one candidate board row per UNPROVEN or PARTIAL
+    claim; no source/test/config file is modified
+  status: complete
+  created_at: '2026-09-18T18:27:57.578991+00:00'
+  completed_at: '2026-09-18T18:40:58.900801+00:00'
