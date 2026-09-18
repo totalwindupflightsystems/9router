@@ -2,15 +2,20 @@
 ARG NODE_IMAGE=node:22-alpine
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
-# CN mirror for apk (used by builder and runner stages)
-RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 
 FROM base AS builder
 
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
-COPY package.json ./
-RUN npm install --registry=https://registry.npmmirror.com
+# QA-9ROUTER-23 — reproducible dependency installs.
+# package-lock.json is tracked in this repo, so the lockfile is copied in with
+# package.json and `npm ci` installs exactly that resolution (and hard-fails the
+# build when the two drift, instead of silently resolving newer versions like
+# `npm install` did). No registry override: the build uses the standard npm
+# registry, so the image no longer depends on a hardcoded third-party CN mirror
+# (an operator can still point a build at a mirror via an .npmrc in the context).
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
