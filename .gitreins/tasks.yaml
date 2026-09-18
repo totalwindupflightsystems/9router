@@ -938,3 +938,67 @@ tasks:
   status: complete
   created_at: '2026-09-18T12:52:02.032554+00:00'
   completed_at: '2026-09-18T12:59:46.409813+00:00'
+- id: FED-E2E-001
+  title: Assert the federation completion path through the edge proxy
+  criteria:
+  - 'tests/federation/e2e.mjs asserts a POST /v1/chat/completions proxied by a LINKED
+    edge returns the central marker, and a stream:true request relays text/event-stream
+    frames ending in [DONE]; the same stream in DEGRADED state is served from the
+    local replica with x-federation-state: degraded; npm run test:e2e exits 0 and
+    the new checks provably fail when proxy forwarding for completions is disabled;
+    final commit touches only tests/federation/e2e.mjs and e2e-child.mjs'
+  status: complete
+  created_at: '2026-09-18T16:02:56.833506+00:00'
+  completed_at: '2026-09-18T16:17:32.586269+00:00'
+- id: HYG-9ROUTER-8
+  title: Make the xai-oauth unit suite deterministic under machine load
+  criteria:
+  - tests/unit/xai-oauth-service.test.js dispatches mocked fetch responses by URL
+    rather than by call position, locates its assertions by URL, and gives the file
+    an explicit timeout of at least 30s
+  - The pre-fix file plus one injected extra fetch call FAILS with the documented
+    TypeError reading ok at src/lib/oauth/providers/xai.js:74, while the hardened
+    file with the same injected call passes 5/5 (RED/GREEN proof)
+  - Three consecutive isolation runs of the real file pass 5/5
+  - The git pre-commit guard reports no regression and only tests/unit/xai-oauth-service.test.js
+    is modified
+  status: complete
+  created_at: '2026-09-18T16:35:36.667784+00:00'
+  completed_at: '2026-09-18T16:41:18.585844+00:00'
+- id: HYG-9ROUTER-9
+  title: Prune the stale known-fails baseline entries and make the reported baseline
+    count honest
+  criteria:
+  - 'tests/__baseline__/known-fails.txt no longer lists the 4 golden-url-header entries
+    that pass at HEAD; verify-no-regression.mjs skips lines starting with # so its
+    printed baseline known=N equals the number of real listed entries; the gate exits
+    0 on a fresh full-suite JSON; the MiMo Free live entry is explicitly accounted
+    for; evidence note records the 4 golden tests passing in isolation and in the
+    full run; commit touches only tests/__baseline__/known-fails.txt, tests/__baseline__/verify-no-regression.mjs
+    and the evidence note'
+  status: complete
+  created_at: '2026-09-18T16:51:06.747673+00:00'
+  completed_at: '2026-09-18T16:59:03.094021+00:00'
+- id: HYG-9ROUTER-11
+  title: Make the kimi golden header case environment-independent so the baseline
+    entry stays out
+  criteria:
+  - tests/translator/golden-url-header.test.js normalizes X-Msh-Device-Name and X-Msh-Version
+    in sanitize(); the regenerated snapshot contains no host-specific hostname literal
+    and no package-version literal; cd tests && npx vitest run translator/golden-url-header.test.js
+    is 124/124 green; tests/__baseline__/known-fails.txt does not list the kimi case;
+    node tests/__baseline__/verify-no-regression.mjs still exits 0 on a fresh full-suite
+    JSON; commit touches only the golden test file and its snapshot
+  status: complete
+  created_at: '2026-09-18T17:05:23.848893+00:00'
+  completed_at: '2026-09-18T17:15:33.815327+00:00'
+- id: HYG-9ROUTER-10
+  title: Gate live MiMo probes behind an explicit opt-in policy and drop them from
+    the deterministic regression baseline
+  criteria:
+  - tests/unit/mimo-free.live.test.js skips both tests unless RUN_REAL=1; known-fails.txt
+    carries zero mimo-free entries and zero entries that pass at HEAD; verify-no-regression.mjs
+    exits 0 on a fresh full-suite JSON; decision + measured basis recorded in docs/dogfood/
+  status: complete
+  created_at: '2026-09-18T17:36:13.479707+00:00'
+  completed_at: '2026-09-18T17:53:20.127368+00:00'
