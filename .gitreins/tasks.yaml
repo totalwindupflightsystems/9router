@@ -1028,3 +1028,12 @@ tasks:
   status: complete
   created_at: '2026-09-18T18:27:57.578991+00:00'
   completed_at: '2026-09-18T18:40:58.900801+00:00'
+- id: FED-GAP-01
+  title: API-key three-hop replica chain asserted end to end in the federation E2E
+  criteria:
+  - A check in tests/federation/e2e.mjs writes an API key through a LINKED edge and
+    asserts the key row exists at central AND on BOTH edges after catch-up; the E2E
+    exits 0 with all checks PASS; full suite no regression vs tests/__baseline__/known-fails.txt
+  status: complete
+  created_at: '2026-09-18T18:56:02.738407+00:00'
+  completed_at: '2026-09-18T19:13:24.022659+00:00'
