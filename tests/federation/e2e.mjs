@@ -553,25 +553,66 @@ async function main() {
     });
     check("seed central: model alias set", seedAlias.status === 200, `status ${seedAlias.status}`);
 
-    // Edges replicate: wait for both to reach the central watermark.
+    // Edges replicate: wait for both to reach the central watermark, then
+    // assert the real lag METRIC on the responses that satisfied the wait.
+    //
+    // FED-GAP-02: lastAppliedRevision equality is an INFERENCE that the
+    // replica is current — it is not the number the status surface reports.
+    // The edge's revisionLag (src/lib/federation/server.js
+    // buildLocalStatusPayload: max(0, centralMaxVersion - lastAppliedRevision),
+    // FED-021 — the replica trailing the watermark central advertised) is what
+    // the dashboard banner renders, so a regression that reported a stale or
+    // positive lag while lastAppliedRevision still matched stayed invisible.
+    // Retain the final local-status payloads that satisfied the catch-up
+    // condition and assert the metric on THOSE (a re-fetch after the wait
+    // would race a later delta and stop being the catch-up observation).
     const centralStatus = await fetchJson(`${centralUrl}/api/federation/status`, { token: FED_TOKEN });
     const centralWatermark = centralStatus.json?.maxVersion ?? 0;
     log(`central watermark: ${centralWatermark}`);
 
+    let catchUp = null;
     await waitFor(
       async () => {
         const [sa, sb] = await Promise.all([
           fetchJson(`${edgeAUrl}/api/federation/local-status`),
           fetchJson(`${edgeBUrl}/api/federation/local-status`),
         ]);
-        return (
+        const upToDate =
           sa.json?.lastAppliedRevision === centralWatermark &&
-          sb.json?.lastAppliedRevision === centralWatermark
-        );
+          sb.json?.lastAppliedRevision === centralWatermark;
+        if (upToDate) {
+          catchUp = { a: sa.json, b: sb.json };
+          return true;
+        }
+        return false;
       },
       { timeout: 30000, label: "edges to catch up to central watermark" }
     );
     check("edges replicate: both at central watermark", true, `revision ${centralWatermark}`);
+
+    // The lag metric itself, per edge, off the real (tokenless) local-status
+    // payload. Detail names the edge and every number the verdict rests on.
+    const lagDetail = (status) =>
+      `revisionLag=${JSON.stringify(status?.revisionLag)} (type ${typeof status?.revisionLag}) ` +
+      `lastAppliedRevision=${JSON.stringify(status?.lastAppliedRevision)} ` +
+      `centralMaxVersion=${JSON.stringify(status?.centralMaxVersion)} ` +
+      `central watermark=${centralWatermark} ` +
+      `last_state=${JSON.stringify(status?.last_state)} role=${JSON.stringify(status?.role)}`;
+    const lagIsZero = (status) =>
+      typeof status?.revisionLag === "number" &&
+      Number.isFinite(status.revisionLag) &&
+      status.revisionLag === 0;
+
+    check(
+      "edge-a: revisionLag === 0 after catch-up",
+      lagIsZero(catchUp?.a),
+      `edge=edge-a ${lagDetail(catchUp?.a)}`
+    );
+    check(
+      "edge-b: revisionLag === 0 after catch-up",
+      lagIsZero(catchUp?.b),
+      `edge=edge-b ${lagDetail(catchUp?.b)}`
+    );
 
     // Edges LINKED (heartbeat succeeded).
     await waitFor(
