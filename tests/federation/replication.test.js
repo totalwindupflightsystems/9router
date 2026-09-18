@@ -586,6 +586,14 @@ describe("write-path stamping hooks", () => {
 // ─── FED-022: boot/import settings seeds are federation-stamped ─────────
 
 describe("FED-022 regression: settings seeds stamp federation_version (delta-visible)", () => {
+  // Vitest's default test timeout is 5000 ms. A loaded full-suite run timed
+  // this describe out at 10988 ms (tick 380, /tmp/9r380b-full.json) while it
+  // completes in ~0.2 s in isolation (163 ms / 115 ms measured) — the dynamic
+  // imports, SQLite adapter factories and temp-dir I/O here are load-sensitive.
+  // Every assertion below is behavioural, never timing-based, so a larger
+  // budget only removes load-induced false reds.
+  vi.setConfig({ testTimeout: 30000 });
+
   it("legacy JSON boot seed (runMigrationOnce → importLegacyMain) stamps settings; delta delivers it to an edge", async () => {
     // Legacy db.json in the temp DATA_DIR — runMigrationOnce picks it up on a
     // fresh DB and imports it. Pre-fix this insert bypassed stamp.js, leaving
