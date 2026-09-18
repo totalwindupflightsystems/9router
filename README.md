@@ -325,10 +325,11 @@ registration path exists for them.
 ## 🧪 Testing
 
 **The suite is NOT all-green by design** — don't chase a red run as a regression.
-The baseline is ~2629 pass / ~85 fail / ~59 skip (2773 total, verified 2026-09-17), with every
+The baseline is ~2658 pass / ~84 fail / ~61 skip (2803 total, verified 2026-09-18), with every
 known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
-Some failures are live-network tests (`real/*.real.test.js`, `mimo-free.live.*`)
-that need real credentials and are expected to fail locally — skip them.
+Live-network tests (`real/*.real.test.js`, `unit/mimo-free.live.test.js`) are **opt-in** via
+`RUN_REAL=1` — a default run skips them, and they are deliberately **not** part of the baseline
+because a third-party endpoint is not a deterministic property of this repo.
 
 ```bash
 npm test                          # full vitest suite (runs from tests/, its own npm package)

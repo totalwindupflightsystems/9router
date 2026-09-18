@@ -62,11 +62,12 @@ npm run lint:gate                                                     # lint deb
 npm run lint:baseline                                                 # regenerate scripts/lint-baseline.json (commit it together with the paydown); REFUSES to write when any file has a parse error
 ```
 
-**The suite is NOT all-green by design**: ~2629 pass / ~85 fail / ~59 skip baseline (2773 total,
-verified 2026-09-17) with a
+**The suite is NOT all-green by design**: ~2658 pass / ~84 fail / ~61 skip baseline (2803 total,
+verified 2026-09-18) with a
 catalogued `tests/__baseline__/known-fails.txt`. Judge regressions with
-`verify-no-regression.mjs`, never a raw run. `real/*.real.test.js` need live
-credentials — skip them.
+`verify-no-regression.mjs`, never a raw run. Live-network tests (`real/*.real.test.js`,
+`unit/mimo-free.live.test.js`) are opt-in via `RUN_REAL=1` — a default run skips them and they
+are not part of the baseline.
 
 **Lint is RED BY DESIGN** — the repo carries **135 errors / 204 warnings (339 problems) across
 218 files** with `npm run lint` (measured 2026-09-18 at HEAD `2897a645`, 1292 files linted).
