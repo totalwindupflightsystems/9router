@@ -18,7 +18,9 @@
 // E2E_EDGE_ID, E2E_PORT (0 = ephemeral), DATA_DIR, FEDERATION_* (as in a
 // real deployment).
 import http from "node:http";
-import { createHash, timingSafeEqual } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { createHash, timingSafeEqual, randomUUID } from "node:crypto";
 
 const ROLE = process.env.E2E_ROLE || "edge";
 const EDGE_ID = process.env.E2E_EDGE_ID || process.env.FEDERATION_EDGE_ID || "edge";
@@ -42,6 +44,46 @@ const { flipToDegraded, start: startFailover } = await import("@/lib/federation/
 const { getEdgeState } = await import("@/lib/federation/state.js");
 const { start: startEdgeClient } = await import("@/lib/federation/edgeClient.js");
 const { getToken } = await import("@/lib/federation/config.js");
+// The real /api/keys route reads through this repo function — the harness
+// reuses it (rather than hand-written SQL) so the local replica read applies
+// the same NOT_DELETED filter production applies (FED-GAP-01).
+const { getApiKeys } = await import("@/lib/db/repos/apiKeysRepo.js");
+const { DATA_DIR } = await import("@/lib/dataDir.mjs");
+
+// ─── Server-derived machine id (harness-side) ────────────────────────────
+// The REAL /api/keys route binds a new key to a server-derived machine id
+// (getConsistentMachineId() in src/shared/utils/machineId.js). That module is
+// NOT loadable in this plain-node child: it does
+// `import { machineIdSync } from "node-machine-id"`, a NAMED import from a
+// CommonJS package (main: ./dist/index.js, no "type", no exports map), which
+// only resolves under a bundler (Next / vitest interop) — under plain node it
+// throws `SyntaxError: Named export 'machineIdSync' not found`, so the shared
+// federation replay path could not create an api-key row at all in this
+// harness. Mirror the production derivation instead: same DATA_DIR machine-id
+// file (created on first use, mode 0600) and the same formula —
+// sha256(raw + salt).substring(0, 16). Nothing about the federation apply or
+// replication path is bypassed; only the value the next hop would have derived
+// is supplied, and the client-visible request body stays just {name}.
+function harnessMachineId() {
+  const file = path.join(DATA_DIR, "machine-id");
+  let raw = null;
+  try {
+    raw = fs.readFileSync(file, "utf8").trim() || null;
+  } catch {
+    /* not created yet */
+  }
+  if (!raw) {
+    raw = randomUUID();
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(file, raw, { mode: 0o600 });
+    } catch {
+      /* best effort — same as the production helper */
+    }
+  }
+  const salt = process.env.MACHINE_ID_SALT || "endpoint-proxy-salt";
+  return createHash("sha256").update(raw + salt).digest("hex").substring(0, 16);
+}
 
 // ─── Auth (roleGuard.js semantics, inlined — next/server is not
 //     importable outside a Next build) ───────────────────────────────────
@@ -273,12 +315,50 @@ const server = http.createServer(async (req, res) => {
         }
         const r = await toRequest(req);
         const body = await r.json().catch(() => null);
-        const result = await applyReplayMutation(db, { method, path, body });
+        // POST /api/keys answers with the REAL route's shape
+        // (src/app/api/keys/route.js: 201 {key, name, id, machineId}) instead
+        // of the generic {ok:true}. The apply path is unchanged
+        // (applyReplayMutation → server.js createApiKey), but that path
+        // returns no row, so the id set is diffed around the call to recover
+        // the created key. Without an id, the write hop through an edge is
+        // unobservable and the replication chain cannot be asserted
+        // (FED-GAP-01: edge write → central → both edges).
+        const keysBefore = path === "/api/keys" ? new Set((await getApiKeys()).map((k) => k.id)) : null;
+        // The shared replay path derives the machine id itself when the body
+        // carries none (server.js: getConsistentMachineId). That derivation is
+        // unavailable in this child (see harnessMachineId), so the harness
+        // supplies the same server-derived value; every other path passes the
+        // client body through untouched.
+        const replayBody = keysBefore && !body?.machineId ? { ...body, machineId: harnessMachineId() } : body;
+        const result = await applyReplayMutation(db, { method, path, body: replayBody });
         if (!result.ok) {
           writeJson(res, result.status || 400, { error: { message: result.error } });
           return;
         }
+        if (keysBefore) {
+          const created = (await getApiKeys()).find((k) => !keysBefore.has(k.id));
+          if (created) {
+            writeJson(res, 201, {
+              key: created.key,
+              name: created.name,
+              id: created.id,
+              machineId: created.machineId,
+            });
+            return;
+          }
+        }
         writeJson(res, 200, { ok: true });
+        return;
+      }
+      // GET /api/keys — local REPLICA read. Dashboard GETs are never proxied
+      // (proxy.js shouldForward forwards only mutating methods on the
+      // forward-set prefixes), so this answers from THIS instance's replica.
+      // That asymmetry is what makes the replication chain observable:
+      // write via an edge (proxied) → read central → read both edges (local).
+      // A sub-path (/api/keys/<id>) still falls through to the 404 below —
+      // only the route the real app serves is implemented here.
+      if (path === "/api/keys") {
+        writeJson(res, 200, { keys: await getApiKeys() });
         return;
       }
       if (path === "/api/settings") {

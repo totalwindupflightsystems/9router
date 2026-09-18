@@ -337,6 +337,86 @@ async function main() {
     );
     check("edges LINKED after heartbeat", true);
 
+    // ── API-key replica chain (FED-GAP-01): the dogfood value-claims matrix
+    //    (docs/dogfood/2026-09-18-federation-value-claims.md, row A2) claims
+    //    "a key created through edge A replicated to central and both edges".
+    //    The full three-hop chain was proven only for a model alias
+    //    (post-recovery, below); the per-hop halves live in queue.test.js /
+    //    failover.test.js / replication.test.js, so a regression breaking the
+    //    apiKeys hop alone would have stayed green everywhere. The hops take
+    //    DIFFERENT paths and are asserted separately:
+    //      write  → edge-a's proxy forwards the mutating dashboard call to
+    //               central (proxy.js MUTATING_API_PREFIXES includes /api/keys)
+    //      central→ applied through the real federation write path
+    //               (e2e-child → applyReplayMutation → server.js createApiKey)
+    //      edges  → picked up from the delta poll into the local replica, read
+    //               back directly (dashboard GETs are never proxied)
+    const KEY_NAME = "e2e-replicated-key";
+    const localKeys = async (baseUrl) =>
+      (await fetchJson(`${baseUrl}/api/keys`, { token: FED_TOKEN })).json?.keys || [];
+    const findKey = async (baseUrl) =>
+      (await localKeys(baseUrl)).find((k) => k.name === KEY_NAME) || null;
+
+    // Hop 1 — write THROUGH the edge (not central). The child answers the
+    // real route's 201 {key, name, id, machineId}, so the created id is
+    // portable into the read-back hops.
+    const keyWrite = await fetchJson(`${edgeAUrl}/api/keys`, {
+      method: "POST",
+      token: FED_TOKEN,
+      body: { name: KEY_NAME },
+    });
+    const centralKeyId = keyWrite.json?.id ?? null;
+    check(
+      "api-key chain: edge-a write accepted (proxied to central)",
+      keyWrite.status === 201 && !!centralKeyId && keyWrite.json?.name === KEY_NAME,
+      `status=${keyWrite.status} id=${centralKeyId ?? "none"} name=${JSON.stringify(keyWrite.json?.name)}`
+    );
+
+    // Hop 2 — the row is at CENTRAL (authoritative). Bounded wait, never a
+    // fixed sleep.
+    let centralKey = null;
+    try {
+      centralKey = await waitFor(() => findKey(centralUrl), {
+        timeout: 30000,
+        interval: 250,
+        label: `key '${KEY_NAME}' at central`,
+      });
+    } catch {
+      centralKey = null;
+    }
+    check(
+      "api-key chain: key row present at central",
+      !!centralKey && !!centralKey.id,
+      `central id=${centralKey?.id ?? "none"} (edge write id=${centralKeyId ?? "none"})`
+    );
+
+    // Hop 3 — the SAME row reached BOTH edges' replicas: id equality proves
+    // it is the replicated row, not a coincidentally-named one. The last
+    // observation is kept so a failure names WHICH edge is behind.
+    let edgeHit = null;
+    let lastEdges = { a: null, b: null, countA: 0, countB: 0 };
+    try {
+      edgeHit = await waitFor(
+        async () => {
+          const [ka, kb] = await Promise.all([localKeys(edgeAUrl), localKeys(edgeBUrl)]);
+          const a = ka.find((k) => k.name === KEY_NAME) || null;
+          const b = kb.find((k) => k.name === KEY_NAME) || null;
+          lastEdges = { a, b, countA: ka.length, countB: kb.length };
+          return a && b ? { a, b } : null;
+        },
+        { timeout: 30000, interval: 250, label: `key '${KEY_NAME}' replicated to both edges` }
+      );
+    } catch {
+      edgeHit = null;
+    }
+    check(
+      "api-key chain: key row replicated to both edges",
+      !!edgeHit && !!centralKeyId && edgeHit.a.id === centralKeyId && edgeHit.b.id === centralKeyId,
+      `edge-a id=${lastEdges.a?.id ?? "absent"} (${lastEdges.countA} keys), ` +
+        `edge-b id=${lastEdges.b?.id ?? "absent"} (${lastEdges.countB} keys), ` +
+        `central id=${centralKeyId ?? "none"}`
+    );
+
     // Edge proxy: /v1 through the edge reaches central (source: central).
     const proxied = await fetchJson(`${edgeAUrl}/v1/models`, { token: FED_TOKEN });
     check(
