@@ -1055,3 +1055,24 @@ tasks:
   status: complete
   created_at: '2026-09-18T19:58:50.864420+00:00'
   completed_at: '2026-09-18T20:28:16.720379+00:00'
+- id: FED-GAP-12
+  title: Prove central-side machineId derivation in federation replay
+  criteria:
+  - A federation test must drive the real server.js replay /api/keys path with no
+    machineId in the request body and assert the created row machineId equals the
+    DATA_DIR machine-id plus MACHINE_ID_SALT SHA-256 16-character derivation; standalone
+    behavior must remain intact.
+  status: complete
+  created_at: '2026-09-18T21:16:07.783474+00:00'
+  completed_at: '2026-09-18T21:23:40.420270+00:00'
+- id: FED-GAP-07
+  title: Prove API-key create-then-authenticate over HTTP with the real guard
+  criteria:
+  - 'PASS: a check creates a key through the real POST /api/keys route module (201
+    {key,name,id,machineId}) and then authenticates a /v1 request with that key through
+    the real dashboardGuard proxy() path with NO mocked validateApiKey; negative controls
+    (no key, bogus key) return 401 API key required for remote API access; full suite
+    no-regression via tests/__baseline__/verify-no-regression.mjs'
+  status: complete
+  created_at: '2026-09-18T22:13:11.531427+00:00'
+  completed_at: '2026-09-18T22:26:55.209477+00:00'
