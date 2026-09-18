@@ -23,6 +23,12 @@
 // and a bogus key must BOTH 401 with the guard's exact error text, and deactivating the
 // created row must flip the previously-accepted request back to 401 (that last one is
 // the assertion that fails if the guard is not really consulting the database).
+//
+// FED-GAP-13 extends the same chain to REVOCATION: DELETE /api/keys/[id] tombstones the
+// row (deleteApiKey → stampDelete, deleted = 1, isActive untouched) instead of removing
+// it, so the auth read must filter that tombstone or the "deleted" credential keeps
+// passing the guard for remote /v1 traffic. Control D and the FED-GAP-13 describe below
+// are the assertions that fail when validateApiKey forgets the NOT_DELETED predicate.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,8 +69,10 @@ const ENV_KEYS = [
 let tempDir;
 let savedEnv = {};
 let keysRoute;
+let keysIdRoute;
 let keysRepo;
 let settingsRepo;
+let driver;
 let guard;
 let created; // { status, body, headerNames } — the ONE real POST this file creates
 let createdKey; // the key the real route returned, reused by every guard request
@@ -85,8 +93,10 @@ beforeAll(async () => {
   vi.resetModules();
 
   keysRoute = await import("../../src/app/api/keys/route.js");
+  keysIdRoute = await import("../../src/app/api/keys/[id]/route.js");
   keysRepo = await import("../../src/lib/db/repos/apiKeysRepo.js");
   settingsRepo = await import("../../src/lib/db/repos/settingsRepo.js");
+  driver = await import("../../src/lib/db/driver.js");
   guard = await import("../../src/dashboardGuard.js");
 
   // The one real create: a plain Request, exactly as the route's callers build one.
@@ -234,6 +244,154 @@ describe("real dashboardGuard proxy() authenticating a created key at /v1", () =
       remoteV1Request("/v1/chat/completions", { authorization: `Bearer ${createdKey}` })
     );
     expect(isPassThrough(res)).toBe(true);
+  });
+
+  it("negative control D: DELETING the row revokes the key the guard just accepted", async () => {
+    // FED-GAP-13. deleteApiKey is a TOMBSTONE (stampDelete sets deleted = 1 and
+    // leaves isActive = 1 — federation replication needs the row to survive), so
+    // this is the assertion that fails if the auth read forgets the NOT_DELETED
+    // predicate: pre-fix the deleted key kept passing the guard for remote /v1
+    // traffic — a revocation that did not revoke.
+    // Premise first: the key is accepted right now (control C restored it).
+    expect(
+      isPassThrough(
+        await guard.proxy(remoteV1Request("/v1/models", { authorization: `Bearer ${createdKey}` }))
+      )
+    ).toBe(true);
+
+    expect(await keysRepo.deleteApiKey(created.body.id)).toBe(true);
+
+    // "revoked, not merely hidden": the authorization read refuses it AND the
+    // logical reads hide it — the trio is the whole claim.
+    expect(await keysRepo.validateApiKey(createdKey)).toBe(false);
+    expect(await keysRepo.getApiKeyById(created.body.id)).toBeNull();
+    expect((await keysRepo.getApiKeys()).some((r) => r.id === created.body.id)).toBe(false);
+
+    const revoked = await guard.proxy(
+      remoteV1Request("/v1/models", { authorization: `Bearer ${createdKey}` })
+    );
+    expect(revoked.status).toBe(401);
+    expect(revoked.headers.get("x-middleware-next")).toBeNull();
+    expect((await revoked.json()).error).toBe(KEY_REQUIRED_ERROR);
+  });
+});
+
+// ─── FED-GAP-13: revocation through the shipped routes ──────────────────
+//
+// The defect: DELETE /api/keys/[id] answered "Key deleted successfully" while
+// the credential kept authenticating remote /v1 traffic (validateApiKey read the
+// tombstoned row). This describe walks the revocation from the ROUTE down to the
+// guard, and pins the two things a one-line predicate fix could silently break:
+// the row must stay a tombstone (not become a hard delete — the federation delta
+// ships deletions as tombstones), and a key created afterwards must still work.
+//
+// It is a SEQUENCE over the file's one temp DB: each test builds on the row the
+// previous one asserted, and vitest runs it-blocks in declaration order.
+describe("FED-GAP-13 revocation via the shipped routes", () => {
+  let viaRouteKey;
+  let viaRouteId;
+  let viaRepoKey;
+  let viaRepoId;
+
+  it("setup: two freshly created keys are accepted by the real guard", async () => {
+    const a = await keysRepo.createApiKey("fed-gap-13-via-route", created.body.machineId);
+    const b = await keysRepo.createApiKey("fed-gap-13-via-repo", created.body.machineId);
+    viaRouteKey = a.key;
+    viaRouteId = a.id;
+    viaRepoKey = b.key;
+    viaRepoId = b.id;
+
+    expect(viaRouteKey).not.toBe(viaRepoKey);
+    expect(await keysRepo.validateApiKey(viaRouteKey)).toBe(true);
+    expect(await keysRepo.validateApiKey(viaRepoKey)).toBe(true);
+    for (const key of [viaRouteKey, viaRepoKey]) {
+      expect(
+        isPassThrough(
+          await guard.proxy(remoteV1Request("/v1/models", { authorization: `Bearer ${key}` }))
+        )
+      ).toBe(true);
+    }
+  });
+
+  it("the real DELETE route answers {message} and its key is 401 on the same remote request", async () => {
+    const res = await keysIdRoute.DELETE(null, { params: Promise.resolve({ id: viaRouteId }) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ message: "Key deleted successfully" });
+
+    // Tombstone, not a hard delete: the row survives with deleted = 1 so the
+    // central's delta endpoint can propagate the deletion to edges.
+    const db = await driver.getAdapter();
+    const raw = db.all("SELECT deleted, isActive FROM apiKeys WHERE id = ?", [viaRouteId]);
+    expect(raw.length).toBe(1);
+    expect(raw[0].deleted).toBe(1);
+
+    expect(await keysRepo.validateApiKey(viaRouteKey)).toBe(false);
+    const revoked = await guard.proxy(
+      remoteV1Request("/v1/models", { authorization: `Bearer ${viaRouteKey}` })
+    );
+    expect(revoked.status).toBe(401);
+    expect(revoked.headers.get("x-middleware-next")).toBeNull();
+    expect((await revoked.json()).error).toBe(KEY_REQUIRED_ERROR);
+  });
+
+  it("deleteApiKey (the fn that route delegates to) revokes: validate false, reads hide the row", async () => {
+    expect(await keysRepo.deleteApiKey(viaRepoId)).toBe(true);
+
+    expect(await keysRepo.validateApiKey(viaRepoKey)).toBe(false);
+    expect(await keysRepo.getApiKeyById(viaRepoId)).toBeNull();
+    expect((await keysRepo.getApiKeys()).some((r) => r.id === viaRepoId)).toBe(false);
+
+    const revoked = await guard.proxy(
+      remoteV1Request("/v1/models", { authorization: `Bearer ${viaRepoKey}` })
+    );
+    expect(revoked.status).toBe(401);
+    expect(revoked.headers.get("x-middleware-next")).toBeNull();
+    expect((await revoked.json()).error).toBe(KEY_REQUIRED_ERROR);
+  });
+
+  it("updateApiKey cannot write behind the tombstone", async () => {
+    // A tombstoned row must be invisible to WRITES as well as reads: a direct
+    // caller (the federation replay path, which does not pre-check getApiKeyById)
+    // could otherwise re-point `key` on a row every sibling read hides.
+    const db = await driver.getAdapter();
+    const select = "SELECT id, key, name, machineId, isActive, deleted FROM apiKeys WHERE id = ?";
+    const before = db.all(select, [viaRepoId])[0];
+
+    const returned = await keysRepo.updateApiKey(viaRepoId, {
+      name: "resurrect-attempt",
+      isActive: true,
+    });
+    expect(returned).toBeNull();
+
+    const after = db.all(select, [viaRepoId])[0];
+    expect(after).toEqual(before);
+    expect(await keysRepo.validateApiKey(viaRepoKey)).toBe(false);
+  });
+
+  it("the real PUT route still answers 404 for a deleted id (behaviour unchanged)", async () => {
+    const res = await keysIdRoute.PUT(
+      new Request("http://9router.test/api/keys/" + viaRepoId, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "resurrect-attempt" }),
+      }),
+      { params: Promise.resolve({ id: viaRepoId }) }
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Key not found" });
+  });
+
+  it("positive control: a key created AFTER the revocations still authenticates", async () => {
+    const fresh = await keysRepo.createApiKey("fed-gap-13-fresh-control", created.body.machineId);
+    expect(fresh.key).not.toBe(viaRouteKey);
+    expect(fresh.key).not.toBe(viaRepoKey);
+    expect(await keysRepo.validateApiKey(fresh.key)).toBe(true);
+
+    const res = await guard.proxy(
+      remoteV1Request("/v1/models", { authorization: `Bearer ${fresh.key}` })
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 });
 
