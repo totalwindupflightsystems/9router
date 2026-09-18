@@ -100,6 +100,30 @@
   next to it. Docs only — no runtime or test-source change (HYG-9ROUTER-3).
 
 ## Fixes
+- **Docker (standalone Compose)**: `docker-compose.yml` now has a
+  backwards-compatible local-build fallback for hosts that cannot pull the
+  third-party images the stack depends on (`decolua/9router`, plus the optional
+  `ghcr.io/chopratejas/headroom` sidecar). Measured on a clean/rootless agent,
+  `docker compose up -d --build` aborted during those pulls, which made the only
+  documented deployment path unusable there. New
+  `docker-compose.local-build.yml` is a Compose **override**: the base file is
+  unchanged, so the default render still resolves the published images, the
+  `${PORT:-20128}` / `${HEADROOM_PORT:-8787}` overrides, the optional `.env`
+  (still `required: false`) and the `9router-data` volume exactly as before, and
+  a plain `docker compose up -d` never starts building. A local build tags
+  `9router:local` — a distinct tag, so it never overwrites
+  `decolua/9router:latest` in the local image cache (`NINEROUTER_LOCAL_IMAGE`
+  picks another). Commands (also in `DOCKER.md` and `README.md`):
+  `docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build`
+  builds 9router from the repo Dockerfile and still pulls headroom; adding
+  `--no-deps 9router` starts 9router alone so nothing is pulled from a
+  third-party registry. Headroom has no local build in this repository
+  (third-party project) and stays optional at runtime, so pull failure degrades
+  to that documented no-headroom run instead of an unusable stack. Pinned by
+  `tests/unit/compose-local-build-fallback.test.js` (static contracts for both
+  paths, the documented commands, and a daemonless/registry-free
+  `docker compose config` render when the Compose CLI is present). No runtime
+  code and no federation compose change (QA-9ROUTER-8).
 - **Tests (root entry)**: `npm test` now runs the vitest pinned by the independent
   `tests/` package instead of a bare `npx vitest`. The root `package.json`
   declares no vitest, so a root-cwd `npx vitest` resolved whatever major the

@@ -237,6 +237,21 @@ docker compose up -d
 > for a real deployment — set `INITIAL_PASSWORD` / `JWT_SECRET` /
 > `API_KEY_SECRET` before exposing the instance. The optional `env_file`
 > syntax requires Docker Compose v2.24+.
+>
+> Pulling the published images fails on a clean/rootless host? Build 9router
+> locally instead (base file unchanged, applied as an override):
+>
+> ```bash
+> # 9router from this checkout; headroom image still pulled if needed
+> docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
+>
+> # no third-party pulls at all — headroom sidecar omitted (it is optional)
+> docker compose -f docker-compose.yml -f docker-compose.local-build.yml \
+>   up -d --build --no-deps 9router
+> ```
+>
+> The fallback builds the distinct tag `9router:local` (never overwrites
+> `decolua/9router:latest`); details in [DOCKER.md](DOCKER.md).
 > Federation deployments use `docker compose -f docker-compose.federation.yml up`
 > instead (see [docs/FEDERATION.md](docs/FEDERATION.md)).
 
@@ -1508,6 +1523,23 @@ docker build -t 9router .
 docker run -d --name 9router -p 20128:20128 \
   -v "$HOME/.9router:/app/data" -e DATA_DIR=/app/data 9router
 ```
+
+**Compose fallback when the published images cannot be pulled** (clean,
+rootless or air-gapped host): keep `docker-compose.yml` and apply the
+local-build override on top of it — ports, volumes, env and wiring still come
+from the base file:
+
+```bash
+# 9router built from this checkout
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
+
+# no third-party pulls at all (headroom sidecar omitted — optional at runtime)
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml \
+  up -d --build --no-deps 9router
+```
+
+The override tags the build `9router:local` (a local build never overwrites
+`decolua/9router:latest`) — see [DOCKER.md](DOCKER.md).
 
 **Container defaults:**
 

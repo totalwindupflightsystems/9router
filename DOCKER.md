@@ -92,6 +92,44 @@ In the dashboard, open `Endpoint` → `Token Saver` → `Headroom`, confirm the 
 
 If Headroom runs on the Docker host instead of as a sidecar, use `http://host.docker.internal:8787` on macOS/Windows. On Linux, add `--add-host=host.docker.internal:host-gateway` or the equivalent compose `extra_hosts` entry.
 
+## Clean host / pull-failure fallback (local build)
+
+`docker-compose.yml` deploys the published third-party images
+(`decolua/9router`, `ghcr.io/chopratejas/headroom`). On a clean or rootless
+host those pulls can fail — measured on a clean agent, `docker compose up -d
+--build` aborted while pulling from those namespaces, which left the only
+documented deployment path unusable there. 9router therefore has a local-build
+fallback, applied as a Compose **override** so the base file (images, ports,
+volumes, env, wiring) stays exactly as published:
+
+```bash
+# 9router built from this checkout (Dockerfile at the repo root).
+# The headroom image is still pulled if compose starts that service.
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
+
+# Clean/rootless host, nothing pulled from a third-party registry at all —
+# headroom sidecar omitted. Headroom is optional at runtime (9router only
+# contacts HEADROOM_URL when the dashboard Token Saver toggle is enabled),
+# so leave that toggle off until you can pull the image.
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml \
+  up -d --build --no-deps 9router
+```
+
+- The override builds and tags **`9router:local`** — a distinct tag, so a local
+  build never overwrites `decolua/9router:latest` in your image cache. Pick
+  another tag with `NINEROUTER_LOCAL_IMAGE=my/9router:dev`.
+- Port overrides (`PORT`, `HEADROOM_PORT`), the optional `.env` and the
+  `9router-data` volume behave exactly as in the default path; only the 9router
+  service gains a `build:` section.
+- Headroom has **no local build** in this repository (it is a third-party
+  project), which is why the second command omits the sidecar instead of
+  building it. Once the headroom image is pullable again, start it with
+  `docker compose -f docker-compose.yml up -d headroom` (or drop
+  `--no-deps 9router` and use the first command).
+- The federation stack already builds from source
+  (`docker-compose.federation.yml` → `Dockerfile.federation`); this fallback
+  gives the standalone stack the same offline-capable path.
+
 ## Update to latest
 
 ```bash
@@ -114,6 +152,13 @@ docker run --rm -p 20128:20128 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
   9router
+```
+
+The same image can be built and run through Compose (see
+[Clean host / pull-failure fallback](#clean-host--pull-failure-fallback-local-build)):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
 ```
 
 ## Publish (automatic via CI)
