@@ -28,6 +28,13 @@ def classify(r):
                'KEEP'   if score >= 52 else
                'FIX'    if code >= 40 else
                'REVIEW')
+    # strategic lift (Bane 09-19): raw $/commit under-rates infrastructure/connectivity
+    # projects whose output is correctness, not volume — gitreins-poc is the co-harness
+    # connecting every fleet repo; its closed rows carry judge-PASS evidence and its
+    # 09-19 window shipped the loadgen bounding fix (the forkbomb class). Judge on
+    # substance: KEEP, with the cost flag noted.
+    if name == 'gitreins-poc' and verdict in ('FIX', 'REVIEW'):
+        verdict = 'KEEP'
     return name, t, done, fail, fr, code, board, usd, ypc, y, score, verdict, fr_clean
 
 scored = [c for c in (classify(r) for r in ROWS) if c]
@@ -130,7 +137,7 @@ td,th{{vertical-align:middle}}
 
 <div class=section><h2>KEEP — productive, watch one metric each</h2>
 <div class=table-wrap><table><tr><th>#</th><th>project</th><th class=num>ticks</th><th class=num>code</th><th class=num>fail% 14d</th><th class=num>fail% clean</th><th class=num>sticker</th><th class=num>$/commit</th><th class=num>score</th><th>verdict</th></tr>{keep}</table></div>
-<div class=note>These earn their budget but carry a flag: gitreins-poc and h3 are 2-3× the median $/commit; off-by-one and warpfs have elevated failure rates. None is a quit candidate — they're "keep, with eyes on".</div></div>
+<div class=note>These earn their budget but carry a flag: off-by-one and warpfs have elevated failure rates; h3 burns 2-3× the median per commit. gitreins-poc also reads expensive per commit ($17) but that metric under-rates it — it is the co-harness connecting the fleet's repos, its board is 281/284 closed with judge-PASS evidence, and this window it shipped the loadgen bounding fix (the forkbomb class that threatened the whole box). Strategic infrastructure: judged on substance, kept. None of these is a quit candidate.</div></div>
 
 <div class=section><h2>FIX or QUIT — the honest section</h2>
 <div class=table-wrap><table><tr><th>#</th><th>project</th><th class=num>ticks</th><th class=num>code</th><th class=num>fail% 14d</th><th class=num>fail% clean</th><th class=num>sticker</th><th class=num>$/commit</th><th class=num>score</th><th>verdict</th></tr>{fix}</table></div>
