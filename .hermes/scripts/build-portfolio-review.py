@@ -12,18 +12,23 @@ def classify(r):
     name, t, done, fail, code, board, usd, backlog = r
     if code == 0: return None  # sync/data lanes, judged separately
     fr = fail/max(t,1)
+    # era correction: most 14d failures are the gateway-outage era (everyone ~35-47%).
+    # reliability is scored on the CLEAN era (post 09:19 deploy); the era rate is shown
+    # in the table but only the post rate moves the score.
+    post = json.load(open('/tmp/post_fails.json')).get(name, [0, 0])
+    fr_clean = post[1]/max(post[0], 1) if post else fr
     ypc = usd/max(code,1)
     y = code/max(t,1)
     score = 0
     score += min(code/250, 1)*40                 # volume of real output
-    score += max(0, (0.8-fr))*30                 # reliability
+    score += max(0, (0.95-fr_clean))*30          # reliability (clean era)
     score += max(0, (1.4-y))*15                  # commits/tick
     score += max(0, (20-ypc))/20*15              # cost per commit
-    verdict = ('CORE'   if score >= 65 and fr < 0.35 else
-               'KEEP'   if score >= 50 else
+    verdict = ('CORE'   if score >= 70 and fr_clean < 0.3 else
+               'KEEP'   if score >= 52 else
                'FIX'    if code >= 40 else
                'REVIEW')
-    return name, t, done, fail, fr, code, board, usd, ypc, y, score, verdict
+    return name, t, done, fail, fr, code, board, usd, ypc, y, score, verdict, fr_clean
 
 scored = [c for c in (classify(r) for r in ROWS) if c]
 scored.sort(key=lambda c: -c[10])
@@ -33,9 +38,11 @@ total_usd = sum(float(r[8] or 0) for r in D)
 
 cls_row = lambda c, rank: (
     f"<tr><td>{rank}</td><td>{html.escape(c[0])}</td><td class=num>{c[1]}</td>"
-    f"<td class=num>{c[5]}</td><td class='num {'bad' if c[4]>0.35 else ('warn' if c[4]>0.15 else 'ok')}'>{c[4]*100:.0f}%</td>"
+    f"<td class=num>{c[5]}</td>"
+    f"<td class='num bad'>{c[4]*100:.0f}%</td>"
+    f"<td class='num {'ok' if c[12]<0.1 else ('warn' if c[12]<0.3 else 'bad')}'>{c[12]*100:.0f}%</td>"
     f"<td class=num>${c[7]:,.0f}</td><td class=num>${c[8]:.0f}</td>"
-    f"<td class='num {'ok' if c[10]>=65 else ('warn' if c[10]>=50 else 'bad')}'><b>{c[10]:.0f}</b></td>"
+    f"<td class='num {'ok' if c[10]>=70 else ('warn' if c[10]>=52 else 'bad')}'><b>{c[10]:.0f}</b></td>"
     f"<td><span class='pill {c[11].lower()}'>{c[11]}</span></td></tr>")
 core = ''.join(cls_row(c,i+1) for i,c in enumerate(scored) if c[11]=='CORE')
 keep = ''.join(cls_row(c,i+1) for i,c in enumerate(scored) if c[11]=='KEEP')
@@ -74,15 +81,15 @@ th{{color:#9ca3af;font-weight:600;font-size:.78rem}}.num{{text-align:right;font-
 </div>
 
 <div class=section><h2>CORE — keep funding, these carry the fleet</h2>
-<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail%</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{core}</table></div>
+<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail% 14d</th><th>fail% clean</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{core}</table></div>
 <div class=note><b>Why they're core:</b> high commit volume, low failure rate, cost per commit at or below fleet median. coding-hermes-scheduler is the meta-project (it runs the fleet itself) — its score understates its value. duckbrain and terminal-jail are the efficiency leaders.</div></div>
 
 <div class=section><h2>KEEP — productive, watch one metric each</h2>
-<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail%</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{keep}</table></div>
+<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail% 14d</th><th>fail% clean</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{keep}</table></div>
 <div class=note>These earn their budget but carry a flag: gitreins-poc and h3 are 2-3× the median $/commit; off-by-one and warpfs have elevated failure rates. None is a quit candidate — they're "keep, with eyes on".</div></div>
 
 <div class=section><h2>FIX or QUIT — the honest section</h2>
-<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail%</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{fix}</table></div>
+<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail% 14d</th><th>fail% clean</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{fix}</table></div>
 <div class=note><b>heading</b> is the clearest quit candidate: 237 ticks and $818 for 34 commits — its failure rate (47%) was 108 gateway failures deep, and its $24/commit is 3× the median. If the post-fix heading doesn't yield ≥1.0 commits/tick over the next week, retire it. <b>hermes-dagger</b> is the biggest spend ($3,291) with a 794-row backlog and a 38% failure history — it produces (258 commits, 1.14/tick) but its board is a landfill; the backlog must be burned down before more ticks make sense. <b>h3</b> family: h3 itself costs $24/commit (11.1M tokens/tick, 3× fleet) — keep the SDK lanes (cheap, clean) and ask whether the umbrella justifies 3×.</div></div>
 
 <div class=section><h2>The data lanes (no code, by design) & QA</h2>
@@ -94,7 +101,7 @@ th{{color:#9ca3af;font-weight:600;font-size:.78rem}}.num{{text-align:right;font-
 <li><b>Hold and verify:</b> hermes-dagger, crier, bunker, hermes-canopy, 9router, chimera-v2 — big producers, but the dagger board dump (794 rows) must shrink; if post-gate-fix failure rates don't drop this week, they were riding the broken era.</li>
 <li><b>Fix-or-quit calls to make now:</b> heading (retire unless this week proves yield), h3 umbrella (3× cost per commit — cap it or justify it), my-project (low output, no clear product — what is it for?).</li>
 </ol>
-<div class=note>Method: score = commit volume (40) + reliability (30) + commits/tick (15) + cost-efficiency (15), from 14d scheduler.db ticks, sticker pricing (~131× real cash). QA/data lanes excluded from scoring (no code by design). Failure rates before 09:19 include the gateway-outage era; next week's numbers are the clean read.</div>
+<div class=note>Method: score = commit volume (40) + reliability (30) + commits/tick (15) + cost-efficiency (15), from 14d scheduler.db ticks, sticker pricing (~131× real cash). QA/data lanes excluded from scoring (no code by design). "fail% 14d" includes the gateway-outage era (everyone ~35-47%, it poisoned every raw rate); "fail% clean" is scored reliability, measured only since the 09:19 deploy. Next week the two columns converge.</div>
 </div>
 </body></html>"""
 open('/home/kara/fleet-portfolio-review-2026-09-19.html','w').write(PAGE)
