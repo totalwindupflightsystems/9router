@@ -132,7 +132,7 @@ def panel_flow(con):
                        GROUP BY d ORDER BY d""")
     hourly = q(con, """SELECT substr(spawned_at,12,2) h, COUNT(*), SUM(status='completed'),
                               SUM(status IN ('failed','timeout')), COALESCE(SUM(code_commits),0)
-                       FROM ticks WHERE spawned_at >= datetime('now','localtime','-24 hours')
+                       FROM ticks WHERE julianday(spawned_at) >= julianday('now','-24 hours')
                        GROUP BY h ORDER BY h""")
     def bars(rows, label_i, n_i, ok_i, bad_i, extra=None):
         out, mx = [], max([r[n_i] for r in rows] + [1])
@@ -161,7 +161,7 @@ def panel_lanes(con):
                              ROUND(COALESCE(SUM(t.cost_usd),0),2), substr(MAX(t.spawned_at),6,11),
                              COALESCE(p.cooldown_s,0)/3600.0, COALESCE(p.namespace_id,'')
                       FROM ticks t JOIN projects p ON p.name=t.project_name
-                      WHERE t.spawned_at >= datetime('now','localtime','-{WINDOW_DAYS} days')
+                      WHERE t.julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
                       GROUP BY t.project_name ORDER BY 2 DESC""")
 
 
@@ -170,11 +170,11 @@ def panel_yield(con):
     lanes = q(con, f"""SELECT t.project_name, COUNT(*), COALESCE(SUM(t.code_commits),0),
                               COALESCE(SUM(t.files_changed),0), SUM(t.status IN ('failed','timeout')),
                               ROUND(COALESCE(SUM(t.cost_usd),0),2), COALESCE(SUM(t.tokens_in+t.tokens_out),0)
-                       FROM ticks t WHERE t.spawned_at >= datetime('now','localtime','-{WINDOW_DAYS} days')
+                       FROM ticks t WHERE t.julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
                        GROUP BY 1 HAVING COUNT(*) >= 8 ORDER BY (CAST(COALESCE(SUM(t.code_commits),0) AS REAL)/COUNT(*)) DESC""")
     tot = q(con, f"""SELECT COUNT(*), COALESCE(SUM(code_commits),0), ROUND(COALESCE(SUM(cost_usd),0),2),
                             COALESCE(SUM(tokens_in+tokens_out),0), COALESCE(SUM(files_changed),0)
-                     FROM ticks WHERE spawned_at >= datetime('now','localtime','-{WINDOW_DAYS} days')""")[0]
+                     FROM ticks WHERE julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')""")[0]
     n, code, usd, tok, files = tot
     head = (f"<div class=kv>fleet: <b>{code/n:.2f}</b> code commits/tick · <b>{n and code and usd/code:,.2f}</b> sticker $/commit · "
             f"<b>{tok/max(code,1)/1e6:.1f}M</b> tokens/commit · <b>{files:,}</b> files changed</div>")
@@ -190,11 +190,15 @@ def panel_yield(con):
 
 def panel_speed(con):
     """Clearance speed: how fast ticks go spawned->completed, hour by hour, plus failure rate."""
+    # spawned_at/completed_at carry '-05:00' offsets: NEVER string-compare them against a
+    # plain datetime — use julianday(), which parses the offset. A string >= compared the
+    # 03:00 failure batch into the 'recent' buckets (13.3% phantom).
     rows = q(con, """
       WITH fin AS (
         SELECT substr(completed_at,12,2) h, (julianday(completed_at)-julianday(spawned_at))*24*60 mins,
                COALESCE(code_commits,0) c
-        FROM ticks WHERE status='completed' AND completed_at >= datetime('now','localtime','-12 hours'))
+        FROM ticks WHERE status='completed'
+          AND julianday(completed_at) >= julianday('now','-12 hours'))
       SELECT h, COUNT(*), CAST(AVG(mins) AS INT), CAST(MAX(mins) AS INT), SUM(c) FROM fin GROUP BY 1 ORDER BY 1""")
     out = ''
     for h, n, avg, mx, c in rows:
@@ -203,9 +207,9 @@ def panel_speed(con):
                 f"<td class=num>{mx}m</td><td class=num>{c}</td></tr>")
     # failure-rate strip: today pre/post deploy-style buckets via 6h windows
     fr = q(con, """
-      SELECT CASE WHEN spawned_at >= datetime('now','localtime','-6 hours') THEN 'last 6h'
+      SELECT CASE WHEN julianday(spawned_at) >= julianday('now','-6 hours') THEN 'last 6h'
                   ELSE '6-12h ago' END w, COUNT(*), SUM(status IN ('failed','timeout'))
-      FROM ticks WHERE spawned_at >= datetime('now','localtime','-12 hours') GROUP BY 1""")
+      FROM ticks WHERE julianday(spawned_at) >= julianday('now','-12 hours') GROUP BY 1""")
     d = {w: (t, f or 0) for w, t, f in fr}
     (t1, f1), (t2, f2) = d.get('last 6h', (0, 0)), d.get('6-12h ago', (0, 0))
     r1 = f1/max(t1,1)*100; r2 = f2/max(t2,1)*100
@@ -217,7 +221,7 @@ def panel_speed(con):
 def panel_fail(con):
     return q(con, f"""SELECT COALESCE(substr(error,1,58),'(none)'), COUNT(*),
                              MIN(substr(spawned_at,6,11)), MAX(substr(spawned_at,6,11))
-                      FROM ticks WHERE spawned_at >= datetime('now','localtime','-{WINDOW_DAYS} days')
+                      FROM ticks WHERE julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
                         AND status IN ('failed','timeout')
                       GROUP BY 1 ORDER BY 2 DESC LIMIT 8""")
 
@@ -275,7 +279,7 @@ def analysis(con):
         r = q(con, f"""SELECT COUNT(*), SUM(status='completed'), SUM(status IN ('failed','timeout')),
                               COALESCE(SUM(code_commits),0), COALESCE(SUM(files_changed),0),
                               COALESCE(SUM(tokens_in+tokens_out),0), ROUND(COALESCE(SUM(cost_usd),0),0)
-                       FROM ticks WHERE spawned_at >= datetime('now','localtime','-{hi} days')
+                       FROM ticks WHERE julianday(spawned_at) >= julianday('now','-{hi} days')
                          AND spawned_at <  datetime('now','localtime','-{lo} days')""")[0]
         w.append((label,) + tuple(x or 0 for x in r))
     wr = ''.join(f"<tr><td>{l}</td><td class=num>{n:,}</td><td class=num>{d:,}</td><td class=num>{f:,}</td>"
@@ -283,9 +287,9 @@ def analysis(con):
                  f"<td class=num>{c/max(d,1):.2f}</td><td class=num>${u:,.0f}</td></tr>"
                  for l, n, d, f, c, fi, t, u in w)
     n, done, fail, code, files, tok, usd = w[0][1:]
-    zero = q(con, """SELECT COUNT(*) FROM ticks WHERE spawned_at >= datetime('now','localtime','-7 days')
+    zero = q(con, """SELECT COUNT(*) FROM ticks WHERE julianday(spawned_at) >= julianday('now','-7 days')
                      AND status='completed' AND COALESCE(code_commits,0)=0 AND COALESCE(board_commits,0)=0""")[0][0]
-    gw = q(con, """SELECT COUNT(*) FROM ticks WHERE spawned_at >= datetime('now','localtime','-7 days')
+    gw = q(con, """SELECT COUNT(*) FROM ticks WHERE julianday(spawned_at) >= julianday('now','-7 days')
                    AND error LIKE 'gateway unreachable%'""")[0][0]
     br = ''.join(f"<tr><td>{k}</td><td class=num>{v}</td><td class=dim>{note}</td></tr>" for k, v, note in [
         ('ticks that failed on gateway unreachable', f"{gw:,}", f"{100*gw/max(n,1):.0f}% of all ticks — pure slot burn, one error string"),
@@ -323,7 +327,7 @@ def csv_out(con, name):
                 'board_commits', 'files_changed', 'tokens_in', 'tokens_out', 'cost_usd', 'cost_source',
                 'nudge_count', 'worker_count', 'error']
         w.writerow(cols)
-        for r in q(con, f"SELECT {','.join(cols)} FROM ticks WHERE spawned_at >= datetime('now','localtime','-{WINDOW_DAYS} days') ORDER BY id"):
+        for r in q(con, f"SELECT {','.join(cols)} FROM ticks WHERE julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days') ORDER BY id"):
             w.writerow(r)
     elif name == 'lanes':
         w.writerow(['project', 'ticks', 'completed', 'failed', 'avg_dur_s', 'code_commits', 'board_commits',
@@ -336,7 +340,7 @@ def csv_out(con, name):
                                    SUM(status IN ('failed','timeout')), COALESCE(SUM(code_commits),0),
                                    COALESCE(SUM(board_commits),0), COALESCE(SUM(tokens_in+tokens_out),0),
                                    ROUND(COALESCE(SUM(cost_usd),0),4)
-                            FROM ticks WHERE spawned_at >= datetime('now','localtime','-30 days')
+                            FROM ticks WHERE julianday(spawned_at) >= julianday('now','-30 days')
                             GROUP BY 1 ORDER BY 1"""):
             w.writerow(r)
     elif name == 'queue':
@@ -387,7 +391,7 @@ def render():
                             COALESCE(SUM(code_commits),0), COALESCE(SUM(board_commits),0),
                             COALESCE(SUM(files_changed),0), COALESCE(SUM(tokens_in+tokens_out),0),
                             ROUND(COALESCE(SUM(cost_usd),0),2)
-                     FROM ticks WHERE spawned_at >= datetime('now','localtime','-{WINDOW_DAYS} days')""")[0]
+                     FROM ticks WHERE julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')""")[0]
     con.close()
     n, ok, bad, code, bcomm, files, tok, cost = tot
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
