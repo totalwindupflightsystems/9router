@@ -60,6 +60,8 @@ h2{{font-size:.95rem;margin:0 0 8px;color:#9ca3af;text-transform:uppercase;lette
 table{{border-collapse:collapse;width:100%;min-width:520px}}
 th,td{{padding:5px 8px;border-bottom:1px solid #26263a;white-space:nowrap;text-align:left}}
 th{{color:#9ca3af;font-weight:600;font-size:.78rem}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
+th.num{{text-align:right;font-variant-numeric:tabular-nums}}
+td,th{{vertical-align:middle}}
 .good{{color:#4ade80}}.bad{{color:#f87171}}.warn{{color:#f59e0b}}.ok{{color:#4ade80}}
 .note{{background:#12121f;border-left:3px solid #f59e0b;padding:8px 12px;margin-top:10px;border-radius:0 6px 6px 0;font-size:.9rem}}
 .pill{{padding:2px 9px;border-radius:10px;font-size:.75rem;font-weight:700}}
@@ -81,15 +83,15 @@ th{{color:#9ca3af;font-weight:600;font-size:.78rem}}.num{{text-align:right;font-
 </div>
 
 <div class=section><h2>CORE — keep funding, these carry the fleet</h2>
-<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail% 14d</th><th>fail% clean</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{core}</table></div>
+<div class=table-wrap><table><tr><th>#</th><th>project</th><th class=num>ticks</th><th class=num>code</th><th class=num>fail% 14d</th><th class=num>fail% clean</th><th class=num>sticker</th><th class=num>$/commit</th><th class=num>score</th><th>verdict</th></tr>{core}</table></div>
 <div class=note><b>Why they're core:</b> high commit volume, low failure rate, cost per commit at or below fleet median. coding-hermes-scheduler is the meta-project (it runs the fleet itself) — its score understates its value. duckbrain and terminal-jail are the efficiency leaders.</div></div>
 
 <div class=section><h2>KEEP — productive, watch one metric each</h2>
-<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail% 14d</th><th>fail% clean</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{keep}</table></div>
+<div class=table-wrap><table><tr><th>#</th><th>project</th><th class=num>ticks</th><th class=num>code</th><th class=num>fail% 14d</th><th class=num>fail% clean</th><th class=num>sticker</th><th class=num>$/commit</th><th class=num>score</th><th>verdict</th></tr>{keep}</table></div>
 <div class=note>These earn their budget but carry a flag: gitreins-poc and h3 are 2-3× the median $/commit; off-by-one and warpfs have elevated failure rates. None is a quit candidate — they're "keep, with eyes on".</div></div>
 
 <div class=section><h2>FIX or QUIT — the honest section</h2>
-<div class=table-wrap><table><tr><th>#</th><th>project</th><th>ticks</th><th>code</th><th>fail% 14d</th><th>fail% clean</th><th>sticker</th><th>$/commit</th><th>score</th><th>verdict</th></tr>{fix}</table></div>
+<div class=table-wrap><table><tr><th>#</th><th>project</th><th class=num>ticks</th><th class=num>code</th><th class=num>fail% 14d</th><th class=num>fail% clean</th><th class=num>sticker</th><th class=num>$/commit</th><th class=num>score</th><th>verdict</th></tr>{fix}</table></div>
 <div class=note><b>heading</b> is the clearest quit candidate: 237 ticks and $818 for 34 commits — its failure rate (47%) was 108 gateway failures deep, and its $24/commit is 3× the median. If the post-fix heading doesn't yield ≥1.0 commits/tick over the next week, retire it. <b>hermes-dagger</b> is the biggest spend ($3,291) with a 794-row backlog and a 38% failure history — it produces (258 commits, 1.14/tick) but its board is a landfill; the backlog must be burned down before more ticks make sense. <b>h3</b> family: h3 itself costs $24/commit (11.1M tokens/tick, 3× fleet) — keep the SDK lanes (cheap, clean) and ask whether the umbrella justifies 3×.</div></div>
 
 <div class=section><h2>The data lanes (no code, by design) & QA</h2>

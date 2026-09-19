@@ -45,6 +45,7 @@ h1{{font-size:clamp(1.5rem,5vw,2rem);background:linear-gradient(90deg,#4ade80,#6
 .card{{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:10px;padding:12px}}
 .card .big{{font-size:1.6rem;font-weight:700}}
 .good{{color:#4ade80}}.bad{{color:#f87171}}.warn{{color:#f59e0b}}.num{{text-align:right;font-variant-numeric:tabular-nums}}
+th.num{{text-align:right;font-variant-numeric:tabular-nums}}
 .section{{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:10px;padding:14px;margin:12px 0}}
 h2{{font-size:1rem;margin:0 0 8px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em}}
 .table-wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
@@ -70,7 +71,7 @@ th{{color:#9ca3af;font-weight:600;font-size:.8rem}}
 
 <div class=section><h2>Today, split at the deploy</h2>
 <div class=table-wrap><table>
-<tr><th>window</th><th>ticks</th><th>completed</th><th>failed</th><th>failure rate</th><th>code commits</th><th>gateway-class</th></tr>
+<tr><th>window</th><th class=num>ticks</th><th class=num>completed</th><th class=num>failed</th><th class=num>failure rate</th><th class=num>code commits</th><th class=num>gateway-class</th></tr>
 <tr><td>00:00 – 09:06 <small>(before)</small></td><td class=num>{pre[0]}</td><td class=num>{pre[1]}</td><td class="num bad">{pre[3]}</td><td class="num bad"><b>{pre_rate}</b></td><td class=num>{pre[4]}</td><td class=num>{pre[3]}</td></tr>
 <tr><td>09:06 – now <small>(after)</small></td><td class=num>{post[0]}</td><td class=num>{post[1]}</td><td class="num good">{post[3]}</td><td class="num good"><b>{post_rate}</b></td><td class=num>{post[4]}</td><td class="num good">{post[3]}</td></tr>
 </table></div>
@@ -80,7 +81,7 @@ th{{color:#9ca3af;font-weight:600;font-size:.8rem}}
 <div class=section><h2>7 days — the week this came from</h2>
 {bars_daily}
 <div class=table-wrap><table style=margin-top:10px>
-<tr><th>day</th><th>ticks</th><th>completed</th><th>failed</th><th>rate</th><th>code commits</th></tr>
+<tr><th>day</th><th class=num>ticks</th><th class=num>completed</th><th class=num>failed</th><th>rate</th><th class=num>code commits</th></tr>
 {rows_daily}
 </table></div>
 <div class=note>09-16 was the crash: 937 ticks, 723 failed — the gateway dying mid-morning and every lane failing blind, all day. The fix removes the entire class.</div>
@@ -88,7 +89,7 @@ th{{color:#9ca3af;font-weight:600;font-size:.8rem}}
 
 <div class=section><h2>Clearance speed today — spawned → done</h2>
 <div class=table-wrap><table>
-<tr><th>hour</th><th>cleared</th><th>avg</th><th>max</th><th>code</th></tr>
+<tr><th>hour</th><th class=num>cleared</th><th class=num>avg</th><th class=num>max</th><th class=num>code</th></tr>
 {rows_speed}
 </table></div>
 <div class=note>Average clearance ~26 min. The slow hours (10:00, 70 min) are the load gate holding spawns past threshold 12 — designed deferral, not failure. When load dips, queues drain in minutes (05:00: 29 cleared at 18 min avg).</div>
@@ -96,8 +97,8 @@ th{{color:#9ca3af;font-weight:600;font-size:.8rem}}
 
 <div class=section><h2>What still fails (7d) & who produced today</h2>
 <div class=grid style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
-<div><table><tr><th>failure class</th><th>count</th></tr>{rows_cls}</table></div>
-<div><table><tr><th>lane</th><th>ticks</th><th>commits</th></tr>{rows_prod}</table></div>
+<div><table><tr><th>failure class</th><th class=num>count</th></tr>{rows_cls}</table></div>
+<div><table><tr><th>lane</th><th class=num>ticks</th><th>commits</th></tr>{rows_prod}</table></div>
 </div>
 <div class=note>Residual failures are real stalls and one-off transients — the "gateway unreachable" wall is gone. Top producer today: {D['producers'][0][0]} with {D['producers'][0][2]} commits.</div>
 </div>
