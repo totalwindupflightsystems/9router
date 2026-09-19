@@ -335,6 +335,21 @@
   central modes are unchanged (`revisionLag` 0 + edge-only note).
 
 ## Maintenance
+- **Board tooling**: add `scripts/board-task.mjs` (`npm run board:task -- …`), a
+  fail-closed mutation helper for the JSONL-canonical board. The board keeps
+  intentional historical generations of the same id (`DF-9ROUTER-1` ×3,
+  `QA-9ROUTER-1` ×9), so an id-only first-match update rewrites the wrong
+  generation — on tick 336 a first-match completion helper completed
+  `DF-9ROUTER-3` (line 73) and `DF-9ROUTER-5` (line 75) instead of the live rows
+  (96/98). The helper refuses an ambiguous id-only mutation (exit 2) with the
+  competing candidates and requires an explicit discriminator (`--line`,
+  `--created-at`, `--ts`, `--title-contains`, `--detail-contains`); unique ids
+  still update without one and historical rows are never renumbered, re-idded or
+  rewritten. Only the selected line is re-serialized (atomic temp+rename write);
+  the rest of the file is copied byte-for-byte. Documented in
+  `.coding-hermes/board/README.md`; covered by
+  `tests/unit/board-task-guard.test.js` (28 tests: unique / ambiguous / explicit
+  discriminator, exit codes 2-5, `--dry-run`, byte preservation). Env: none.
 - **Dependencies**: conservative refresh of nine semver-compatible direct
   packages — `@next/third-parties` 16.3.0 → 16.3.5, `@xyflow/react`
   12.11.2 → 12.11.6, `jose` 6.2.8 → 6.2.12, `marked` 18.0.9 → 18.0.13,

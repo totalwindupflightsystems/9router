@@ -17,6 +17,7 @@
     "cli:publish": "npm --prefix cli run publish:cli",
     "test": "node scripts/check-test-deps.mjs && cd tests && ./node_modules/.bin/vitest run",
     "test:e2e": "node tests/federation/e2e.mjs",
+    "board:task": "node scripts/board-task.mjs",
     "lint": "eslint .",
     "lint:gate": "node scripts/lint-baseline.mjs",
     "lint:baseline": "node scripts/lint-baseline.mjs --update"
