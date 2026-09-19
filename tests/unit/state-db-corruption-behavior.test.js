@@ -69,11 +69,56 @@ const dataFile = () => path.join(dbDir(), "data.sqlite");
 const backupsDir = () => path.join(dbDir(), "backups");
 
 // A real "restart": fresh module graph + fresh driver singleton, same DATA_DIR.
+//
+// The full suite runs hundreds of adapter opens across parallel workers, and under
+// that contention an open can fail for resource reasons (SQLITE_CANTOPEN /
+// "unable to open database file" / EMFILE / SQLITE_BUSY) instead of because the file
+// is damaged. The production code deliberately does NOT classify those as corruption
+// (a transient I/O error must never move the real state DB aside), so such a boot
+// surfaces the generic "[DB] No SQLite driver available …" fatal. Measured once in a
+// guarded full-suite run (2026-09-19T04:35:23Z, .gitreins/logs/guard-20260919T043523.749325Z.log):
+// three of the cases below red on exactly that message while the file on disk is
+// provably damaged; the same cases pass in isolation, under load, and in two other
+// full-suite runs.
+//
+// A damaged file stays damaged on every attempt, so a bounded retry cannot mask a
+// real regression — and the per-driver diagnostics of the last attempt are attached
+// to the final error, so a genuine break still names its cause.
 async function boot() {
-  delete global._dbAdapter;
-  vi.resetModules();
-  const { getAdapter } = await import("@/lib/db/driver.js");
-  return await getAdapter();
+  const ATTEMPTS = 3;
+  let lastError;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    delete global._dbAdapter;
+    vi.resetModules();
+    try {
+      const { getAdapter } = await import("@/lib/db/driver.js");
+      return await getAdapter();
+    } catch (e) {
+      lastError = e;
+      const environmental = /No SQLite driver available/i.test(String(e?.message ?? ""));
+      if (!environmental || attempt === ATTEMPTS) break;
+      await new Promise((r) => setTimeout(r, 150 * attempt)); // let the contention pass
+    }
+  }
+  const detail = await describeChainFailure();
+  if (detail) throw new Error(`${lastError?.message}\n  [state-db-corruption test] ${detail}`);
+  throw lastError;
+}
+
+// Diagnostics only (never an assertion): what each driver says about the file as it
+// is on disk right now, so a failure is self-describing.
+async function describeChainFailure() {
+  const file = dataFile();
+  if (!fs.existsSync(file)) return "";
+  try {
+    const { createAdapterWithChain } = await import("@/lib/db/adapterChain.js");
+    const { attempts } = await createAdapterWithChain(file);
+    return attempts
+      .map((a) => `${a.driver}=${a.status}${a.reason ? ` (${a.reason})` : ""}${a.error ? `: ${a.error.message}` : ""}`)
+      .join("; ");
+  } catch (e) {
+    return `diagnostics unavailable: ${e.message}`;
+  }
 }
 
 // Seed a marker row through the real adapter, then close so the file on disk

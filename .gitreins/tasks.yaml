@@ -1112,3 +1112,17 @@ tasks:
   status: complete
   created_at: '2026-09-19T03:31:09.949648+00:00'
   completed_at: '2026-09-19T03:34:44.464160+00:00'
+- id: HYG-9ROUTER-15
+  title: State-DB corruption is detected, preserved and recoverable (no misleading
+    driver error, no silent reset)
+  criteria:
+  - 'A malformed or emptied DATA_DIR/db/data.sqlite is detected at startup: startup
+    reports the real cause and the file path (never ''No SQLite driver available''),
+    the original bytes are preserved under a .corrupt-<ts> name, and a usable entry
+    under DATA_DIR/db/backups is restored with the restored row content readable;
+    a healthy DB is untouched; a deterministic vitest in tests/ covers all four cases
+    and is proven load-bearing (goes red when the detection is removed); verify-no-regression
+    shows no new pass->fail and lint:gate no NEW/INCREASED problem'
+  status: complete
+  created_at: '2026-09-19T04:15:46.176491+00:00'
+  completed_at: '2026-09-19T04:33:40.323882+00:00'
