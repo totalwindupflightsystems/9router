@@ -1089,3 +1089,18 @@ tasks:
   status: complete
   created_at: '2026-09-18T22:49:25.908647+00:00'
   completed_at: '2026-09-18T22:56:28.373283+00:00'
+- id: FED-GAP-14
+  title: "migration.test.js adapter-loop test fails under full-suite host load (timeout\
+    \ flake) \u2014 make it deterministic"
+  criteria:
+  - 'The test ''migration 002 idempotency across adapters re-applies cleanly on every
+    available adapter (no-op second pass)'' in tests/federation/migration.test.js
+    must not fail as a zero-code-delta pass->fail under a loaded full-suite run: the
+    load-sensitivity is reproduced deliberately (load or timeout probe) and the assertion
+    is made deterministic with an explicit, measured timeout bound plus a comment;
+    3 consecutive full-suite runs (cd tests && npx vitest run --reporter=json --outputFile=...)
+    show the test passing every time with no code delta from the runner; node tests/__baseline__/verify-no-regression.mjs
+    reports no regression on each run; no production source file is modified'
+  status: complete
+  created_at: '2026-09-18T23:43:34.781892+00:00'
+  completed_at: '2026-09-18T23:58:37.975104+00:00'
