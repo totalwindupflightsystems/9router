@@ -161,7 +161,7 @@ def panel_lanes(con):
                              ROUND(COALESCE(SUM(t.cost_usd),0),2), substr(MAX(t.spawned_at),6,11),
                              COALESCE(p.cooldown_s,0)/3600.0, COALESCE(p.namespace_id,'')
                       FROM ticks t JOIN projects p ON p.name=t.project_name
-                      WHERE t.julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
+                      WHERE julianday(t.spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
                       GROUP BY t.project_name ORDER BY 2 DESC""")
 
 
@@ -170,7 +170,7 @@ def panel_yield(con):
     lanes = q(con, f"""SELECT t.project_name, COUNT(*), COALESCE(SUM(t.code_commits),0),
                               COALESCE(SUM(t.files_changed),0), SUM(t.status IN ('failed','timeout')),
                               ROUND(COALESCE(SUM(t.cost_usd),0),2), COALESCE(SUM(t.tokens_in+t.tokens_out),0)
-                       FROM ticks t WHERE t.julianday(spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
+                       FROM ticks t WHERE julianday(t.spawned_at) >= julianday('now','-{WINDOW_DAYS} days')
                        GROUP BY 1 HAVING COUNT(*) >= 8 ORDER BY (CAST(COALESCE(SUM(t.code_commits),0) AS REAL)/COUNT(*)) DESC""")
     tot = q(con, f"""SELECT COUNT(*), COALESCE(SUM(code_commits),0), ROUND(COALESCE(SUM(cost_usd),0),2),
                             COALESCE(SUM(tokens_in+tokens_out),0), COALESCE(SUM(files_changed),0)
