@@ -97,7 +97,70 @@ def stopped_section():
 
 
 stopped_head, stopped_rows, stopped_n = stopped_section()
+
+# ---- scope groups: group the producing lanes by what they're FOR ----
+SCOPES = {
+ 'FLEET SELF-IMPROVEMENT — systems that run and improve the fleet itself': {
+   'coding-hermes-scheduler': 'the fleet brain: admission, caps, gates, cooldowns',
+   'gitreins-poc':            'co-harness: tasks, judges, guards — connects every repo',
+   'trouble':                 'self-audit: chaos cells, QA findings, board integrity',
+   'boardctl':                'board tooling: reads/writes/validates fleet boards',
+   'coding-hermes-tools':     'toolsd: shared tools for fleet workers',
+   'task-router':             'model routing: lanes, profiles, pricing registry',
+   'my-project':              'scratch/forecast: fleet cost + benchmark models'},
+ 'RUNTIME & INFRA — the platform the fleet runs on': {
+   'bunker':        'agent isolation: per-agent docker hosts, deploys',
+   '9router':       'model federation: central + 4 edge routers, keys, lanes',
+   'duckbrain':     'memory: DuckBrain store, embeddings, syncs, recall',
+   'h3':            'protocol: h3 consensus/battery — correctness layer',
+   'warpfs':        'hilo filesystem: project fs layer',
+   'terminal-jail': 'sandboxing: what worker shells may touch'},
+ 'PRODUCTS — user-facing systems built by the fleet': {
+   'crier':         'webhook/event product: pages, workers, landing',
+   'hermes-canopy': 'canopy UI: fleet frontend (Vite/React)',
+   'hermes-dagger': 'DAGger: sandbox-first DAG execution product',
+   'chimera-v2':    'chimera deliberation: multi-model product + DAG',
+   'heading':       'travel-agent cockpit (TS monorepo)',
+   'off-by-one':    'pre-solve lab: idle GPU to priced predictions'},
+ 'SDK FAMILY — h3 client libraries (one protocol, four languages)': {
+   'h3-shim-foreman':           'shim: compliance battery for the protocol',
+   'h3-sdk-go-foreman':         'Go SDK',
+   'h3-sdk-python-foreman':     'Python SDK',
+   'h3-sdk-typescript-foreman': 'TypeScript SDK'},
+ 'PLUMBING — small roles that keep the machine honest': {
+   'release-engineer':     'cuts releases when a lane lands a fix',
+   'h3-protocol-foreman':  'protocol spec foreman (newest lane)',
+   'qa-audit':             'audits the QA lanes themselves'},
+}
+by_name = {c[0]: c for c in scored}
+group_rows_html = {}
+group_stats = {}
+for g, projs in SCOPES.items():
+    members = []
+    for pname, blurb in projs.items():
+        c = by_name.get(pname)
+        if not c: continue
+        members.append((pname, blurb, c[5], c[7], c[8], c[10], c[11]))
+    tot_usd = sum(m[3] for m in members)
+    tot_code = sum(m[2] for m in members)
+    verdicts = [m[6] for m in members]
+    gcls = 'good' if verdicts.count('CORE')*2 >= len(verdicts) else ('warn' if 'FIX' not in verdicts else 'bad')
+    group_stats[g] = (len(members), tot_code, tot_usd, gcls)
+    trs = ''
+    for pname, blurb, code, usd, ypc, sc, vd in sorted(members, key=lambda m:-m[2]):
+        trs += (f"<tr><td>{html.escape(pname)}</td><td style='white-space:normal'>{html.escape(blurb)}</td>"
+                f"<td class=num>{code}</td><td class=num>${usd:,.0f}</td><td class=num>${ypc:.0f}</td>"
+                f"<td><span class='pill {vd.lower()}'>{vd}</span></td></tr>")
+    group_rows_html[g] = trs
+group_cards = ''.join(
+    f"<div class=card><div style='font-size:.78rem;color:#9ca3af'>{g.split(' — ')[0]}</div>"
+    f"<div class=big {st[3]}>{st[1]}</div><small>{st[0]} lanes · ${st[2]:,.0f} · 14d commits</small></div>"
+    for g, st in group_stats.items())
 def money(x): return f"${x:,.0f}"
+scope_tables = ''.join(
+    f"<div style='margin-top:10px'><b style='color:#9ca3af;font-size:.85rem'>{g}</b>"
+    f"<div class=table-wrap><table><tr><th>project</th><th>what it is</th><th class=num>code 14d</th><th class=num>sticker</th><th class=num>$/commit</th><th>verdict</th></tr>{trs}</table></div></div>"
+    for g, trs in group_rows_html.items())
 PAGE = f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Portfolio review — where the fleet money goes, 14d</title><style>
 body{{background:#0f0f1a;color:#e0e0e0;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%;margin:0;padding:12px}}
@@ -142,6 +205,11 @@ td,th{{vertical-align:middle}}
 <div class=section><h2>FIX or QUIT — the honest section</h2>
 <div class=table-wrap><table><tr><th>#</th><th>project</th><th class=num>ticks</th><th class=num>code</th><th class=num>fail% 14d</th><th class=num>fail% clean</th><th class=num>sticker</th><th class=num>$/commit</th><th class=num>score</th><th>verdict</th></tr>{fix}</table></div>
 <div class=note><b>heading</b> is the clearest quit candidate: 237 ticks and $818 for 34 commits — its failure rate (47%) was 108 gateway failures deep, and its $24/commit is 3× the median. If the post-fix heading doesn't yield ≥1.0 commits/tick over the next week, retire it. <b>hermes-dagger</b> is the biggest spend ($3,291) with a 794-row backlog and a 38% failure history — it produces (258 commits, 1.14/tick) but its board is a landfill; the backlog must be burned down before more ticks make sense. <b>h3</b> family: h3 itself costs $24/commit (11.1M tokens/tick, 3× fleet) — keep the SDK lanes (cheap, clean) and ask whether the umbrella justifies 3×.</div></div>
+
+<div class=section><h2>SCOPE — what each dollar is FOR (projects grouped by purpose, not just performance)</h2>
+<div class=grid>{group_cards}</div>
+{scope_tables}
+<div class=note>Grouping answers "what am I buying": <b>SELF-IMPROVEMENT</b> spends make the fleet better at everything else (your gitreins/trouble point — one budget, many beneficiaries); <b>RUNTIME & INFRA</b> is the platform's fixed cost of being reliable; <b>PRODUCTS</b> are what the fleet ships to users; <b>SDK FAMILY</b> is one protocol multiplied across languages; <b>PLUMBING</b> keeps the machine honest for pennies. Verdicts per project roll up from the tier tables above.</div></div>
 
 <div class=section><h2>STOPPED — {stopped_n} paused/disabled lanes, judged by their own history</h2>
 {stopped_head}
