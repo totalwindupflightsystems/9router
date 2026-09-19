@@ -100,6 +100,27 @@
   next to it. Docs only — no runtime or test-source change (HYG-9ROUTER-3).
 
 ## Fixes
+- **State database (corrupt / emptied `db/data.sqlite`)**: the real state DB
+  (`DATA_DIR/db/data.sqlite`) is now detected, preserved and recovered instead
+  of being misreported or silently reset (HYG-9ROUTER-15). Measured at the
+  previous revision: a truncated or otherwise unreadable file made every driver
+  fail, and the process died with `[DB] No SQLite driver available
+  (bun/better/node/sql.js all failed)` — the drivers were blamed, the damaged
+  bytes stayed in place and `DATA_DIR/db/backups` was never consulted; an
+  EMPTIED file (0 bytes) was treated as a fresh install, so migrations were
+  re-applied, the previous schema was gone and nothing was logged at all. Now a
+  damaged file is classified separately from a missing driver module (static
+  size/header check plus the drivers' own `SQLITE_CORRUPT`/`SQLITE_NOTADB`
+  errors, so a genuinely absent `better-sqlite3` still reports `[DB]
+  better-sqlite3 unavailable: …` and falls through), the damaged bytes are
+  RENAMED to `data.sqlite.corrupt-<timestamp>` (`-wal`/`-shm` siblings
+  alongside — never overwritten in place, never deleted), and startup
+  continues: if a usable `data.sqlite` exists under
+  `DATA_DIR/db/backups/<dir>/` (validated the same way, with `PRAGMA
+  quick_check`) the newest one is restored and announced, otherwise the app
+  comes up on a fresh DB behind a prominent `DATA LOSS` message naming the
+  file, the preserved copy and the backup directory. No new dependencies, and
+  healthy/standalone/federation behaviour is unchanged.
 - **Docker (standalone Compose)**: `docker-compose.yml` now has a
   backwards-compatible local-build fallback for hosts that cannot pull the
   third-party images the stack depends on (`decolua/9router`, plus the optional
