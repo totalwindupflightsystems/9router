@@ -81,8 +81,3 @@ tests/unit/translator-request-normalization.test.js :: request normalization tra
 tests/unit/windsurf-executor.test.js :: WindsurfExecutor class PROVIDERS.windsurf baseUrl is the chat endpoint (registry in sync)
 tests/unit/windsurf-executor.test.js :: WindsurfExecutor class buildUrl returns the GetChatMessage endpoint
 tests/unit/windsurf-executor.test.js :: WindsurfExecutor class constructor wires config from PROVIDERS.windsurf
-
-# Backport v0.5.69->v0.5.75 (2026-09-14): upstream 35b950be moved the Kiro
-# CodeWhisperer endpoint to q.us-east-1.amazonaws.com but did not update this
-# test; fails identically on pure upstream/master (17c4cc76).
-tests/unit/kiro-external-idp.test.js :: Kiro external_idp (CLIProxyAPI) import and refresh adds CodeWhisperer external IdP headers and endpoint ordering
