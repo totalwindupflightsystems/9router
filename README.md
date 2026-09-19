@@ -39,7 +39,7 @@ multiple instances across datacenters/hosts and keep them in sync.
   `FEDERATION_MODE` is set (zero behavior change out of the box).
 
 Enable it with the `FEDERATION_*` environment variables (see `.env.example`, lines
-41–51): set `FEDERATION_MODE=central` on the central instance, and
+53–70): set `FEDERATION_MODE=central` on the central instance, and
 `FEDERATION_MODE=edge` with `FEDERATION_CENTRAL_URL` + `FEDERATION_TOKEN` on edges.
 
 Full design & config reference: [docs/federation-spec.md](docs/federation-spec.md).
