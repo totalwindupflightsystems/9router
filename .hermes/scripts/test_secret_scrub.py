@@ -22,6 +22,7 @@ POSITIVE_CASES = [
     ("anthropic-api-key",    "sk-ant-fakeTESTKEY-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sk-ant-[REDACTED]"),
     ("github-token-ghp",     "ghp_FakeTokenFakeTokenFakeToken",           "[REDACTED-GITHUB-TOKEN]"),
     ("github-token-gho",     "gho_FakeOAuthFakeOAuthFakeOAu",             "[REDACTED-GITHUB-TOKEN]"),
+    ("github-token-ghpou",   "ghpou_" + "FakeGhpou" * 5,                  "[REDACTED-GITHUB-TOKEN]"),
     ("github-pat",           "github_pat_11FAKEFAKEFAKEFAKEFAKEFAKE",     "github_pat_[REDACTED]"),
     # AWS's own documentation placeholder access key id — shape-correct, public.
     ("aws-access-key-id",    "AKIAIOSFODNN7EXAMPLE",                      "AKIA[REDACTED]"),
