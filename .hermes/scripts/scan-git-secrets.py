@@ -171,6 +171,12 @@ FP_PATTERNS = [
     re.compile(r'<code>-----BEGIN [A-Z ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK|KEY BLOCK)-----(?:</code>)?'),
     # (c) the scrubber's own test vector file (marker text + [REDACTED:...] expected-output column)
     re.compile(r'(?i)/scrub/testdata/.*(?:private_key_block|\[REDACTED:)'),
+    # ── Backtick-quoted PEM BEGIN-header in the scanner's own prose (scan #101) ──
+    # The scanner's source comment describing the bare-diff-line miss wraps the
+    # marker in backticks: `+-----BEGIN RSA PRIVATE KEY-----`. Complete header,
+    # no base64 body on the line — documentation, not material. Narrow like the
+    # straight-quote rule: header must END the backtick span immediately.
+    re.compile(r'`\+?-----BEGIN [A-Z ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK|KEY BLOCK)-----`'),
     # (d) literal alphabet run as an assigned value (Go byte-set const: setToken = "ABC…XYZabc…xyz0-9")
     re.compile(r'"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'),
     # ── Secret-store KEY-NAME constants (scan #93, 2026-09-17) ──
