@@ -188,6 +188,32 @@ def panel_yield(con):
     return head, rows
 
 
+def panel_speed(con):
+    """Clearance speed: how fast ticks go spawned->completed, hour by hour, plus failure rate."""
+    rows = q(con, """
+      WITH fin AS (
+        SELECT substr(completed_at,12,2) h, (julianday(completed_at)-julianday(spawned_at))*24*60 mins,
+               COALESCE(code_commits,0) c
+        FROM ticks WHERE status='completed' AND completed_at >= datetime('now','localtime','-12 hours'))
+      SELECT h, COUNT(*), CAST(AVG(mins) AS INT), CAST(MAX(mins) AS INT), SUM(c) FROM fin GROUP BY 1 ORDER BY 1""")
+    out = ''
+    for h, n, avg, mx, c in rows:
+        cls = 'ok' if avg <= 30 else ('warn' if avg <= 60 else 'bad')
+        out += (f"<tr><td>{h}:00</td><td class=num>{n}</td><td class='num {cls}'><b>{avg}m</b></td>"
+                f"<td class=num>{mx}m</td><td class=num>{c}</td></tr>")
+    # failure-rate strip: today pre/post deploy-style buckets via 6h windows
+    fr = q(con, """
+      SELECT CASE WHEN spawned_at >= datetime('now','localtime','-6 hours') THEN 'last 6h'
+                  ELSE '6-12h ago' END w, COUNT(*), SUM(status IN ('failed','timeout'))
+      FROM ticks WHERE spawned_at >= datetime('now','localtime','-12 hours') GROUP BY 1""")
+    d = {w: (t, f or 0) for w, t, f in fr}
+    (t1, f1), (t2, f2) = d.get('last 6h', (0, 0)), d.get('6-12h ago', (0, 0))
+    r1 = f1/max(t1,1)*100; r2 = f2/max(t2,1)*100
+    head = (f"<div class=kv>failure rate: <b class='{'ok' if r1 < 5 else 'bad'}'>{r1:.1f}%</b> last 6h ({f1}/{t1}) · "
+            f"<b>{r2:.1f}%</b> 6-12h ago ({f2}/{t2}) · avg clearance <b>{sum(r[2]*r[1] for r in rows)/max(sum(r[1] for r in rows),1):.0f}m</b></div>")
+    return head, out
+
+
 def panel_fail(con):
     return q(con, f"""SELECT COALESCE(substr(error,1,58),'(none)'), COUNT(*),
                              MIN(substr(spawned_at,6,11)), MAX(substr(spawned_at,6,11))
@@ -329,6 +355,7 @@ def render():
     flow_d, flow_h = panel_flow(con)
     lanes = panel_lanes(con)
     yield_head, yield_rows = panel_yield(con)
+    speed_head, speed_rows = panel_speed(con)
     analysis_html = analysis(con)
     fails = panel_fail(con)
     queue = panel_queue(con)
@@ -418,7 +445,8 @@ td.num{{text-align:right;font-variant-numeric:tabular-nums}} td.lane{{max-width:
  <div class=card><h2>24 hours by hour</h2>{flow_h}</div>
  <div class=card><h2>namespaces (cap / mode / gate)</h2><table><tr><th>ns</th><th>cap</th><th>mode</th><th>gate</th><th>prompt</th><th>lanes</th></tr>{ns_rows}</table></div>
  {analysis_html}
- <div class=card><h2>YIELD PER TICK — effectiveness, not volume</h2>{yield_head}<div class=scroll><table><tr><th>lane</th><th>ticks</th><th>code</th><th>per tick</th><th>files</th><th>fail</th><th>tok/tick</th><th>$/commit</th></tr>{yield_rows}</table></div></div>
+ <div class=card><h2>CLEARANCE SPEED — spawned→done minutes + failure rate</h2>{speed_head}<div class=scroll><table><tr><th>hour</th><th>cleared</th><th>avg</th><th>max</th><th>code</th></tr>{speed_rows}</table></div></div>
+<div class=card><h2>YIELD PER TICK — effectiveness, not volume</h2>{yield_head}<div class=scroll><table><tr><th>lane</th><th>ticks</th><th>code</th><th>per tick</th><th>files</th><th>fail</th><th>tok/tick</th><th>$/commit</th></tr>{yield_rows}</table></div></div>
  <div class=card><h2>failure classes (7d)</h2><table><tr><th>error</th><th>n</th><th>first</th><th>last</th></tr>{fail_rows}</table></div>
  <div class=card><h2>busiest lanes (7d)</h2><div class=scroll><table><tr><th>lane</th><th>ns</th><th>n</th><th>ok%</th><th>fail</th><th>avg s</th><th>code</th><th>board</th><th>files</th><th>tokens</th><th>$</th><th>cool</th><th>last</th></tr>{lane_rows}</table></div></div>
  <div class=card><h2>board backlog (open rows)</h2><table><tr><th>project</th><th>open</th><th>total</th></tr>{board_rows}</table></div>
