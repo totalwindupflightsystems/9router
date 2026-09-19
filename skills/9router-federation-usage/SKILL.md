@@ -19,7 +19,7 @@ edges proxy `/v1` + mutating dashboard API to a central instance, replicate its
 SQLite config DB, and serve from the local replica if central dies (writes
 queued during an outage, replayed on recovery).
 
-**Status (re-verified 2026-09-01 dogfood, real deployment @ cd90fd9e): the
+**Status (re-verified 2026-09-19 dogfood, real deployment @ 585bd31c): the
 feature WORKS end-to-end and all known integrity findings are FIXED.**
 Acceptance checks A–D pass: replication converges (<7s), client API keys
 authenticate through the edge, the federation API answers Bearer-only, and the
@@ -145,8 +145,19 @@ curl -s http://CENTRAL:PORT/api/federation/status -H "Authorization: Bearer $FED
 - **During a central outage the edge logs `[federation] pull failed: fetch
   failed` once per sync interval** — expected until central returns (R3-03,
   rate-limiting suggested).
-- **Model IDs on /v1 need the provider prefix** (`ollama-local/<model>`), or a
-  combo name (no prefix).
+- **Wiring a local OpenAI-compatible endpoint (the two-object model).** The
+  fast path is: (1) `POST /api/provider-nodes` with
+  `{name, type:"openai-compatible", apiType:"chat", prefix, baseUrl}` — the
+  node carries NO credential; (2) `POST /api/providers` with
+  `{provider: <node.id from step 1>, apiKey, name}` — this is the credential
+  that makes traffic flow. Skip step 2 and every request dies with
+  `No active credentials for provider: openai-compatible-chat-…`. If the
+  upstream is genuinely Ollama-native (`/api/chat`), use
+  `provider:"ollama-local"` with `providerSpecificData.baseUrl` instead —
+  pointing `ollama-local` at an OpenAI-shaped server gives a silent empty 200.
+- Model IDs on /v1 need the provider prefix (`ollama-local/<model>`), or a
+  combo name (no prefix). For openai-compatible nodes the prefix is the one
+  YOU defined on the node.
 - Never reuse `FEDERATION_TOKEN` for `JWT_SECRET`/`API_KEY_SECRET`; do share
   the latter two across instances.
 - Historical context: FED-011..016 (dead proxy/auth/loops), FED-020 (delta

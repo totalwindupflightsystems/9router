@@ -199,3 +199,40 @@ passed, including row-level probes. Three lessons worth keeping:
    catch-up + replay cycle dominates. During the outage the edge logs one
    `[federation] pull failed: fetch failed` per sync interval (filed R3-03).
    Expect a bounded window of `degraded` after restart and don't panic-fix.
+
+## 12. Run 4 (2026-09-19, HEAD 585bd31c): standalone + federation both hold; the gap moved to onboarding
+
+Run 4 was a full fresh-user pass — scratch standalone instance AND a real
+central+edge federation pair, all acceptance checks A/A+/B/C/D passing. What
+the run taught:
+
+1. **The hard part of local-endpoint wiring is the two-object model.** A
+   "provider node" (`providerNodes` table, user-defined prefix → baseUrl) and
+   a "provider connection" (`providerConnections`, holds the credential) are
+   separate rows; chat traffic only works when BOTH exist and the connection's
+   `provider` field equals the node id. `POST /api/provider-nodes` creating a
+   node with no credential attached is the trap: the model routes
+   (`src/sse/services/model.js` matches the prefix) but auth finds zero
+   connections and the user sees `No active credentials` with no hint that a
+   second call is needed. Right way: node first, then
+   `POST /api/providers {provider: <node.id>, apiKey: …}`.
+2. **Executor protocol families are invisible at the API surface.**
+   `ollama-local` speaks Ollama's native `/api/chat`; an OpenAI-shaped server
+   behind it yields HTTP 200 + `data: [DONE]` + `IN 0 · OUT 0` — a silent
+   empty success rather than a protocol error. The generic escape hatch is an
+   `openai-compatible` node (`apiType: "chat"`), which translated
+   transparently. Lesson: when a local upstream "returns nothing", suspect the
+   executor family first, before debugging the gateway.
+3. **The outage window between central death and the edge's DEGRADED flip is
+   fail-hard, not fail-open.** For ~1.5×OUTAGE_THRESHOLD_MS after the kill,
+   `/v1` answers `FED_UPSTREAM_ERROR` while the replica is fully fresh
+   (lag 0). Serving from the replica would be safe there; today the user sees
+   the worst possible moment for an error. Filed DF-9ROUTER-31; watch this if
+   failover state machine work ever lands.
+4. **Re-verification recipe unchanged and still authoritative.** Boot from
+   repo-root production path, run the four acceptance checks (A replication,
+   A+ row-level version/updated_at equality, B edge-authenticated /v1, C
+   Bearer-only federation API, D kill/queue/recover lifecycle) — all passed
+   at this HEAD with zero config beyond the FEDERATION_* envs. The 09-01
+   conclusion stands: unit green ≠ federation works; only the real-boot
+   playbook is the verdict.
