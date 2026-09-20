@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "counts": {
+    "assumptions": 8,
+    "contradictions": 1,
+    "core_checks": 9,
+    "decisions": 24,
+    "escalations": 2,
+    "tradeoffs": 9,
+    "unknowns": 5
+  },
+  "canonical_domain_files": 44,
+  "errors": []
+}

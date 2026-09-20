@@ -1,0 +1,534 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "spec-decomposition-matrix register (dirdigest run)",
+  "description": "Machine-readable schema for the registers emitted under design/. Ids are regexes, not examples (skill \u00a77.6). Cross-reference integrity rules are enforced by tools/validate.py, which is the executable gate.",
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^(D|T|U|A|C)-\\d{3}$|^ESC-\\d{2}$|^core-check-\\d+$|^F-\\d{2}$|^RB-\\d+$|^I-\\d+$|^R-\\d+$|^HS-\\d+$"
+    },
+    "decisionId": {
+      "type": "string",
+      "pattern": "^D-\\d{3}$"
+    },
+    "classification": {
+      "enum": [
+        "BEFORE-BUILD",
+        "BEFORE-SHIP",
+        "DEFER-WITH-OWNER"
+      ]
+    },
+    "reversalCost": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "effectively-irreversible"
+      ]
+    },
+    "blockingClass": {
+      "enum": [
+        "BEFORE-BUILD",
+        "BEFORE-SHIP",
+        "DEFER"
+      ]
+    }
+  },
+  "type": "object",
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "branch",
+          "classification",
+          "alternatives_considered",
+          "evidence",
+          "breaks",
+          "depends_on",
+          "reversal_cost",
+          "owner"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/definitions/decisionId"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 10
+          },
+          "branch": {
+            "type": "string"
+          },
+          "ring": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "terminating_ring": {
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "classification": {
+            "$ref": "#/definitions/classification"
+          },
+          "alternatives_considered": {
+            "type": "array",
+            "minItems": 2
+          },
+          "evidence": {
+            "type": "array"
+          },
+          "breaks": {
+            "type": "string",
+            "minLength": 1,
+            "description": "\u00a75.5 form. 'none' is only legal when followed by an explicit checked-against list."
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/id"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/decisionId"
+            }
+          },
+          "contradicts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^C-\\d{3}$"
+            }
+          },
+          "core_check": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(core-check-\\d+)?$"
+          },
+          "supersedes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "superseded_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reversal_cost": {
+            "$ref": "#/definitions/reversalCost"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provisional": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "tradeoffs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "core_link",
+          "classification",
+          "candidates",
+          "hinge_axis",
+          "recommendation",
+          "why",
+          "confidence",
+          "dedup_key",
+          "escalation_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^T-\\d{3}$"
+          },
+          "question": {
+            "type": "string"
+          },
+          "core_link": {
+            "type": "string"
+          },
+          "classification": {
+            "$ref": "#/definitions/classification"
+          },
+          "candidates": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "advantages",
+                "costs",
+                "breaks",
+                "evidence",
+                "assumptions",
+                "reversal_path",
+                "reversal_cost"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "advantages": {
+                  "type": "array"
+                },
+                "costs": {
+                  "type": "array"
+                },
+                "breaks": {
+                  "type": "array"
+                },
+                "evidence": {
+                  "type": "array"
+                },
+                "assumptions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/id"
+                  }
+                },
+                "reversal_path": {
+                  "type": "string"
+                },
+                "reversal_cost": {
+                  "$ref": "#/definitions/reversalCost"
+                }
+              }
+            }
+          },
+          "dominated": {
+            "type": "array"
+          },
+          "hinge_axis": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 3
+          },
+          "why": {
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "dedup_key": {
+            "type": "string"
+          },
+          "escalation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(ESC-\\d{2})?$"
+          }
+        }
+      }
+    },
+    "escalations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "options",
+          "our_read",
+          "default",
+          "default_rationale",
+          "risk_of_default"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ESC-\\d{2}$"
+          },
+          "question": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2
+          },
+          "our_read": {
+            "type": "string",
+            "minLength": 10
+          },
+          "default": {
+            "type": "string"
+          },
+          "default_rationale": {
+            "type": "string"
+          },
+          "risk_of_default": {
+            "type": "string",
+            "minLength": 10
+          }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "why_unanswered",
+          "owner",
+          "deadline_or_trigger",
+          "blocking_class",
+          "containment_default",
+          "evidence_to_close",
+          "decisions_affected"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^U-\\d{3}$"
+          },
+          "question": {
+            "type": "string"
+          },
+          "why_unanswered": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "deadline_or_trigger": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking_class": {
+            "$ref": "#/definitions/blockingClass"
+          },
+          "containment_default": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_to_close": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decisions_affected": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^(D-\\d{3}|\\S+\\s\\S.*)$"
+            }
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "assumption",
+          "evidence",
+          "falsifier",
+          "when_tested",
+          "decisions_affected",
+          "containment"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^A-\\d{3}$"
+          },
+          "assumption": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "falsifier": {
+            "type": "string",
+            "minLength": 1,
+            "description": "An assumption with no falsifier is a belief and belongs in the risk register instead."
+          },
+          "when_tested": {
+            "type": "string"
+          },
+          "decisions_affected": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^(D-\\d{3}|O\\d+|\\S+\\s\\S.*)$"
+            }
+          },
+          "containment": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "parties",
+          "competing_claims",
+          "evidence",
+          "affected_decisions",
+          "detected_by",
+          "owner",
+          "containment_default",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^C-\\d{3}$"
+          },
+          "kind": {
+            "enum": [
+              "decision-vs-decision",
+              "seed-vs-seed",
+              "seed-vs-derivation",
+              "assumption-vs-evidence"
+            ]
+          },
+          "parties": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "$ref": "#/definitions/id"
+            }
+          },
+          "competing_claims": {
+            "type": "array",
+            "minItems": 2
+          },
+          "evidence": {
+            "type": "array"
+          },
+          "affected_decisions": {
+            "type": "array"
+          },
+          "detected_by": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "containment_default": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "RESOLVED",
+              "ACCEPTED-COST",
+              "SUPERSEDED"
+            ]
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "resolved_date_or_trigger": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "RESOLVED",
+                    "ACCEPTED-COST",
+                    "SUPERSEDED"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "resolution",
+                "resolved_date_or_trigger"
+              ],
+              "properties": {
+                "resolution": {
+                  "minLength": 10
+                },
+                "resolved_date_or_trigger": {
+                  "minLength": 4
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "core_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "branch",
+          "user_class",
+          "jtbd",
+          "why_needed",
+          "result",
+          "delta",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^core-check-\\d+$"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "simplify",
+              "prune",
+              "escalate"
+            ]
+          },
+          "delta": {
+            "type": "string",
+            "minLength": 5
+          }
+        }
+      }
+    }
+  }
+}
