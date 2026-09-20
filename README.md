@@ -358,14 +358,19 @@ curl -s -X POST http://localhost:20128/api/provider-nodes \
 
 The generated `id` is `openai-compatible-<apiType>-<uuid>` — read it out of the
 response (`GET /api/provider-nodes` lists every node: `{"nodes":[…]}`). Fields the
-route accepts (`src/app/api/provider-nodes/route.js:35-60`):
+route accepts (`src/app/api/provider-nodes/route.js:40-70`):
+
+Two fields look alike and are easy to transpose: **`type` is the node *kind***,
+**`apiType` is the *protocol* the node speaks**. Neither is derived from the other —
+sending one where the other belongs is rejected, never silently repaired into a
+placeholder value.
 
 | Field | Required | Values |
 | --- | --- | --- |
 | `name` | yes | free text — 400 `Name is required` |
-| `prefix` | yes | the model-id namespace, e.g. `lmstudio` → `lmstudio/<model>` — 400 `Prefix is required`. Must not collide with a built-in provider id/alias (`src/sse/services/model.js:12-17`) |
-| `type` | no | `openai-compatible` (default), `anthropic-compatible`, `custom-embedding` |
-| `apiType` | for `openai-compatible` | `chat` (Chat Completions) or `responses` (Responses API) — anything else: 400 `Invalid OpenAI compatible API type` |
+| `prefix` | yes | the model-id namespace, e.g. `lmstudio` → `lmstudio/<model>` — 400 `Prefix is required`. Must not collide with a built-in provider id/alias (`src/sse/services/model.js:12-17`). Always the caller's own string — never defaulted from `type` |
+| `type` | no | the node **kind**: `openai-compatible` (default), `anthropic-compatible`, `custom-embedding`. Not the protocol — that is `apiType` |
+| `apiType` | for `openai-compatible` | the **protocol**: `chat` (Chat Completions) or `responses` (Responses API). Omitted or anything else: 400 `Invalid apiType "openai" — allowed values: chat, responses (apiType is the protocol; "type" is the node kind)`. Never defaulted |
 | `baseUrl` | no | defaults to `https://api.openai.com/v1`; for a local server give the OpenAI base **including `/v1`** |
 
 **2. Add the credential connection** — `provider` is the `id` from step 1:
