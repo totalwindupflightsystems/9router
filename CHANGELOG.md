@@ -100,6 +100,22 @@
   next to it. Docs only — no runtime or test-source change (HYG-9ROUTER-3).
 
 ## Fixes
+- **Federation (pre-DEGRADED outage window)**: an edge now serves `/v1` from
+  its local replica during the window between central becoming unreachable and
+  the DEGRADED flip, instead of answering a hard `502
+  FED_UPSTREAM_ERROR` while holding a fully current replica (DF-9ROUTER-31).
+  The window fails open only when it is provably safe — central unreachable
+  **before** the request body was sent (dead/partitioned central), a `/v1/*`
+  request, and a replica that is initialized with `revisionLag == 0` against
+  the central-advertised watermark — and the response carries the same
+  `X-Federation-State: degraded` header the post-flip path emits. No new state
+  was added: the LINKED → DEGRADED transition is still owned by the heartbeat
+  threshold and the proxy failover hook, and the freshness numbers come from
+  the same `federation_meta` columns `local-status` reports. The window stays
+  fail-hard for a lagging or never-synced replica, for failures **after**
+  connect (the client body was already consumed), and for mutating dashboard
+  writes (applying those locally while LINKED would skip `pendingWrites` and
+  never replay) — see `docs/FEDERATION.md` §5.1.1. Env: none new.
 - **State database (corrupt / emptied `db/data.sqlite`)**: the real state DB
   (`DATA_DIR/db/data.sqlite`) is now detected, preserved and recovered instead
   of being misreported or silently reset (HYG-9ROUTER-15). Measured at the
