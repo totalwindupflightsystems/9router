@@ -608,3 +608,147 @@ ROUTER-MISS line first.
   evidence — that isolation is what makes the mandatory head-drift
   explanation checkable instead of a guess.
 
+- **MISSING plan_terms ROW = WHOLE PROVIDER SILENTLY UNPRICED (2026-09-17,
+  openrouter)**: the models.dev sync added 359 openrouter lanes; the pricing
+  engine priced NONE — openrouter had no plan_terms row, and the engine
+  skips unknown-plan providers with only a per-lane "no plan_terms row"
+  log line. Symptom: gap report floods with price+catalog NULLs for ONE
+  provider. Law: after any sync that adds lanes for a provider, verify a
+  plan_terms row exists for it BEFORE expecting prices. Also: openrouter's
+  price convention is the models.dev INPUT sticker (registry PAYG
+  convention), NOT the 0.96/0.04 blend — that blend is the per_request
+  budget-unknown fallback only. Verify the convention with a spot-check
+  against the source before writing the plan_terms note.
+
+- **GUARD DIFF-MODE REFUSES DATA-ONLY COMMITS (2026-09-17)**: gitreins
+  `test_mode: diff` can never grade a data-only commit (data/tables/*.jsonl
+  match no test files → tests lane skipped → DEGRADED PASS → hook exit 1 →
+  commit silently aborted; git prints PASS text but writes nothing —
+  VERIFY with `git log`, not exit codes or stdout). Fix the config, not the
+  commit: `test_mode: full` grades the whole tree, and `hook_timeout` must
+  exceed the full-suite runtime (300s default failed-open on the first
+  full-mode data commit; 700s gives conclusive PASS at ~220s suite). Same
+  doctrine class as the 09-16 test_timeout fix — a timed-out or skipped
+  stage is an inconclusive gate, not a pass.
+
+- **A PROVIDER ABSENT FROM models.dev HAS NO CATALOG DIFF AT ALL (2026-09-18,
+  xkiro)**: the daily models.dev sync silently cannot see such a provider, so
+  nothing compared its LANE IDS against its own live catalog. xkiro carried
+  6 ids that had disappeared upstream — ACTIVE, priced **$0**, i.e. head-
+  eligible phantom lanes that 404 on every call — while the hourly probe
+  reported them DOWN for days and router_probefix called them "UNEXPLAINED
+  (catalog serves the id)". Rule: for every provider with a live `/models`
+  endpoint, run a registry-lane ↔ live-catalog id diff in the same loop
+  (xkiro 2026-09-18: live 111 vs registry 115 → 6 dead disabled, 2 live ids
+  added). Cheap test for the class: `$0 lane + probe DOWN + id absent from
+  the provider's own catalog` = disable it, don't wait for an agent.
+
+- **EDGE WAFs REJECT KEYLESS-UA REQUESTS — THAT IS NOT A DEAD PROVIDER
+  (2026-09-18, xkiro + crof)**: without a browser User-Agent, api.xkiro.com
+  (and crof.ai) answer HTTP 403 `error code: 1010` **even with a perfectly
+  valid Bearer key** — the same key returns 200 with a UA. Two consequences:
+  (a) a cross-check script that omits the UA will conclude the provider is
+  down and mis-classify every lane failure; (b) router_probefix's catalog
+  fetch fails, so its old code printed "catalog serves the id" for lanes it
+  could not even list. Always send a browser UA in cross-check tooling, and
+  make a failed catalog fetch a DIFFERENT class from a failed lane.
+
+- **THE 404 SCANNER MUST SPLIT ITS VERDICTS, AND provider_rules COMES FIRST
+  (2026-09-18)**: one `unexplained` bucket was hiding three different
+  situations and re-reporting known artifacts as open work (13 opencode-go
+  400s/day were already documented — `x-opencode-session` is required and the
+  probe deliberately omits it). Now: provider_rules rows may carry
+  `explains_probe: ["<regex>"]` and the scanner reports **EXPLAINED** (an
+  explanation row beats a re-diagnosis; honoring `valid_to`, so an expired
+  contract stops explaining); catalog fetched + id present = **UNEXPLAINED**
+  (transient/auth); catalog fetched + id absent = **DEAD-ID** (disable or
+  replace); catalog fetch failed = **CATALOG-N/A** (endpoint/credential
+  problem — never a lane verdict). If a report line claims evidence the run
+  did not actually obtain, that is a data-honesty bug, not a wording nit.
+
+- **KILLING A LANE MEANS UPDATING THE GOLDEN HEADS DELIBERATELY
+  (2026-09-18)**: three test files anchor on "the head lane" (P1_CODING
+  golden in `test_regression.py`, plus the ledger-fixture anchor in
+  `test_soft_gate.py` and two assertions in `test_visibility.py`). Disabling
+  the dead xkiro lanes turned the suite red with an assert that *names the
+  old lane* — that is the intended alarm, not a broken test: update the
+  golden text with the dated reason ("lane id gone upstream; the next $0
+  1M-ctx lane takes the tie-break"), re-seed, and re-run the full suite.
+  Never "fix" it by re-enabling the dead lane to silence the assert.
+
+- **ALIAS SLICES ARE SAFE BY FAMILY, NOT BY NAME COUNT (2026-09-18)**: adding
+  `model_aliases.jsonl` rows for vendor-prefixed / `:free` mirrors
+  (openrouter `openai/gpt-5.6-sol`, xkiro `z-ai/glm-5.3-flash`, …) does NOT
+  inflate the percentile scale — `cat_q` groups by the alias FAMILY (base
+  model), so variants inherit tiers without moving boundaries. Two
+  requirements: (a) the alias row's first two keys must be `model` then
+  `inherits` (the seed reads `tuple(values())[:2]`); (b) map only
+  EXACT-normalized matches (namespace + `:free` stripped) against a base that
+  already has perf rows — fuzzy mapping is a judgment call for the agent, not
+  a script. Expect heads to move when an inherited lane is genuinely cheaper
+  than the incumbent (2026-09-18: xkiro `openai/gpt-5.6-sol` at normalized
+  $0.18 displaced openai-codex `gpt-5.6-sol` $0.40 for P0_FORE) — that is the
+  cheapest-acceptable rule working; verify the new head serves (live probe)
+  and report the flip with its cause.
+
+
+- **PLAN-INCLUDED LANES PRICED AT THE PAYG STICKER — 'normalized:' IS NOT
+  PROTECTION (2026-09-19, minimax Token Plan)**: the stale-flat reprice
+  (Bane 2026-08-27) converts box prices into subscription economics but only
+  for evidence NOT starting with `normalized:` — and `normalized:payg-sticker`
+  IS a box price wearing a normalized label. Symptom: one physical model carries
+  two prices on one provider (minimax `MiniMax-M3` at the blended PAYG sticker
+  $0.3 vs its lowercase twin `minimax-m3` at the plan-true $0.0926, plan
+  multiplier 8.1x). Fix in `router_pricing.py`: treat `normalized:payg-sticker`
+  as stale for flat-subscription providers WITH an included list (not-included
+  lanes are unaffected — the module returns None and the price is untouched),
+  and lock it with
+  `test_plan_included_lanes_never_carry_payg_sticker_evidence`. Guardrail: the
+  test only checks lanes with a resolvable catalog sticker, because a lane with
+  no sticker anywhere cannot be repriced and stays a documented gap.
+- **A POINTS-PLAN PROVIDER HAS NO MECHANICAL SWEEP — CHECK PLAN INCLUSION
+  BEFORE PRICING (2026-09-19, zai-glm glm-5.3-flashx)**: `router_plan_sweep.py`
+  only sweeps `flat_subscription` providers with an `included_models` list.
+  Points/subscription providers (zai-glm official-points, kimi weekly) get NO
+  sweep, so a new lane from a models.dev sync arrives ACTIVE with price NULL and
+  nothing disables it. Read the provider's OFFICIAL plan model-list before you
+  price it: Z.AI's own page states "GLM-5.3-Flash is now fully available on the
+  GLM Coding Plan ... (GLM-5.3-FlashX is not yet available on the plan)" — a
+  plan lane calling a not-on-plan id is a phantom head waiting to happen. The
+  correct treatment is the not-callable class: NULL price + disable +
+  model_notes row quoting the source, NOT a guessed multiplier.
+- **THE 404 SCANNER MUST TREAT AN ALREADY-DISABLED LANE AS HANDLED
+  (2026-09-19)**: auto DEAD-ID/GAP rows are de-duped by (provider, model,
+  action-prefix) but never checked against registry state, so the 09-18 xkiro
+  and synthetic dead-id rows re-appeared in the very next scan with nothing left
+  to do — stale work burying real work. `router_probefix.py` now loads
+  models.jsonl disabled rows and prints `HANDLED <prov> <model>: lane already
+  disabled in the registry (<reason>)` before any classification (registry state
+  beats a re-diagnosis, same ladder position as provider_rules explanations).
+  The scanner's exit counts carry a separate `already-disabled lane(s)` bucket.
+- **SYNC WRITERS MUST EMIT THE FULL models.jsonl SCHEMA (2026-09-19,
+  clinepass sync)**: `router_clinepass.py sync` wrote new lanes with an 8-key
+  literal (no `context_limit`, no perf_* columns) and the suite went red the
+  first time it actually added a lane
+  (`test_models_jsonl_carries_context_limit`). Every writer into a shared table
+  must emit the table's full column set with NULL for unknowns — a thinner row
+  is a schema hole that only trips the next consumer. Same class as the
+  provider-less model_notes KeyError (09-10): the table is the contract, not the
+  writer's convenience.
+
+- **"INERT BY DESIGN" IS FALSE IF THE SOURCE TEXT NAMES THE PATTERN (2026-09-19,
+  self-inflicted and caught by the boundary diff)**: five evidence rows were
+  appended with sources that SAID "held INERT deliberately: naming avoids the
+  overlay pattern" — while quoting the pattern token in the same sentence
+  (`Terminal-Bench 2.1`, `BenchLM rank #8/230`). BENCH_OVERLAY matches
+  `source LIKE '%<pattern>%'`, so the rows landed anyway: a sentiment row
+  (0.7/1.0) became `glm-5.3-flashx` terminal 0.7, a vendor terminal score
+  0.866 moved the shared terminal quantiles, and a rank composite became
+  spec_docs 0.82 for five qwen3.8-max lanes — boundary shifts visible in
+  `git diff data/tables/category_levels.jsonl`, with zero head drift to warn
+  you. RULE: an inert row must not CONTAIN the pattern token anywhere in its
+  source string; write the non-landing ones as e.g. "agentic-terminal eval
+  86.6/100 (no overlay pattern token by design)" and always `grep -c` the
+  pattern against the new rows before seeding. And after any bench append,
+  `git diff --stat data/tables/category_levels.jsonl` is the cheapest proof of
+  whether the ladder moved at all.

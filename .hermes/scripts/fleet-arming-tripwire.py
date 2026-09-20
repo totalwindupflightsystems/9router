@@ -115,8 +115,18 @@ for name, ns, en, cd, fl, ce, ac in rows:
         if ac:
             problems.append(f"T1: {name} armed but namespace '{ns}' not in ADAPTIVE_LANES")
         continue
+    # TASKS-ADMISSION LAW (Bane 2026-09-19): the coding-hermes namespace is
+    # tasks-admission — lanes spawn from board state, never the cooldown
+    # timer — so adaptive_cooldown is DEAD BOOKKEEPING there. Expected state:
+    # flag OFF. An armed row is config drift (the policy regen stopped
+    # emitting the flag for tasks namespaces); a disarmed row is CORRECT and
+    # is NOT counted into the armed set at all.
+    if ns == "coding-hermes":
+        if ac:
+            problems.append(f"T1: {name} armed but namespace 'coding-hermes' is tasks-admission (adaptive flag is dead bookkeeping — disarm)")
+        continue
     if not ac:
-        # expected-armed but flag off = REAL arming drift
+        # expected-armed but flag off = REAL arming drift (timer-based lane)
         problems.append(f"T1: {name} foreman-lane enabled but adaptive_cooldown=0 (disarmed)")
         continue
     db_armed[name] = (cd, fl, ce)

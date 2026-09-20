@@ -22,8 +22,8 @@ reserved = 0
 hard_cap = 10
 max_concurrent = 0
 enabled = true
-description = "Nightly backups, git mirror sync"
 admission_mode = "cooldown"
+description = "Nightly backups, git mirror sync"
 
 [[namespaces]]
 id = "coding-hermes"
@@ -32,9 +32,9 @@ reserved = 70
 hard_cap = 100
 max_concurrent = 8
 enabled = true
-description = "Active foreman projects"
-default_prompt = '''Load skills coding-hermes-map and coding-hermes-foreman at start. Use the map to pull additional skills LAZILY as each phase needs them (board read, worker dispatch, gitreins, debugging, etc.) — never preload the whole toolbox. Read the project board: .coding-hermes/board/tasks.jsonl if present (JSONL-canonical), else .coding-hermes/tasks.md. Execute ONE foreman tick per the foreman skill. OFF-BY-ONE (pre-solve lab, localhost:8766): BEFORE debugging any error or designing a fix from scratch, discover a pre-verified answer via `curl -s -X POST http://localhost:8766/api/v1/problems/discover -H 'Content-Type: application/json' -d '{"problem_class":"<class>"}'` or grep the flat corpus data/answers/ (per the off-by-one skill). If you had to debug something non-trivial, submit it (`cadence: post-debug`) so future ticks hit a cached answer. IMPORTANT — worker dispatch: You are the FOREMAN. You pick ONE board task, then dispatch a WORKER to implement it. Do NOT implement complex tasks yourself. To dispatch a worker, run a BACKGROUND process via your terminal tool: `hermes chat -q "<task brief from the board, plus files-to-modify and acceptance criteria>" -m <worker_model> --provider <worker_provider> -s coding-hermes-worker --ignore-rules -Q` (terminal background=true). The worker shares this same workdir, so it edits files and commits directly. Then poll the background process until it exits, verify build/lint/test and the commit landed, update the board, and report. MANDATORY PUSH AFTER EVERY COMMIT — do not skip: after ANY commit (worker or yours), run `git push origin <branch>` (or `git push`) and verify `git fetch origin && git rev-list --count origin/<branch>..HEAD` is 0. A tick that ends with unpushed commits is NOT complete. Never rely on the worker having pushed — verify the remote HEAD yourself. On non-fast-forward push, `git pull --rebase`, re-run the gate, push. Only implement trivial one-file changes yourself; anything multi-file or architectural goes to a worker. MANDATORY GitReins lifecycle — do not skip: (1) BEFORE any implementation, run `gitreins task create <TASK-ID> "<title>" "<criterion>"` then `gitreins task start <TASK-ID>` for the board task you picked. (2) AFTER the worker commits the work (verify the commit exists in git log), ALWAYS run `gitreins task complete <TASK-ID>` — this fires the Tier 2 LLM judge and writes verdict.json. NEVER end a tick without running `gitreins task complete` for the picked task — even if the tick is near its timeout, complete the gitreins task FIRST, then update the board. (3) Then delete the gitreins task with `gitreins task delete <TASK-ID>` to keep tasks.yaml clean (optional — the fleet default keeps completed tasks for audit). If the worker committed but you missed the gitreins lifecycle, run `gitreins task complete` on the committed work before finishing. MANDATORY CI-health check — do not skip: run `gh run list --repo <org>/<repo> --limit 3 --json status,conclusion,displayTitle,headBranch,createdAt` (derive org/repo from `git remote -v` — the on-disk folder name may not match the GitHub org). If ANY recent run shows conclusion=failure that YOU did not just create, file a board task for the broken CI (e.g. INT-CI-<n> '<what failed>') before ending the tick, so it does not rot. Report CI health (green or the failure you flagged) in your output. Format your final output as clean, well-structured markdown with tables and sections. Report result.'''
 admission_mode = "tasks"
+description = "Active foreman projects"
+default_prompt = '''Load skills coding-hermes-map and coding-hermes-foreman at start. Use the map to pull additional skills LAZILY as each phase needs them (board read, worker dispatch, gitreins, debugging, etc.) — never preload the whole toolbox. Read the project board: .coding-hermes/board/tasks.jsonl if present (JSONL-canonical), else .coding-hermes/tasks.md. Execute ONE foreman tick per the foreman skill. OFF-BY-ONE (pre-solve lab, localhost:8766): BEFORE debugging any error or designing a fix from scratch, discover a pre-verified answer via `curl -s -X POST http://localhost:8766/api/v1/problems/discover -H 'Content-Type: application/json' -d '{"problem_class":"<class>"}'` or grep the flat corpus data/answers/ (per the off-by-one skill). If you had to debug something non-trivial, submit it (`cadence: post-debug`) so future ticks hit a cached answer. WAVE DISPATCH: First try to compose a WAVE — pick up to 12 MUTUALLY INDEPENDENT board tasks (respect the injected WAVE_BUDGET line as the hard ceiling) (no depends_on edges between them; verify from the rows) and dispatch one WORKER PER TASK, each in its OWN git worktree per the coding-hermes-foreman skill's wave section (~/.hermes/scripts/worktree.sh new <project> <taskid>; record worktree/branch in the board rows via boardctl; write the wave manifest .coding-hermes/waves/<scheduler-tick-id>.json BEFORE dispatching). Merge serially, gate each merge. If fewer than 2 independent tasks exist, fall back to the serial path. SERIAL FALLBACK — worker dispatch: You are the FOREMAN. You pick ONE board task, then dispatch a WORKER to implement it. Do NOT implement complex tasks yourself. To dispatch a worker, run a BACKGROUND process via your terminal tool: `hermes chat -q "<task brief from the board, plus files-to-modify and acceptance criteria>" -m <worker_model> --provider <worker_provider> -s coding-hermes-worker --ignore-rules -Q` (terminal background=true). The worker shares this same workdir, so it edits files and commits directly. Then poll the background process until it exits, verify build/lint/test and the commit landed, update the board, and report. MANDATORY PUSH AFTER EVERY COMMIT — do not skip: after ANY commit (worker or yours), run `git push origin <branch>` (or `git push`) and verify `git fetch origin && git rev-list --count origin/<branch>..HEAD` is 0. A tick that ends with unpushed commits is NOT complete. Never rely on the worker having pushed — verify the remote HEAD yourself. On non-fast-forward push, `git pull --rebase`, re-run the gate, push. Only implement trivial one-file changes yourself; anything multi-file or architectural goes to a worker. MANDATORY GitReins lifecycle — do not skip: (1) BEFORE any implementation, run `gitreins task create <TASK-ID> "<title>" "<criterion>"` then `gitreins task start <TASK-ID>` for the board task you picked. (2) AFTER the worker commits the work (verify the commit exists in git log), ALWAYS run `gitreins task complete <TASK-ID>` — this fires the Tier 2 LLM judge and writes verdict.json. NEVER end a tick without running `gitreins task complete` for the picked task — even if the tick is near its timeout, complete the gitreins task FIRST, then update the board. (3) Then delete the gitreins task with `gitreins task delete <TASK-ID>` to keep tasks.yaml clean (optional — the fleet default keeps completed tasks for audit). If the worker committed but you missed the gitreins lifecycle, run `gitreins task complete` on the committed work before finishing. MANDATORY CI-health check — do not skip: run `gh run list --repo <org>/<repo> --limit 3 --json status,conclusion,displayTitle,headBranch,createdAt` (derive org/repo from `git remote -v` — the on-disk folder name may not match the GitHub org). If ANY recent run shows conclusion=failure that YOU did not just create, file a board task for the broken CI (e.g. INT-CI-<n> '<what failed>') before ending the tick, so it does not rot. Report CI health (green or the failure you flagged) in your output. Format your final output as clean, well-structured markdown with tables and sections. Report result.'''
 
 [[namespaces]]
 id = "data-cleanup"
@@ -43,8 +43,8 @@ reserved = 0
 hard_cap = 15
 max_concurrent = 0
 enabled = true
-description = "Data retention, compaction, tombstone cleanup"
 admission_mode = "cooldown"
+description = "Data retention, compaction, tombstone cleanup"
 
 [[namespaces]]
 id = "doc-writer"
@@ -53,9 +53,9 @@ reserved = 1
 hard_cap = 10
 max_concurrent = 1
 enabled = true
+admission_mode = "cooldown"
 description = "Weekly documentation pass — research-driven doc refresh; injects DOC- tasks into project boards; no-op when git history is quiet"
 default_prompt = '''You are the weekly doc-writer tick. Today: note UTC date. For EACH enabled fleet project listed in ~/.hermes/fleet.toml [[projects]] (namespace_id coding-hermes or pm, workdir exists locally): (1) BASELINE — read <workdir>/.coding-hermes/board/events.jsonl and find the most recent event whose detail mentions doc-writer or a DOC- task id; its timestamp is the last doc pass. No such event = look back 30 days. (2) ACTIVITY CHECK — `git -C <workdir> log --oneline --since=<baseline>`; zero meaningful commits (excluding board chore commits touching .coding-hermes) means NOTHING TO DO for that project — skip silently. (3) RESEARCH — for projects with activity: scan the new commits and diffstats for undocumented features/changes; you are ENCOURAGED to do your own web research on new concepts/libraries introduced; cross-check each candidate doc topic against the actual git history (file:line evidence) before filing. (4) INJECT — file at most 3 DOC-<N> task rows per board (priority P3, complexity 3, status pending, title carries the evidence, reasoning field carries file:line + why now). Use boardctl if on PATH (boardctl -C <workdir> create ...) else the JSONL append recipe from skill coding-hermes-jsonl-board-append (append-only, parsed-id dedupe — never substring matching, mirror the last row schema, commit + push with co-author trailer). (5) Append one audit event per board you touched with detail {"doc_writer_run":"<UTC date>","injected":[ids]} so next week has its baseline. (6) Report: per-project one-liner (injected / skipped-quiet / skipped-up-to-date). If every project is quiet, report exactly that — an idle clean tick is a SUCCESS. Never rewrite whole JSONL files; never inject into boards you cannot push to.'''
-admission_mode = "cooldown"
 
 [[namespaces]]
 id = "dogfood"
@@ -64,6 +64,7 @@ reserved = 1
 hard_cap = 15
 max_concurrent = 1
 enabled = true
+admission_mode = "cooldown"
 description = "Dogfood lanes — value discovery through real use (skill coding-hermes-dogfood). Verification, not development: battery + ephemeral-bunker install leg, findings filed for the foreman."
 default_prompt = '''You are a DOGFOOD lane for ONE project: the project this lane targets (CODING_HERMES_PROJECT minus the -dogfood suffix; you run from its stand-in workdir).
 
@@ -72,7 +73,6 @@ This job is DEFINED BY THE SKILL `coding-hermes-dogfood` — load it and follow 
 EXECUTOR: run the skill's dogfood loop yourself — the `dogfood-scheduler-tick.sh` / dogfooding.ts driver is RETIRED (old dagger, dropped until the new one is built). The install leg still uses `bunker-qa.sh`.
 
 Rules: never modify code or board state — findings become rows the foreman works. Never change repo visibility or permissions, and never mint credentials to make a clone work. Never touch a disabled project. The install leg is never a silent pass: when the ephemeral bunker leg cannot run (host unreachable, bunkerd inactive, no credential, no install path), file the explicit SKIPPED-install-bunker row with the evidence and say so in the report. And "filed: N" from a write step is not proof — check git HEAD and the board tail before you report that a write landed.'''
-admission_mode = "cooldown"
 
 [[namespaces]]
 id = "duckbrain-infra"
@@ -81,8 +81,8 @@ reserved = 0
 hard_cap = 15
 max_concurrent = 0
 enabled = true
-description = "DuckBrain sync, compaction, namespace maintenance"
 admission_mode = "cooldown"
+description = "DuckBrain sync, compaction, namespace maintenance"
 
 [[namespaces]]
 id = "duckbrain-sync"
@@ -91,6 +91,7 @@ reserved = 1
 hard_cap = 100
 max_concurrent = 1
 enabled = true
+admission_mode = "cooldown"
 description = "DuckBrain namespace sync lanes — skill-driven focused sync (context-sync-duckbrain). Driver retired until the new dagger is built. 1 concurrent."
 default_prompt = '''You are a DuckBrain namespace sync tick dispatched by the coding-hermes scheduler.
 Load the context-sync-duckbrain skill at start — it is the authoritative procedure (preflight, scan, write protocol, verification, pitfalls). Also load the data skill named in your project prompt (e.g. blog-sync-data) which carries the namespace annotation and canonical reference pointer.
@@ -109,7 +110,6 @@ Hard constraints: NEVER kill or restart DuckBrain; never python3 -c or curl|pyth
 Output: a short markdown report (under 20 lines) — namespace synced, keys written, verification results, anomalies.
 
 EXECUTOR NOTE: the `sync-scheduler-tick.sh` / dagger-role-tick.sh duckbrain-sync driver is RETIRED (old dagger, dropped until the new one is built). Execute this procedure yourself via your tools — the write protocol and its verification are the lane's job now, and no deterministic core stands behind it.'''
-admission_mode = "cooldown"
 
 [[namespaces]]
 id = "monitoring"
@@ -118,8 +118,8 @@ reserved = 0
 hard_cap = 30
 max_concurrent = 0
 enabled = true
-description = "Health checks, watchdog, CVE scan"
 admission_mode = "cooldown"
+description = "Health checks, watchdog, CVE scan"
 
 [[namespaces]]
 id = "pm"
@@ -128,6 +128,7 @@ reserved = 1
 hard_cap = 15
 max_concurrent = 1
 enabled = true
+admission_mode = "cooldown"
 description = "Per-project PM lane — board hygiene: dedupe by content fingerprint, repair reused/malformed ids, normalise priorities, no refiling. 1 concurrent."
 default_prompt = '''You are the PM stand-in tick for ONE project: the project this lane was spawned for (CODING_HERMES_PROJECT minus the -pm suffix; you run from its stand-in workdir).
 
@@ -135,13 +136,15 @@ The PM job is DEFINED BY SKILLS — load them and run the cycle yourself with yo
 - `coding-hermes-project-manager` — the cycle you execute: ledger first, parallel gap-hunters, the PRE-ADD GATE (G1-G7) before any row is written, write only gated rows and wake the foreman, verify the previous cycle's items with real commands, escalate what is stale, log the cycle to DuckBrain and report.
 - `pm-injected-board-rows` — the rules for any row you inject.
 
+FIRST STEP OF EVERY CYCLE - reconcile before you list or report anything. The ledger (~/.hermes/stand-in/ledger.json) drifts: items stay added/picked_up while their board row is already complete, so the raw count overstates outstanding work. Run the ONE canonical reconciler - `python3 ~/.hermes/stand-in/ledger_board_reconcile.py` (dry run; add --apply to stamp the ledger items whose board row is already terminal - it writes a pre-write backup first). It lives in the coding-hermes-scheduler repo at ops/pm-standin/ledger_board_reconcile.py and is the single implementation; the copy at get-h3/h3 scripts/ledger-board-reconcile.py is only a delegation shim. Report the RECONCILED open count and NAME every residual bucket the reconciler prints (drift_closable, board_open_work, no_id_match, board_missing, stale_drift, stale_terminal, age_unknown, ambiguous) instead of the raw ledger number.
+
 RETIRED — do NOT run the legacy Dagger pm.ts pipeline (`~/.hermes/scripts/pm-standin-tick.sh`). That is the old dagger we are dropping; the PM runs the skill prompt directly until the new Dagger can carry the job. If you are about to invoke that script, stop and run the skill cycle instead. There is no deterministic digest to lean on: do the gating and the verification yourself.
 
 Board hygiene is part of the cycle, not a separate pass — see "G7 in practice — dedupe by CONTENT, never by id" in the PM skill. On QA and dogfood boards the row id is a rotating cycle slot, so dedupe on a normalised content fingerprint; annotate duplicates with superseded_by instead of deleting; rewrite a board atomically (temp file, re-parse, rename) and restore it if the re-parse fails.
 
-Scope: ONE project per tick. Never touch a disabled project. Never fix code yourself — you manage the work, foremen do it. Never re-file a finding that already has an open row. When the ledger and the evidence disagree, the evidence wins. Report terse: OK/ESCALATE on the first line, then rows gated-in, items verified (with the command), stale escalations, and board row counts before/after.'''
-admission_mode = "cooldown"
-load_gate = "off"
+Scope: ONE project per tick. Never touch a disabled project. Never fix code yourself — you manage the work, foremen do it. Never re-file a finding that already has an open row. When the ledger and the evidence disagree, the evidence wins. Report terse: OK/ESCALATE on the first line, then rows gated-in, items verified (with the command), stale escalations, and board row counts before/after.
+
+TARGET RESOLUTION - which board you read and write. Your workdir is a stand-in path; the board you operate on is NEVER inside it. Resolve it first, every cycle: TARGET = $CODING_HERMES_PROJECT with the -pm suffix removed; then read the target workdir from the scheduler DB (sqlite3 ~/.hermes/coding-hermes/scheduler.db "SELECT workdir FROM projects WHERE name='<TARGET>';") and use <TARGET_WORKDIR>/.coding-hermes/board/tasks.jsonl (plus events.jsonl) as THE board. If the lookup returns no row, STOP and report ESCALATE - never create a tasks.md or tasks.jsonl anywhere under a stand-in workdir; a board written there is invisible to every foreman and the rows are theater.'''
 
 [[namespaces]]
 id = "qa"
@@ -150,6 +153,7 @@ reserved = 1
 hard_cap = 15
 max_concurrent = 1
 enabled = true
+admission_mode = "cooldown"
 description = "QA lanes — clean-machine brittleness battery (skill qa-foreman-ops). Bunker path; the Dagger qa.ts executor is retired until the new dagger is built. 1 concurrent."
 default_prompt = '''You are a QA lane for ONE project: the project this lane targets (CODING_HERMES_PROJECT minus the -qa suffix; qa-audit means random discovery). Your workdir is the stand-in path.
 
@@ -164,18 +168,17 @@ Battery discipline: the FULL battery, never a sample. No `-short`, no `-run`, no
 Filing discipline: dedupe by DEFECT, not by title — the same failing cell with the same root cause is ONE row however it is worded. Never re-file a defect that already has an open row; annotate it or skip. One row per failing/INFO stage, with its own cell token and the exact failing step or package named. Never present a harness limitation (no C compiler, no compose plugin, sync too slow) as a product defect. And verify what you claim: `filed:N` is not proof — check the board tail and git HEAD.
 
 Report terse: first line PASS / FINDINGS / FAILED, then the per-cell results, each finding with its row id, what you reproduced yourself, and what remains UNVERIFIED.'''
-admission_mode = "cooldown"
 
 [[namespaces]]
 id = "releases"
 weight = 5
 reserved = 1
-hard_cap = 15
+hard_cap = 40
 max_concurrent = 1
 enabled = true
+admission_mode = "cooldown"
 description = "Release engineering lane — manual-trigger release cuts via POST /api/v1/projects/release-engineer/spawn; CI/dogfood evidence review; semver decision + artifact builds"
 default_prompt = '''Load the releases skill at start and follow it. Identify the target repo from the triggering message thread; if none given, reply in the delivery thread asking which project to release. Gather evidence: git log --oneline <last-tag>..HEAD categorized by conventional-commit prefixes (feat→minor, fix→patch, BREAKING CHANGE/!→major — propose major but require explicit user confirmation before tagging); CI history via gh run list --repo <org/repo> --limit 20 (derive org/repo from git remote -v, not folder name); gitreins verdicts; dogfood results. Check the repo for its own release tooling FIRST (Makefile release target, goreleaser.yml, Dockerfile, scripts/release*, release docs — Bane doctrine: projects should ship a release script + docs; use theirs, else fall back to gh release create). Build artifacts per detected type (Go → cross-compile static binaries; Dockerfile + registry configured → build/push image; npm/pyproject → package build). Create the tag, then gh release create vX.Y.Z --notes-file <categorized notes>. Verify: gh release view and CI green on the tag commit. NEVER release on red CI without explicit user override; NEVER force-move an existing tag. Report the release decision + evidence table to the delivery thread.'''
-admission_mode = "cooldown"
 
 [[namespaces]]
 id = "update-and-patch"
@@ -184,8 +187,8 @@ reserved = 0
 hard_cap = 20
 max_concurrent = 1
 enabled = true
-description = "Weekly update & patch board-injection lane (deterministic cron, no dagger) — UPD-* board rows"
 admission_mode = "cooldown"
+description = "Weekly update & patch board-injection lane (deterministic cron, no dagger) — UPD-* board rows"
 
 [[projects]]
 name = "9router"
@@ -195,9 +198,6 @@ weight = 10
 priority = 5
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:118900"
 enabled = true
 
@@ -235,6 +235,28 @@ deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
+name = "9router-releng"
+repo_url = "local:/home/kara/9router"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/9router"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "9router-sync"
+repo_url = "https://example.com/9router-sync"
+workdir = "/home/kara/.hermes/sync-workdirs/9router-sync"
+weight = 1
+priority = 5
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "axiom-sync"
 repo_url = "https://github.com/anything-agent/axiom.git"
 workdir = "/home/kara/.hermes/sync-workdirs/axiom-sync"
@@ -251,7 +273,7 @@ repo_url = "https://github.com/totalwindupflightsystems/blog.git"
 workdir = "/home/kara/.hermes/sync-workdirs/blog-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "local"
 enabled = true
@@ -263,13 +285,52 @@ workdir = "/home/kara/coding-hermes-boardctl"
 weight = 3
 priority = 5
 cooldown_s = 21600
-model = "deepseek-v4-flash"
-provider = "deepseek-foreman"
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "boardctl-dogfood"
+repo_url = "local:/home/kara/coding-hermes-boardctl"
+workdir = "/home/kara/.hermes/stand-in/dogfood/boardctl"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "boardctl-pm"
+repo_url = "local:/home/kara/coding-hermes-boardctl"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/boardctl"
+weight = 4
+priority = 4
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "boardctl-qa"
+repo_url = "local:/home/kara/coding-hermes-boardctl"
+workdir = "/home/kara/.hermes/stand-in/pm/boardctl"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "boardctl-releng"
+repo_url = "local:/home/kara/coding-hermes-boardctl"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/boardctl"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
@@ -291,9 +352,6 @@ weight = 15
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:70902"
 enabled = true
 
@@ -331,6 +389,17 @@ deliver = "telegram:-1003310984808:70902"
 enabled = true
 
 [[projects]]
+name = "bunker-releng"
+repo_url = "local:/home/kara/bunker"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/bunker"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "bunker-sync"
 repo_url = "https://example.com/bunker-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/bunker-sync"
@@ -349,9 +418,6 @@ weight = 10
 priority = 5
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:50404"
 enabled = true
 
@@ -389,6 +455,17 @@ deliver = "telegram:-1003310984808:50404"
 enabled = true
 
 [[projects]]
+name = "chimera-v2-releng"
+repo_url = "local:/home/kara/chimera-v2"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/chimera-v2"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "chimera-v2-sync"
 repo_url = "https://example.com/chimera-v2-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/chimera-v2-sync"
@@ -407,10 +484,17 @@ weight = 15
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-scheduler-dogfood"
+repo_url = "local:/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
+workdir = "/home/kara/.hermes/stand-in/dogfood/coding-hermes-scheduler"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
 enabled = true
 
 [[projects]]
@@ -419,9 +503,40 @@ repo_url = "local:/home/kara/.hermes/stand-in/pm/coding-hermes-scheduler"
 workdir = "/home/kara/.hermes/stand-in/pm/coding-hermes-scheduler"
 weight = 3
 priority = 3
-cooldown_s = 21600
+cooldown_s = 86400
 namespace_id = "pm"
 deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-scheduler-qa"
+repo_url = "local:/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
+workdir = "/home/kara/.hermes/stand-in/qa/coding-hermes-scheduler"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-scheduler-releng"
+repo_url = "local:/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/coding-hermes-scheduler"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-scheduler-sync"
+repo_url = "local:/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
+workdir = "/home/kara/.hermes/sync-workdirs/coding-hermes-scheduler-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
 enabled = true
 
 [[projects]]
@@ -430,7 +545,7 @@ repo_url = "https://example.com/coding-hermes-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/coding-hermes-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
@@ -441,11 +556,63 @@ repo_url = "local:/home/kara/coding-hermes-tools"
 workdir = "/home/kara/coding-hermes-tools"
 weight = 3
 priority = 6
-cooldown_s = 21600
+cooldown_s = 900
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
+enabled = true
+
+[[projects]]
+name = "coding-hermes-tools-dogfood"
+repo_url = "local:/home/kara/coding-hermes-tools"
+workdir = "/home/kara/.hermes/stand-in/dogfood/coding-hermes-tools"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-tools-pm"
+repo_url = "local:/home/kara/coding-hermes-tools"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/coding-hermes-tools"
+weight = 4
+priority = 4
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-tools-qa"
+repo_url = "local:/home/kara/coding-hermes-tools"
+workdir = "/home/kara/.hermes/stand-in/pm/coding-hermes-tools"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-tools-releng"
+repo_url = "local:/home/kara/coding-hermes-tools"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/coding-hermes-tools"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-tools-sync"
+repo_url = "local:/home/kara/coding-hermes-tools"
+workdir = "/home/kara/.hermes/sync-workdirs/coding-hermes-tools-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
 enabled = true
 
 [[projects]]
@@ -456,9 +623,6 @@ weight = 15
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:83399"
 enabled = true
 
@@ -468,7 +632,7 @@ repo_url = "local:/home/kara/crier"
 workdir = "/home/kara/.hermes/stand-in/dogfood/crier"
 weight = 3
 priority = 5
-cooldown_s = 86400
+cooldown_s = 259200
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:83399"
 enabled = true
@@ -496,6 +660,17 @@ deliver = "telegram:-1003310984808:83399"
 enabled = true
 
 [[projects]]
+name = "crier-releng"
+repo_url = "local:/home/kara/crier"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/crier"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "crier-sync"
 repo_url = "https://example.com/crier-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/crier-sync"
@@ -512,9 +687,9 @@ repo_url = "https://example.com/deepseek-payg-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/deepseek-payg-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:9652"
+deliver = "telegram:-1003310984808:68481"
 enabled = true
 
 [[projects]]
@@ -525,10 +700,18 @@ weight = 10
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:2065"
+enabled = true
+
+[[projects]]
+name = "duckbrain-dogfood"
+repo_url = "local:/home/kara/duckbrain"
+workdir = "/home/kara/.hermes/stand-in/dogfood/duckbrain"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
 enabled = true
 
 [[projects]]
@@ -540,6 +723,27 @@ priority = 3
 cooldown_s = 86400
 namespace_id = "pm"
 deliver = "telegram:-1003310984808:2065"
+enabled = true
+
+[[projects]]
+name = "duckbrain-qa"
+repo_url = "local:/home/kara/duckbrain"
+workdir = "/home/kara/.hermes/stand-in/qa/duckbrain"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+enabled = true
+
+[[projects]]
+name = "duckbrain-releng"
+repo_url = "local:/home/kara/duckbrain"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/duckbrain"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
@@ -559,9 +763,20 @@ repo_url = "https://example.com/eduos-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/eduos-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "local"
+enabled = true
+
+[[projects]]
+name = "fleet-releng"
+repo_url = "local:/home/kara/.hermes/stand-in/releng-lane/fleet-releng"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/fleet-releng"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
@@ -570,7 +785,7 @@ repo_url = "https://example.com/frontiers-ghost-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/frontiers-ghost-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "local"
 enabled = true
@@ -583,9 +798,6 @@ weight = 25
 priority = 8
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:3254"
 enabled = true
 
@@ -623,12 +835,34 @@ deliver = "telegram:-1003310984808:3254"
 enabled = true
 
 [[projects]]
+name = "gitreins-poc-releng"
+repo_url = "local:/home/kara/gitreins-poc"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/gitreins-poc"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "gitreins-poc-sync"
+repo_url = "https://github.com/totalwindupflightsystems/gitreins"
+workdir = "/home/kara/.hermes/sync-workdirs/gitreins-poc-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
+enabled = true
+
+[[projects]]
 name = "gitreins-sync"
 repo_url = "https://example.com/gitreins-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/gitreins-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:3254"
 enabled = true
@@ -641,9 +875,6 @@ weight = 15
 priority = 10
 cooldown_s = 43200
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 43200
-cooldown_ceiling_s = 345600
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
@@ -675,12 +906,64 @@ repo_url = "https://github.com/get-h3/protocol"
 workdir = "/home/kara/get-h3/protocol"
 weight = 10
 priority = 8
-cooldown_s = 43200
+cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 43200
-cooldown_ceiling_s = 345600
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-protocol-foreman-dogfood"
+repo_url = "https://github.com/get-h3/protocol"
+workdir = "/home/kara/.hermes/stand-in/dogfood/h3-protocol-foreman"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "h3-protocol-foreman-pm"
+repo_url = "https://github.com/get-h3/protocol"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/h3-protocol-foreman"
+weight = 4
+priority = 4
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "h3-protocol-foreman-qa"
+repo_url = "https://github.com/get-h3/protocol"
+workdir = "/home/kara/.hermes/stand-in/pm/h3-protocol-foreman"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "h3-protocol-foreman-releng"
+repo_url = "local:/home/kara/get-h3/protocol"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/h3-protocol-foreman"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "h3-protocol-foreman-sync"
+repo_url = "https://github.com/get-h3/protocol"
+workdir = "/home/kara/.hermes/sync-workdirs/h3-protocol-foreman-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
 enabled = true
 
 [[projects]]
@@ -689,9 +972,20 @@ repo_url = "local:/home/kara/get-h3/h3"
 workdir = "/home/kara/.hermes/stand-in/pm/h3"
 weight = 4
 priority = 4
-cooldown_s = 43200
+cooldown_s = 21600
 namespace_id = "qa"
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-releng"
+repo_url = "local:/home/kara/get-h3/h3"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/h3"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
@@ -702,10 +996,62 @@ weight = 10
 priority = 8
 cooldown_s = 43200
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 43200
-cooldown_ceiling_s = 345600
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-go-foreman-dogfood"
+repo_url = "local:/home/kara/get-h3/sdk-go"
+workdir = "/home/kara/.hermes/stand-in/dogfood/h3-sdk-go-foreman"
+weight = 3
+priority = 5
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-go-foreman-pm"
+repo_url = "local:/home/kara/.hermes/stand-in/pm-lane/h3-sdk-go-foreman"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/h3-sdk-go-foreman"
+weight = 3
+priority = 3
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-go-foreman-qa"
+repo_url = "local:/home/kara/get-h3/sdk-go"
+workdir = "/home/kara/.hermes/stand-in/pm/h3-sdk-go-foreman"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-go-foreman-releng"
+repo_url = "local:/home/kara/get-h3/sdk-go"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/h3-sdk-go-foreman"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-go-foreman-sync"
+repo_url = "https://github.com/get-h3/sdk-go"
+workdir = "/home/kara/.hermes/sync-workdirs/h3-sdk-go-foreman-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
 enabled = true
 
 [[projects]]
@@ -716,10 +1062,62 @@ weight = 15
 priority = 10
 cooldown_s = 43200
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 43200
-cooldown_ceiling_s = 345600
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-python-foreman-dogfood"
+repo_url = "local:/home/kara/get-h3/sdk-python"
+workdir = "/home/kara/.hermes/stand-in/dogfood/h3-sdk-python-foreman"
+weight = 3
+priority = 5
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-python-foreman-pm"
+repo_url = "local:/home/kara/.hermes/stand-in/pm-lane/h3-sdk-python-foreman"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/h3-sdk-python-foreman"
+weight = 3
+priority = 3
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-python-foreman-qa"
+repo_url = "local:/home/kara/get-h3/sdk-python"
+workdir = "/home/kara/.hermes/stand-in/pm/h3-sdk-python-foreman"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-python-foreman-releng"
+repo_url = "local:/home/kara/get-h3/sdk-python"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/h3-sdk-python-foreman"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-python-foreman-sync"
+repo_url = "https://github.com/get-h3/sdk-python"
+workdir = "/home/kara/.hermes/sync-workdirs/h3-sdk-python-foreman-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
 enabled = true
 
 [[projects]]
@@ -730,10 +1128,62 @@ weight = 10
 priority = 5
 cooldown_s = 43200
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 43200
-cooldown_ceiling_s = 345600
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-typescript-foreman-dogfood"
+repo_url = "local:/home/kara/get-h3/sdk-typescript"
+workdir = "/home/kara/.hermes/stand-in/dogfood/h3-sdk-typescript-foreman"
+weight = 3
+priority = 5
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-typescript-foreman-pm"
+repo_url = "local:/home/kara/.hermes/stand-in/pm-lane/h3-sdk-typescript-foreman"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/h3-sdk-typescript-foreman"
+weight = 3
+priority = 3
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-typescript-foreman-qa"
+repo_url = "local:/home/kara/get-h3/sdk-typescript"
+workdir = "/home/kara/.hermes/stand-in/pm/h3-sdk-typescript-foreman"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-typescript-foreman-releng"
+repo_url = "local:/home/kara/get-h3/sdk-typescript"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/h3-sdk-typescript-foreman"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "h3-sdk-typescript-foreman-sync"
+repo_url = "https://github.com/get-h3/sdk-typescript"
+workdir = "/home/kara/.hermes/sync-workdirs/h3-sdk-typescript-foreman-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
 enabled = true
 
 [[projects]]
@@ -744,10 +1194,73 @@ weight = 15
 priority = 10
 cooldown_s = 43200
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 43200
-cooldown_ceiling_s = 345600
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-shim-foreman-dogfood"
+repo_url = "local:/home/kara/get-h3/shim"
+workdir = "/home/kara/.hermes/stand-in/dogfood/h3-shim-foreman"
+weight = 3
+priority = 5
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-shim-foreman-pm"
+repo_url = "local:/home/kara/.hermes/stand-in/pm-lane/h3-shim-foreman"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/h3-shim-foreman"
+weight = 3
+priority = 3
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-shim-foreman-qa"
+repo_url = "local:/home/kara/get-h3/shim"
+workdir = "/home/kara/.hermes/stand-in/pm/h3-shim-foreman"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-shim-foreman-releng"
+repo_url = "local:/home/kara/get-h3/shim"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/h3-shim-foreman"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "h3-shim-foreman-sync"
+repo_url = "https://github.com/get-h3/shim"
+workdir = "/home/kara/.hermes/sync-workdirs/h3-shim-foreman-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
+enabled = true
+
+[[projects]]
+name = "h3-sync"
+repo_url = "https://github.com/get-h3/h3"
+workdir = "/home/kara/.hermes/sync-workdirs/h3-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
 enabled = true
 
 [[projects]]
@@ -769,9 +1282,6 @@ weight = 10
 priority = 5
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:87734"
 enabled = true
 
@@ -809,6 +1319,17 @@ deliver = "telegram:-1003310984808:87734"
 enabled = true
 
 [[projects]]
+name = "heading-releng"
+repo_url = "local:/home/kara/heading"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/heading"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "heading-sync"
 repo_url = "https://example.com/heading-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/heading-sync"
@@ -825,7 +1346,7 @@ repo_url = "https://example.com/hermes-agent-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/hermes-agent-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "local"
 enabled = true
@@ -838,9 +1359,6 @@ weight = 10
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:92776"
 enabled = true
 
@@ -878,6 +1396,17 @@ deliver = "telegram:-1003310984808:92776"
 enabled = true
 
 [[projects]]
+name = "hermes-canopy-releng"
+repo_url = "local:/home/kara/hermes-canopy"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/hermes-canopy"
+weight = 2
+priority = 3
+cooldown_s = 86400
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "hermes-canopy-sync"
 repo_url = "https://example.com/hermes-canopy-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/hermes-canopy-sync"
@@ -894,11 +1423,8 @@ repo_url = "https://github.com/Hermes-DAGger/hermes-dagger.git"
 workdir = "/home/kara/hermes-dagger"
 weight = 10
 priority = 10
-cooldown_s = 21600
+cooldown_s = 900
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:87792"
 enabled = true
 
@@ -936,6 +1462,28 @@ deliver = "telegram:-1003310984808:87792"
 enabled = true
 
 [[projects]]
+name = "hermes-dagger-releng"
+repo_url = "local:/home/kara/hermes-dagger"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/hermes-dagger"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "hermes-dagger-sync"
+repo_url = "https://github.com/Hermes-DAGger/hermes-dagger.git"
+workdir = "/home/kara/.hermes/sync-workdirs/hermes-dagger-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
+enabled = true
+
+[[projects]]
 name = "my-project"
 repo_url = "https://github.com/user/my-project"
 workdir = "/home/kara/my-project"
@@ -943,10 +1491,18 @@ weight = 10
 priority = 5
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:12345"
+enabled = true
+
+[[projects]]
+name = "my-project-dogfood"
+repo_url = "https://github.com/user/my-project"
+workdir = "/home/kara/.hermes/stand-in/dogfood/my-project"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
 enabled = true
 
 [[projects]]
@@ -961,6 +1517,38 @@ deliver = "telegram:-1003310984808:12345"
 enabled = true
 
 [[projects]]
+name = "my-project-qa"
+repo_url = "https://github.com/user/my-project"
+workdir = "/home/kara/.hermes/stand-in/qa/my-project"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+enabled = true
+
+[[projects]]
+name = "my-project-releng"
+repo_url = "local:/home/kara/my-project"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/my-project"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "my-project-sync"
+repo_url = "https://github.com/user/my-project"
+workdir = "/home/kara/.hermes/sync-workdirs/my-project-sync"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "local"
+enabled = true
+
+[[projects]]
 name = "off-by-one"
 repo_url = "local:/home/kara/off-by-one"
 workdir = "/home/kara/off-by-one"
@@ -968,9 +1556,6 @@ weight = 10
 priority = 5
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:72503"
 enabled = true
 
@@ -1008,6 +1593,17 @@ deliver = "telegram:-1003310984808:72503"
 enabled = true
 
 [[projects]]
+name = "off-by-one-releng"
+repo_url = "local:/home/kara/off-by-one"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/off-by-one"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "off-by-one-sync"
 repo_url = "https://example.com/off-by-one-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/off-by-one-sync"
@@ -1036,8 +1632,6 @@ workdir = "/home/kara/.hermes/release-engineer/repo"
 weight = 5
 priority = 3
 cooldown_s = 604800
-model = "deepseek-v4-flash"
-provider = "deepseek-foreman"
 namespace_id = "releases"
 deliver = "telegram:-1003310984808:118900"
 enabled = true
@@ -1061,10 +1655,51 @@ weight = 10
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:137810"
+enabled = true
+
+[[projects]]
+name = "task-router-dogfood"
+repo_url = "https://github.com/coding-hermes/task-router"
+workdir = "/home/kara/.hermes/stand-in/dogfood/task-router"
+weight = 4
+priority = 4
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "task-router-pm"
+repo_url = "https://github.com/coding-hermes/task-router"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/task-router"
+weight = 4
+priority = 4
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
+name = "task-router-qa"
+repo_url = "https://github.com/coding-hermes/task-router"
+workdir = "/home/kara/.hermes/stand-in/pm/task-router"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "task-router-releng"
+repo_url = "local:/home/kara/task-router"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/task-router"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
@@ -1084,7 +1719,7 @@ repo_url = "https://github.com/totalwindupflightsystems/temporal-vector-index.gi
 workdir = "/home/kara/.hermes/sync-workdirs/temporal-vector-index-sync"
 weight = 1
 priority = 5
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "duckbrain-sync"
 deliver = "local"
 enabled = true
@@ -1097,9 +1732,6 @@ weight = 15
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:91542"
 enabled = true
 
@@ -1137,6 +1769,17 @@ deliver = "telegram:-1003310984808:91542"
 enabled = true
 
 [[projects]]
+name = "terminal-jail-releng"
+repo_url = "local:/home/kara/terminal-jail"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/terminal-jail"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
 name = "terminal-jail-sync"
 repo_url = "https://example.com/terminal-jail-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/terminal-jail-sync"
@@ -1148,53 +1791,6 @@ deliver = "telegram:-1003310984808:91542"
 enabled = true
 
 [[projects]]
-name = "trouble"
-repo_url = "local:/home/kara/trouble"
-workdir = "/home/kara/trouble"
-weight = 10
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
-deliver = "telegram:-1003310984808:168443"
-enabled = true
-
-[[projects]]
-name = "trouble-dogfood"
-repo_url = "local:/home/kara/trouble"
-workdir = "/home/kara/.hermes/stand-in/dogfood/trouble"
-weight = 3
-priority = 4
-cooldown_s = 259200
-namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:168443"
-enabled = true
-
-[[projects]]
-name = "trouble-qa"
-repo_url = "local:/home/kara/trouble"
-workdir = "/home/kara/.hermes/stand-in/pm/trouble"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "qa"
-deliver = "telegram:-1003310984808:168443"
-enabled = true
-
-[[projects]]
-name = "trouble-sync"
-repo_url = "local:/home/kara/trouble"
-workdir = "/home/kara/.hermes/sync-workdirs/trouble-sync"
-weight = 1
-priority = 5
-cooldown_s = 21600
-namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:168443"
-enabled = true
-
-[[projects]]
 name = "warpfs"
 repo_url = "local:/home/kara/warpfs"
 workdir = "/home/kara/warpfs"
@@ -1202,9 +1798,6 @@ weight = 15
 priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-adaptive_cooldown = true
-cooldown_floor_s = 21600
-cooldown_ceiling_s = 172800
 deliver = "telegram:-1003310984808:60183"
 enabled = true
 
@@ -1239,6 +1832,17 @@ priority = 4
 cooldown_s = 21600
 namespace_id = "qa"
 deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "warpfs-releng"
+repo_url = "local:/home/kara/warpfs"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/warpfs"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]

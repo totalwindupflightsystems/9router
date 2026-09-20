@@ -53,8 +53,10 @@ ELEVATED_PINS = {
     'h3-sdk-python-foreman': 43200,
     'h3-sdk-typescript-foreman': 43200,
     'h3-shim-foreman': 43200,
-    'h3-protocol-foreman': 43200,  # same h3 anti-flood pin
     'warpfs': 21600,  # Bane 2026-08-19: ALL projects to 6h window for now
+    'hermes-canopy-releng': 86400,  # Bane 2026-09-19: releng is 24h, not 6h
+    'hermes-dagger': 900,  # Bane 2026-09-15: 15min dagger speed ruling (was living in DB only, drifted fleet.toml back to 7200)
+    'hermes-canopy': 21600,  # Bane 2026-09-17: all coding-hermes primaries at 21600 (was 7200 in OPERATOR_7200)
 }
 
 # OPERATOR_7200 — Bane-designated 2h FAST projects (killer projects under active
@@ -73,29 +75,24 @@ ELEVATED_PINS = {
 # restart, and (b) hand-edits to fleet.toml are clobbered by the next
 # --apply. Sync/qa/pm/dogfood lanes stay OFF until the upstream-quiet
 # signal ships — arming them now would only mask upstream outages.
+#
+# TASKS-ADMISSION LAW (Bane 2026-09-19): adaptive cooldown is a TIMER
+# feature — it paces a lane that wakes on its cooldown clock. A
+# tasks-admission project spawns from board state, never from the timer,
+# so arming it is dead bookkeeping and the tripwire ends up policing an
+# invariant over machinery that never runs. Arming therefore applies ONLY
+# to namespaces whose admission_mode is timer-based (cooldown); a tasks
+# namespace is never armed, and an armed row in one is config drift the
+# tripwire flags. Today that means: nothing in coding-hermes (tasks) is
+# armed; only a future cooldown-admission foreman lane would be.
 ADAPTIVE_LANES = {"coding-hermes"}
 ADAPTIVE_CEILING_MULTIPLIER = 8
-OPERATOR_7200 = {
-    # Emptied 2026-09-19 (Bane's 2026-09-17 ruling removed the fast exceptions: "all 17
-    # coding-hermes primaries at 21600/21600"). Leaving hermes-dagger/hermes-canopy here
-    # forced 7200 into fleet.toml while the DB held 21600 — a pin in one store only
-    # (drift, flagged by ops/check-fleet-invariants.py) and a 2h snap-back on restart.
-    # NOTE: this file is NOT under version control and was silently reverted once already
-    # (2026-09-19) — re-apply after any sibling overwrite; the gate names the symptom.
-}
-
-# SATELLITE_FAMILY_PINS — sister-lane floors (2026-09-19, Bane: "each foreman gets one
-# of each" + "slow down some things"). WHY PINS AND NOT POLICY: a satellite's workdir is
-# a STAND-IN whose board is a SYMLINK to the primary's, so board_pending() always reads
-# the PRIMARY's backlog — the REDUCE rule ("above 6h WITH real work → 6h") therefore
-# fires on every satellite on every run and pulls the whole qa/sync fleet to its floor.
-# Measured before the fix: sync sat at exactly 100% of its 6h ceiling (583 ticks/wk).
-SATELLITE_FAMILY_PINS = {
-    'qa': 43200,        # 12h
-    'pm': 86400,        # 24h
-    'sync': 43200,      # 12h (was 6h, saturating)
-    'dogfood': 259200,  # 72h
-}
+# OPERATOR_7200 — emptied 2026-09-19 (Bane's 2026-09-17 ruling removed the fast
+# exceptions: "all 17 coding-hermes primaries at 21600/21600"). hermes-dagger
+# (900s, the 2026-09-15 ruling) and hermes-canopy (21600s) moved to ELEVATED_PINS
+# so the regen emits the canonical pin instead of fossilizing 7200 into
+# fleet.toml — a 2h snap-back on restart was the symptom (SCHED-GAP-121).
+OPERATOR_7200 = {}
 
 LEDGER_PATH = os.path.expanduser('~/.hermes/stand-in/ledger.json')
 
@@ -241,11 +238,6 @@ def main():
         # promotion race. The canonical pin is written to fleet.toml by
         # write_fleet_pins below, so restarts re-pin to it.
         elevated = ELEVATED_PINS.get(name)
-        if elevated is None:
-            for fam, fam_cd in SATELLITE_FAMILY_PINS.items():
-                if name.endswith('-' + fam):
-                    elevated = fam_cd
-                    break
         if elevated is None and pin is not None and pin not in (TARGET_ACTIVE, TARGET_IDLE, TARGET_COMPLETED, 7200):
             # Any fleet.toml pin outside the canonical policy set (900/21600/
             # 43200/7200) is operator intent (e.g. weekly 604800 cadence for
@@ -421,6 +413,10 @@ def write_fleet_pins(projects, namespaces=None):
         "",
     ]
     if namespaces:
+        # admission_mode per namespace (TASKS-ADMISSION LAW): tasks
+        # namespaces are never armed; timer (cooldown) namespaces are.
+        ns_admission = {n.get('id', ''): (n.get('admission_mode') or 'cooldown')
+                        for n in namespaces}
         out.append("# ── Namespaces ───────────────────────────────────────────────")
         out.append("# Namespace-level config (prompts, chains, caps) is data in the")
         out.append("# scheduler DB; the regen mirrors it so restarts re-pin it.")
@@ -432,6 +428,9 @@ def write_fleet_pins(projects, namespaces=None):
             out.append(f'hard_cap = {ns.get("hard_cap", 100)}')
             out.append(f'max_concurrent = {ns.get("max_concurrent", 0)}')
             out.append(f'enabled = {"true" if ns.get("enabled", True) else "false"}')
+            am = ns.get("admission_mode") or ""
+            if am:
+                out.append(f'admission_mode = "{am}"')
             desc = ns.get("description") or ""
             if desc and '"' not in desc:
                 out.append(f'description = "{desc}"')
@@ -454,14 +453,6 @@ def write_fleet_pins(projects, namespaces=None):
         # whitelisted projects even if the live API was already clobbered —
         # the regen must never fossilize a below-pin value into fleet.toml.
         cooldown = ELEVATED_PINS.get(pname, OPERATOR_7200.get(pname, p.get("cooldown_s", p.get("CooldownS", 7200))))
-        for _fam, _fam_cd in SATELLITE_FAMILY_PINS.items():
-            if pname.endswith('-' + _fam):
-                cooldown = _fam_cd
-                break
-        # Bane 2026-09-17: sub-6h pins are retired fleet-wide. The regen must never
-        # fossilize the policy's old 2h tier into fleet.toml.
-        if cooldown < 21600:
-            cooldown = 21600
         out.append(f'cooldown_s = {cooldown}')
         # DYNAMIC-ONLY (Bane 2026-08-28): NEVER emit a model/provider default.
         # The task-router resolves the model at spawn time; a present static
@@ -476,13 +467,14 @@ def write_fleet_pins(projects, namespaces=None):
         ns = p.get('namespace_id', p.get('NamespaceID'))
         if ns:
             out.append(f'namespace_id = "{ns}"')
-        # SCHED-GAP-1 arming: foreman lane only, explicit 8x ceiling.
-        # cooldown_floor_s is emitted EXPLICITLY = the pin: the loader
-        # defaults an absent floor to the pin-at-enable-time, so regens
-        # without the key could drift the floor away from the pin (the
-        # 2026-09-09 h3 fossil: floor=900 vs pin=43200 → 2 days of 15-min
-        # ticks). Floor == pin here keeps restart re-pins converged.
-        if ns in ADAPTIVE_LANES:
+        # SCHED-GAP-1 arming (as amended by the TASKS-ADMISSION LAW,
+        # Bane 2026-09-19): arm ONLY a timer-based (cooldown-admission)
+        # foreman lane. A tasks-admission project spawns from board
+        # state, so adaptive pacing is dead bookkeeping there — emit no
+        # adaptive keys at all, and the tripwire treats an armed row in
+        # a tasks namespace as drift. The live admission_mode comes
+        # from the namespace; the namespace block above carries it.
+        if ns in ADAPTIVE_LANES and ns_admission.get(ns, "cooldown") != "tasks":
             out.append('adaptive_cooldown = true')
             out.append(f'cooldown_floor_s = {cooldown}')
             out.append(f'cooldown_ceiling_s = {cooldown * ADAPTIVE_CEILING_MULTIPLIER}')
