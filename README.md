@@ -325,7 +325,7 @@ registration path exists for them.
 ## 🧪 Testing
 
 **The suite is NOT all-green by design** — don't chase a red run as a regression.
-The baseline is ~2749 pass / ~81 fail / ~61 skip (2891 total, verified 2026-09-19), with every
+The baseline is ~2762 pass / ~68 fail / ~61 skip (2891 total, verified 2026-09-19), with every
 known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
 Live-network tests (`real/*.real.test.js`, `unit/mimo-free.live.test.js`) are **opt-in** via
 `RUN_REAL=1` — a default run skips them, and they are deliberately **not** part of the baseline

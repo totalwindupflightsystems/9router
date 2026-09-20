@@ -1126,3 +1126,28 @@ tasks:
   status: complete
   created_at: '2026-09-19T04:15:46.176491+00:00'
   completed_at: '2026-09-19T04:33:40.323882+00:00'
+- id: HYG-9ROUTER-18
+  title: 'Suite-baseline truth refresh: prune 2 stale known-fails entries (force-stream-config
+    now passes) and refresh suite counts in AGENTS.md/CLAUDE.md/README.md/docs/federation-spec.md'
+  criteria:
+  - tests/unit/force-stream-config.test.js no longer appears in tests/__baseline__/known-fails.txt
+    and passes in a fresh full-suite run; all four docs quote the fresh counts measured
+    this tick; verify-no-regression.mjs on the fresh JSON exits 0; lint gate unchanged
+  status: complete
+  created_at: '2026-09-19T07:32:08.348411+00:00'
+  completed_at: '2026-09-19T07:36:35.221344+00:00'
+- id: HYG-9ROUTER-19
+  title: Re-arm 13 dead security-audit assertions (cwd-relative source paths)
+  criteria:
+  - 'PASS: (1) tests/unit/security-audit.test.js resolves every source read cwd-independently
+    (no path.resolve of a repo-relative path) and the file passes 21/21 under the
+    canonical npm test entry from the repo root; (2) the 13 security-audit.test.js
+    entries are pruned from tests/__baseline__/known-fails.txt and a fresh full-suite
+    run + node tests/__baseline__/verify-no-regression.mjs exits 0 with no stale baseline
+    entries; (3) npm run lint:gate exits 0 (no NEW/INCREASED problem, no stale baseline
+    entry); (4) the four documented suite-count lines (AGENTS.md, CLAUDE.md, README.md,
+    docs/federation-spec.md) quote the freshly measured totals; (5) no product/runtime
+    source file is modified.'
+  status: complete
+  created_at: '2026-09-19T08:27:57.857108+00:00'
+  completed_at: '2026-09-19T23:58:39.500078+00:00'
