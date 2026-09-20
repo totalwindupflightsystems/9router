@@ -118,7 +118,20 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   const clientRequestedStreaming = body.stream === true || sourceFormat === FORMATS.ANTIGRAVITY || sourceFormat === FORMATS.GEMINI || sourceFormat === FORMATS.GEMINI_CLI;
   const providerRequiresStreaming = PROVIDERS[provider]?.forceStream === true;
-  let stream = providerRequiresStreaming ? true : (body.stream !== false);
+  // An OMITTED `stream` key means the client wants a single JSON body — that is
+  // the documented OpenAI Chat Completions default, and it is what every client
+  // that never mentions the flag (the OpenAI SDK, plain curl, most "wrap your
+  // base URL" integrations) is entitled to. Reading the absent key as
+  // "streaming" made the router take the streaming path end to end while the
+  // outbound body it sent carried no `stream` key at all, so the upstream
+  // answered `application/json` and that JSON body went through the SSE
+  // transform, which appended the synthetic `data: [DONE]` terminator onto it
+  // (DF-9ROUTER-32 — `json.loads` then fails with `Extra data`).
+  // Only an explicit `stream: true` (or a source format that cannot be answered
+  // any other way) turns streaming on; `providerRequiresStreaming` still forces
+  // it for providers that have no non-streaming mode, and the forced case is
+  // aggregated back to JSON for the client by handleForcedSSEToJson below.
+  let stream = providerRequiresStreaming ? true : (body.stream === true || sourceFormat === FORMATS.ANTIGRAVITY || sourceFormat === FORMATS.GEMINI || sourceFormat === FORMATS.GEMINI_CLI);
 
   // Image generation models require non-streaming (Google v1internal:generateContent)
   const modelType = getModelType(alias, model);

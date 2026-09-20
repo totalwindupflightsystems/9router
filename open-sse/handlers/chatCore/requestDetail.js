@@ -182,7 +182,14 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
   const inTokens = effective.input_tokens ?? effective.prompt_tokens ?? 0;
   const outTokens = effective.output_tokens ?? effective.completion_tokens ?? 0;
 
-  if (inTokens === 0 && outTokens === 0) return;
+  // A successful request whose tokens resolve to 0/0 is DROPPED by the DB layer's
+  // own guard, so the row silently never lands and usageHistory / usage stats stay
+  // empty for real served traffic (DF-9ROUTER-33). Never let that be silent: name
+  // the provider and model so the accounting hole is visible in the server log.
+  if (inTokens === 0 && outTokens === 0) {
+    console.warn(`[USAGE] dropped all-zero usage record · ${provider || "unknown"}/${model || "unknown"}${connectionId ? ` | account=${connectionId.slice(0, 8)}...` : ""}${body ? ` | contentLength=${contentLength}` : ""}`);
+    return;
+  }
 
   if (!silent) {
     const time = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });

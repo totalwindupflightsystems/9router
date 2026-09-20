@@ -78,6 +78,31 @@ export function createSSEStream(options = {}) {
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
 
+  // Responses-API assistant text rides on top-level `response.output_text.delta`
+  // events, not on a chat delta. Both branches below (passthrough for a
+  // Responses-format client, translate for a chat client routed to a
+  // Responses-format provider such as codex) receive those same events, so the
+  // counting lives here and is called from both. Without it totalContentLength
+  // stayed 0 for a whole codex conversation, finalizeStream() had no content to
+  // base an estimate on, and the request was recorded nowhere — while the client
+  // received the full answer (DF-9ROUTER-33).
+  //
+  // A concatenated `response.output_text.done` carries the item's FULL text, so it
+  // REPLACES what the deltas accumulated rather than being added on top: a
+  // provider emitting both must not be double-counted.
+  const countResponsesText = (parsed, eventName) => {
+    const event = eventName || parsed?.type || null;
+    if (typeof parsed?.delta === "string" && event === "response.output_text.delta") {
+      totalContentLength += parsed.delta.length;
+      accumulatedContent += parsed.delta;
+      return;
+    }
+    if (typeof parsed?.text === "string" && event === "response.output_text.done" && parsed.text.length >= accumulatedContent.length) {
+      totalContentLength += parsed.text.length - accumulatedContent.length;
+      accumulatedContent = parsed.text;
+    }
+  };
+
   // Usage/logging tail, callable from transform() as well as flush(): a client that
   // closes right after the terminal event cancels the reader, and flush() never runs.
   const finalizeStream = () => {
@@ -86,8 +111,19 @@ export function createSSEStream(options = {}) {
 
     const isPassthrough = mode === STREAM_MODE.PASSTHROUGH;
     let finalUsage = isPassthrough ? usage : state?.usage;
+    // An all-zero usage chunk is the upstream SAYING "no counts", not reporting a
+    // zero-token completion: hasValidUsage() treats it as absent, so drop it here
+    // rather than let a plain 0/0 object sail past the estimate fallback below.
+    if (!hasValidUsage(finalUsage)) finalUsage = null;
 
-    if (!hasValidUsage(finalUsage) && totalContentLength > 0) {
+    // A successful stream that produced content but whose upstream never reported
+    // token counts must still be RECORDED. Without the estimate on this path the
+    // record reached the DB layer as 0/0 and was dropped by its all-zero guard, so
+    // a whole class of traffic (Responses-API passthrough streams, an upstream
+    // that omits the usage chunk) disappeared from usageHistory while the client
+    // received a perfectly good answer — DF-9ROUTER-33, where usageHistory stayed
+    // at zero rows and /api/usage/stats reported nothing for served requests.
+    if (!finalUsage && totalContentLength > 0) {
       finalUsage = estimateUsage(body, totalContentLength, isPassthrough ? FORMATS.OPENAI : sourceFormat);
       if (isPassthrough) usage = finalUsage; else state.usage = finalUsage;
     }
@@ -95,6 +131,10 @@ export function createSSEStream(options = {}) {
     if (hasValidUsage(finalUsage)) {
       logUsage(isPassthrough ? provider : (state?.provider || targetFormat), finalUsage, model, connectionId, apiKey);
     } else {
+      // Neither counts nor content: the only case where an absent usage row is the
+      // honest outcome. Name it, because an empty completion and a broken
+      // accounting path otherwise look identical in the logs.
+      console.warn(`[USAGE] no usage recorded · ${provider || "unknown"}/${model || "unknown"} · ${totalContentLength} content chars, no token counts`);
       appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
     }
 
@@ -200,6 +240,9 @@ export function createSSEStream(options = {}) {
                 totalContentLength += reasoning.length;
                 accumulatedThinking += reasoning;
               }
+              // Responses-API passthrough: the assistant text rides on top-level
+              // `response.output_text.delta` events, not on a chat delta.
+              countResponsesText(parsed, currentOpenAIResponsesEvent);
 
               const extracted = extractUsage(parsed);
               if (extracted) {
@@ -315,6 +358,12 @@ export function createSSEStream(options = {}) {
           accumulatedThinking += parsed.choices[0].delta.reasoning_content;
         }
         
+        // Responses-API event (a chat client routed to a Responses-format provider
+        // such as codex): the assistant text is a top-level string. Counting it
+        // here is what lets finalizeStream() record an estimate for a codex
+        // conversation that reports no usage (DF-9ROUTER-33).
+        countResponsesText(parsed, currentOpenAIResponsesEvent);
+
         // Gemini format
         if (parsed.candidates?.[0]?.content?.parts) {
           for (const part of parsed.candidates[0].content.parts) {
