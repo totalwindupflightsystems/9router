@@ -236,3 +236,128 @@ the run taught:
    at this HEAD with zero config beyond the FEDERATION_* envs. The 09-01
    conclusion stands: unit green ≠ federation works; only the real-boot
    playbook is the verdict.
+
+## 13. Run 5 (2026-09-20, HEAD 321268d5): the product promises under the federation plumbing
+
+Every previous run judged federation and onboarding. This one went after what the README actually
+sells — RTK token saving, auto-fallback, multi-account rotation, usage accounting — and found that
+the layer below the federation work is where the lies live. The test suite is structurally unable
+to see any of it, and it is worth understanding *why* before touching the code.
+
+### How the money feature is wired (and that it is genuinely real)
+
+RTK is not a marketing wrapper. The chain is:
+
+`POST /v1/chat/completions` → `src/sse/handlers/chat.js` (combo/account selection, reads the
+Token-Saver header) → `open-sse/handlers/chatCore.js:259`
+`compressMessages(translatedBody, tokenSaverEnabled && rtkEnabled)` → `open-sse/rtk/index.js`,
+which walks every tool-result shape (OpenAI `role:"tool"` string and array forms, Claude
+`tool_result` blocks, OpenAI-Responses `function_call_output`, and the Kiro
+`conversationState` shape) and replaces each blob in place → `open-sse/rtk/autodetect.js` picks a
+filter from the first 4 KB by regex (`git-log`/`git-diff`/`git-status` → build output → grep →
+find → tree → ls → read-numbered → dedup-log → smart-truncate) → the filter runs inside
+`safeApply`.
+
+Three properties are worth internalising, because they are what make the claim credible:
+
+1. **`safeApply` is a real safety property, not a comment.** `compressText` rejects the filter
+   output when it is empty or *larger* than the input, and keeps the original. Measured: a
+   synthetic all-unique grep blob went 11119 → 12420 bytes and RTK returned the original
+   unchanged; real `grep -rn` output went 11259 → 7641 (32.1% saved) and real `find` output
+   7266 → 1926 (73.5%). A token saver that can *inflate* context would be worse than none.
+2. **The saving is visible in the actual prompt.** The upstream sees a smaller prompt, not a
+   differently-labelled one: `prompt_tokens` 3316 → 2592 for the RTK request, and back to 3483
+   with `X-9Router-Token-Saver: off`.
+3. **The per-request bypass header works** (`X-9Router-Token-Saver: off`), which is the right
+   affordance for the case where you *want* the model to see raw output.
+
+Lesson for future test authors: the RTK unit tests exercise the filters well but nothing asserted
+the **end-to-end** saving, which is why "RTK works" had never been verified from outside. If you
+ever change the executors' request assembly, re-measure `prompt_tokens` with and without the
+header — that difference is the only honest test of this feature.
+
+### Why usage accounting is empty — the guard that eats a whole feature
+
+`open-sse/handlers/chatCore/requestDetail.js` records usage for the API-key/per-model/quota views
+through `saveRequestUsage`. Directly above that call sits:
+
+```js
+const inTokens  = effective.input_tokens  ?? effective.prompt_tokens     ?? 0;
+const outTokens = effective.output_tokens ?? effective.completion_tokens ?? 0;
+if (inTokens === 0 && outTokens === 0) return;   // <-- drops the record
+```
+
+The guard reads as defensive (don't store junk), but it hides a contract break: on the **streaming**
+path the counters are never populated, so every streaming request silently exits here. The
+discriminator is one instance and one SQLite count:
+
+| request | client sees | `usageHistory` rows |
+|---|---|---|
+| `stream:true` | SSE chunks | +1 |
+| **`stream` omitted** | non-stream JSON | **+0** |
+| `stream:false` | non-stream JSON | +1 |
+
+Because coding CLIs stream by default, the rows stay at zero and `/api/usage/stats` reports
+`totalRequests: 0` for a box that served a dozen completions — while the console prints
+`📊 DONE … IN 0 · OUT 0` as if that were normal. **The right way** to fix this is to take the
+counts from the stream's final usage chunk (the upstream already sends them) or estimate from
+text length, and to make a *successful* request with all-zero usage a loud warning rather than a
+silent skip. Never let a guard that protects data quality quietly amputate a product feature.
+
+### The `data: [DONE]` tail: what actually triggers it
+
+Symptom: `…"system_fingerprint":"…"}data: [DONE]` — a JSON body that no strict parser accepts.
+Isolation: probe the upstream directly (clean), then vary exactly one field:
+
+```bash
+curl -s -X POST $B/v1/chat/completions -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json'   -d '{"model":"…","messages":[…]}' | tail -c 20        # }data: [DONE]   <-- broken
+```
+
+`stream:true` → proper SSE; `stream:false` → clean JSON; **`stream` absent → the broken hybrid**.
+So the defect is in the branch taken when the flag is missing, and it is a *default* path — the
+OpenAI SDK omits the key unless told otherwise. This is the same family as the old
+"empty-as-success" gap: the response is assembled from the wrong shape for the path that most
+clients take, and nothing errors. When a body must be JSON, assert it with a strict parser at the
+boundary — a `res.json()` round-trip in a test would have caught this years ago.
+
+### Fallback: the same guard, the wrong scope
+
+`open-sse/services/combo.js` advances to the next model only when
+`checkFallbackError(status, errorText)` says so. That helper
+(`open-sse/services/accountFallback.js:57`) returns `shouldFallback:false` for 4xx except
+401/402/403/429, with a good reason in its comment: a request-shaped 400 says nothing about the
+*credential*, so cooling an account down would be wrong. But the combo caller is asking a
+different question — "is the next *model* worth trying?" — and inherits the account answer. Hence
+a combo whose first model doesn't exist dies on model #1 forever. If you fix this, keep the two
+questions separate: **credential health** and **candidate viability** are not the same predicate,
+and one function answering both is how a correct guard becomes a broken feature.
+
+### Model discovery on a fresh node: what the 1-model listing tells you
+
+On a brand-new install, `/v1/models` for a node pointing at a healthy 91-model upstream returned a
+single id — a *combo name* the upstream's catalog happened to contain. A completion through the
+same node succeeded, so routing works and only the listing is wrong; on the instance that had
+synced the `dlm/` prefix, the same kind of node listed 90 ids. The observable rule is *an
+un-synced prefix degrades to a placeholder set*, and the mechanism is not yet proven — treat the
+board row (DF-9ROUTER-35) as a fix-me, not a doc-me. **The right way to test model listing from
+now on:** create a node against an upstream with a prefix the local catalog has never seen, then
+compare the gateway list against the upstream's own `/v1/models` count. A count mismatch is the
+test; "the dashboard looks fine" is not.
+
+### Re-verification playbook for this surface (new, keep it)
+
+```bash
+# 0. isolated instance (never the fleet router on :20128)
+PORT=20127 DATA_DIR=/tmp/dogfood-9router data-dir … npm run start
+# 1. wiring: login → node → connection → key (two objects, prefix field)
+# 2. RTK: POST a real `grep -rn` blob as role:"tool" and compare prompt_tokens
+#    with and without -H 'X-9Router-Token-Saver: off'   (expect a 20-40% drop)
+# 3. usage: read the row count from SQLite around one streaming and one
+#    explicit non-streaming request (expect +1 each)
+# 4. fallback: combo [<nonexistent model>, <working model>] must answer 200
+# 5. install leg: fresh bunker agent, clone → npm ci → dev → same completions
+```
+
+Numbers from this run are in `2026-09-20-integration.md`; the board rows are
+DF-9ROUTER-32..37. Nothing in this run required a repo fix — the findings are tasks for the
+foreman, and the diagnostics above are the "why", not a log dump.

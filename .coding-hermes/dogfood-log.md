@@ -1,5 +1,74 @@
 # Dogfood Log
 
+## 2026-09-20 — 9router (federation fork) — run 7: the product promises under the plumbing
+
+- **Verdict:** 🟡 PROMISING-BUT-ROUGH. The ROI feature is real (RTK measurably
+  saves 32% on grep / 73% on find and is proven end-to-end), but two of the
+  README's headline promises are broken at HEAD `321268d5` and the test suite
+  is structurally unable to see either.
+- **Angle (new surface):** 10+ prior runs swept the CLI/CAG surface, the
+  gateway endpoints and the whole federation acceptance suite (most recently
+  2026-09-19, all green). This run took the untested product layer instead:
+  RTK token saver, combo/model auto-fallback, multi-account rotation, and
+  usage/quota accounting — driven with a real client on a scratch instance
+  (`PORT=20127`, `DATA_DIR=/tmp/dogfood-9router`) plus a fresh bunker box.
+  The 09-19 conclusion ("remaining roughness is onboarding friction, not
+  broken promises") does not survive this surface.
+- **Promise:** "point any OpenAI/Claude-compatible coding CLI at one endpoint,
+  route to 40+ providers with RTK saving 20-40% of tool_result tokens, auto
+  fallback subscription→cheap→free for zero downtime, round-robin across
+  accounts, and track usage/quota so subscriptions get used before reset."
+- **Method:** real use — scratch production instance, OpenAI-compatible node →
+  LM Studio over the tailnet, client API key, real tool blobs sent as
+  `role:"tool"` content, row counts read straight from SQLite, plus a fresh
+  ephemeral bunker agent (`bunker-las-03`, agent `6e0618e5`, destroyed) for
+  the install leg and a two-hop chain on that box.
+- **Top findings:**
+  1. **DF-9ROUTER-32 (P0)** — a request that OMITS `stream` (the OpenAI SDK
+     default) returns non-stream JSON with `data: [DONE]` glued on, so the body
+     does not parse (`Extra data: line 33 column 2`). Explicit `stream:true`
+     and `stream:false` are both correct; upstream LM Studio is clean.
+  2. **DF-9ROUTER-33 (P0)** — usage recording is dead on the streaming path:
+     rows 1 → `stream:true` 2 → `stream` omitted 2 (NO ROW) → `stream:false` 3,
+     while the client receives real counts. `requestDetail.js` drops the record
+     when `inTokens === 0 && outTokens === 0`. Re-find: first reported
+     2026-09-16, still open; this run adds the discriminator + guard location.
+  3. **DF-9ROUTER-34 (P1)** — combo fallback never advances past a
+     model-scoped 4xx: `[bad-model, good-model]` returns the first model's 400
+     and never tries model #2, contradicting "zero downtime".
+  4. **DF-9ROUTER-35 (P1)** — on a fresh install, a node against a healthy
+     91-model upstream listed exactly ONE model through `/v1/models` (stable
+     across 3 probes) although a completion through it worked.
+  5. **DF-9ROUTER-36 (P1)** — round-robin is opt-in (fill-first default):
+     4/4 requests served by the newest connection; README states it as a
+     feature, not a switch.
+  6. **DF-9ROUTER-37 (P2)** — a wrong provider-nodes field name gives a
+     misleading error, and omitting `apiType` silently invents
+     `prefix:"compatible"`.
+- **Verified working (explicitly, on the same instance):** RTK saving
+  (`grep` 11259B→32.1%, `find` 7266B→73.5%, `git log` refused) and end-to-end
+  `[RTK] saved 3618B / 11259B via [grep]` with prompt_tokens 3316→2592, or
+  3483 with `X-9Router-Token-Saver: off`; the filter safety contract (a
+  worst-case blob GREW and was correctly left alone); restart persistence
+  (nodes/connections/combos/models/traffic all survive); round-robin once
+  enabled; and on the fresh box clone → `npm ci` (43s) → `npm run dev`
+  (`Ready in 396ms`) → a real `CHAIN-OK` completion through fresh-install →
+  control-host → LM Studio.
+- **Time-to-first-success:** ~6 min on the control host (login → node →
+  connection → key → completion); ~5 min from bare Debian to working routing
+  on the fresh bunker box. Friction count: 6 product findings.
+- **Artifacts:** `docs/dogfood/2026-09-20-integration.md`,
+  `docs/dogfood/diagnostics.md` §13 (mechanism + the new re-verification
+  playbook), `skills/9router-token-saving-and-accounting-usage/SKILL.md`,
+  board rows DF-9ROUTER-32..37.
+- **Foreman:** NOT woken — fleet law pins this project at 21600s; the rows are
+  picked up at the normal cadence. No cooldown or Enabled state was touched.
+- **Meta:** every one of these defects lives in a path the suite green-lights —
+  a filter that returns bigger output (correctly refused) hides the missing
+  end-to-end saving assertion; a "don't store junk" guard silently amputates a
+  whole feature; an account-health predicate answers a model-level question.
+  Tests proved modules; using it proved the product.
+
 ## 2026-09-01 — 9router (federation fork) — run 3: re-verify the fixes
 
 - **Verdict:** ✅ SHIPPABLE (federation feature). Every formerly-open finding
@@ -125,3 +194,5 @@
 2026-09-16 | PROMISING-BUT-ROUGH | 335s t2fs | friction 14 | 5 findings\n
 2026-09-19 | PROMISING-BUT-ROUGH | t2fs boot 40s + local-endpoint wiring ~6min | friction 4 | 3 findings (DF-9ROUTER-29 P1 onboarding/two-object model, DF-9ROUTER-30 P2 silent empty completion on protocol mismatch, DF-9ROUTER-31 P3 fail-hard outage window) | promise: multi-tool AI gateway routing to 40+ providers + fork federation; reality: OpenAI stream/non-stream + Anthropic /v1/messages + usage tracking all work at HEAD 585bd31c, federation acceptance A/A+/B/C/D all PASS (replication, row-level integrity, edge auth, kill→degraded→queue→drain→relink); all five 09-13 P0/P1 findings re-checked and none reproduce; artifacts docs/dogfood/2026-09-19-integration.md + diagnostics.md §12 + skills/9router-federation-usage updated | install leg: bunker-qa battery on bunker-las-02 agent c5d61826 (evidence /tmp/bunker-qa-evidence-9router-df10.jsonl)
 install-leg result (bunker-las-02, agent c5d61826, evidence /tmp/bunker-qa-evidence-9router-df10.jsonl): fresh-install OK on the clean agent (toolchain-bootstrap OK, repo sync + install path completed); collect OK, agent destroyed. Cell FAILs are battery-environment artifacts, not install failures: docker-deploy/chaos-shutdown rc=125 'unknown shorthand flag: d' — the agent's rootless docker is the compose-v1 era CLI (compose plugin absent), same class seen on other QA runs; upgrade 404 — the fork's private package 9router-app has no registry release (README documents fork is source/Docker only); ui-probe treats the auth 307 /login redirect as not-serving; ci-pass/chaos-resource need act + full toolchain the throwaway agent lacks. None of these contradict installability; compose cells would need a compose-plugin bootstrap in the battery script (bunker-qa.sh, not this repo).
+
+2026-09-20 | PROMISING-BUT-ROUGH | t2fs ~6min (control host) / ~5min fresh box | friction 6 | 6 findings (DF-9ROUTER-32 P0 default-stream unparseable JSON, DF-9ROUTER-33 P0 usage-dead-on-streaming, DF-9ROUTER-34 P1 combo-fallback-4xx, DF-9ROUTER-35 P1 fresh-node 1-model listing, DF-9ROUTER-36 P1 round-robin opt-in, DF-9ROUTER-37 P2 node-field validation) | RTK VERIFIED (grep 32.1%/find 73.5%; prompt_tokens 3316->2592, 3483 with saver off) | install_seconds=43 | bunker=las-bunker-03 agent=6e0618e5 | smoke=ok (clone+checkout federation+npm ci 43s+dev Ready 396ms+CHAIN-OK completion; agent destroyed)
