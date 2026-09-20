@@ -18,8 +18,9 @@
 // it against a local node:http server without touching Next.js.
 import http from "node:http";
 import { isEdge, getCentralUrl, getToken } from "./config.js";
-import { getEdgeState } from "./state.js";
+import { getEdgeState, canServeFromReplica } from "./state.js";
 import { STATES } from "./constants.js";
+import { FEDERATION_STATE_HEADER } from "./headers.js";
 
 // ─── Forward-set matching (spec §3.2) ────────────────────────────────────
 
@@ -63,6 +64,19 @@ export function isMutatingDashboardApi(method, url) {
   return MUTATING_API_PREFIXES.some((p) => path === p || path.startsWith(p + "/"));
 }
 
+// True when the request is served by the /v1 API surface. DF-9ROUTER-31 uses
+// this to bound the pre-DEGRADED fail-open: /v1 requests are READS against the
+// replica (the chat pipeline reads accounts/combos/keys/aliases) and are safe
+// to serve locally; a mutating dashboard write is NOT — applying it locally
+// while still LINKED would bypass the pendingWrites queue and diverge the edge
+// from central (the write would never be replayed). Those stay fail-hard in
+// the window, so the client retries after the DEGRADED flip and the write is
+// queued exactly once.
+export function isV1Path(url) {
+  const path = String(url || "").split("?")[0];
+  return path === "/v1" || path.startsWith("/v1/");
+}
+
 // True when the path is a dashboard API path (any method) — the forward-set
 // prefixes. FED-005 uses this to tag DEGRADED-mode dashboard READ responses
 // with X-Federation-State: degraded (spec §3.5): reads on these paths
@@ -77,7 +91,6 @@ export function isDashboardApiPath(url) {
 }
 
 // ─── Header plumbing ─────────────────────────────────────────────────────
-
 // Headers that describe the transport hop and must NOT be replayed upstream
 // (the central derives its own view of the peer). Everything else — Content-
 // Type, Accept, the client's Authorization (its own API key), x-api-key,
@@ -225,7 +238,36 @@ export function relayResponse(upstreamRes, clientRes, { onAbort } = {}) {
 
 // Returns a promise of { response, request }. The request handle is kept so
 // client aborts can destroy the upstream socket. The client request body is
-// piped through untouched (arbitrary methods/bodies, spec §3.2).
+// piped through untouched (arbitrary methods/bodies, spec §3.2) — but only
+// once the upstream socket is CONNECTED (DF-9ROUTER-31):
+//
+//   The pre-DEGRADED outage window may now fall back to local replica serving
+//   (see proxyRequest), and that fallback hands the SAME req to the local
+//   handler. Piping the client body into a doomed upstream request consumes
+//   it: the local pipeline would then see an empty body and answer a bogus
+//   400. Deferring the pipe to the socket's `connect` event keeps the body
+//   readable by whoever ultimately serves the request whenever the failure
+//   happened BEFORE a connection ever existed (ECONNREFUSED on a dead
+//   central — the dogfood case; verified live: with keep-alive the dead
+//   upstream always presents a fresh, not-yet-connected socket, so the body
+//   is never touched).
+//
+//   A failure AFTER connect (central accepted, then reset mid-response) can
+//   still consume the body, so such a failure is marked and remains
+//   fail-hard — never replayed locally. Both `node:http` and undici-style
+//   transports honour this via the `federationBodyUntouched` flag, which the
+//   transport and proxyRequest are the only two parties to (undocumented on
+//   the public transport contract; injectable transports simply never set
+//   it, which keeps them on the fail-hard path).
+export const BODY_UNTOUCHED_FLAG = "federationBodyUntouched";
+
+// Gate a transport error on whether the client body is still readable. A
+// transport that never sets the flag (a test double, a custom transport) is
+// treated as "body consumed" — fail-hard, exactly the pre-DF-31 behavior.
+export function isBodyUntouched(err) {
+  return err?.[BODY_UNTOUCHED_FLAG] === true;
+}
+
 function defaultTransport(req, base, headers) {
   return new Promise((resolve, reject) => {
     const upstream = http.request(
@@ -233,8 +275,22 @@ function defaultTransport(req, base, headers) {
       { method: req.method, headers },
       (upstreamRes) => resolve({ response: upstreamRes, request: upstream })
     );
-    upstream.on("error", reject);
-    req.pipe(upstream);
+    let bodyPiped = false;
+    const pipeBody = () => {
+      if (bodyPiped) return;
+      bodyPiped = true;
+      req.pipe(upstream);
+    };
+    // Pipe on connect for a socket that is still connecting; pipe at once
+    // when the agent hands back an already-connected (pooled) socket.
+    upstream.on("socket", (socket) => {
+      if (socket.connecting === false) pipeBody();
+      else socket.once("connect", pipeBody);
+    });
+    upstream.on("error", (err) => {
+      if (!bodyPiped) err[BODY_UNTOUCHED_FLAG] = true;
+      reject(err);
+    });
   });
 }
 
@@ -257,10 +313,26 @@ function defaultTransport(req, base, headers) {
 // machine flips to DEGRADED immediately on a proxy-side 502/timeout (spec
 // §3.4). It is injected (not imported) so proxy.js never depends on
 // failover.js (no circular import; failover depends on proxy's exports).
+//
+// DF-9ROUTER-31 (fail-open in the pre-DEGRADED window): while the heartbeat
+// failure span has not yet reached the jittered outage threshold the edge is
+// still LINKED, so the old code answered a hard 502 FED_UPSTREAM_ERROR — even
+// when the local replica was fully caught up (revisionLag 0) and serving from
+// it was safe. Now, when the upstream failure happened BEFORE a connection
+// existed (the client body is therefore still unread) AND the local replica is
+// fresh, the request falls through to the local handlers with
+// X-Federation-State: degraded — the same header and the same serving path the
+// post-flip DEGRADED state uses. Failures after connect stay fail-hard: the
+// body may already have been consumed, so a local replay would read an empty
+// body. `isFreshReplica` is injectable (a predicate over the edge's own
+// federation_meta); it defaults to the DB-backed check in state.js and,
+// crucially, defaults to FALSE whenever `getState` was injected, so callers
+// that stub the state read get a pure function with no hidden DB dependency.
 export async function proxyRequest(req, res, options = {}) {
   const {
     transport = null,
     getState = null,
+    isFreshReplica = null,
     centralUrl = null,
     token = null,
     log = console,
@@ -270,17 +342,29 @@ export async function proxyRequest(req, res, options = {}) {
   if (!isEdge()) return false; // standalone/central: no-op pass-through
 
   let state;
+  let dbForFreshness = null;
   if (getState) {
     state = getState();
   } else {
     try {
       const { getAdapter } = await import("../db/driver.js");
-      state = getEdgeState(await getAdapter());
+      const dbAdapter = await getAdapter();
+      dbForFreshness = dbAdapter;
+      state = getEdgeState(dbAdapter);
     } catch {
       state = STATES.LINKED; // DB unavailable → proxy-up-by-default
     }
   }
   if (state === STATES.DEGRADED) return false; // DEGRADED → local handlers
+
+  // Resolved lazily — only a failed forward ever asks whether the replica is
+  // good enough to answer from, so the happy path pays nothing.
+  const replicaIsFresh = async () => {
+    if (typeof isFreshReplica === "function") return !!isFreshReplica();
+    if (getState) return false; // stubbed state ⇒ no DB surprise; fail-hard
+    if (!dbForFreshness) return false;
+    return canServeFromReplica(dbForFreshness);
+  };
 
   if (!shouldForward(req.method, req.url)) return false;
 
@@ -312,6 +396,27 @@ export async function proxyRequest(req, res, options = {}) {
         log.error(`[federation] onUpstreamFailure hook failed: ${e?.message || e}`);
       }
     }
+
+    // DF-9ROUTER-31: pre-DEGRADED window, fresh replica, body never sent, /v1
+    // request → serve locally instead of failing hard. The client keeps its
+    // unread body, so the local pipeline sees a request identical to one that
+    // arrived while DEGRADED. Bounded to /v1 on purpose: those are reads
+    // against the replica. A mutating dashboard write stays fail-hard below —
+    // applying it locally while still LINKED would skip the pendingWrites
+    // queue and diverge the edge (it would never be replayed).
+    if (isV1Path(req.url) && isBodyUntouched(err) && (await replicaIsFresh())) {
+      log.warn(
+        `[federation] edge proxy: upstream ${req.method} ${req.url} failed before the request body was sent; ` +
+          `serving from the fresh local replica (state '${state}').`
+      );
+      try {
+        res.setHeader(FEDERATION_STATE_HEADER, STATES.DEGRADED);
+      } catch {
+        /* response already gone — the local handler will fail on its own */
+      }
+      return false;
+    }
+
     if (!res.headersSent) {
       try {
         res.writeHead(502, { "Content-Type": "application/json" });

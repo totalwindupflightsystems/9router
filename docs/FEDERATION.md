@@ -221,6 +221,51 @@ of a false green "Federation linked".
 3. A proxy-side 502/timeout while LINKED flips immediately (no waiting for
    the threshold).
 
+#### 5.1.1 The pre-DEGRADED window fails open when the replica is fresh
+
+Between central's death and the DEGRADED flip (step 2 above), the edge is
+still LINKED, so `/v1` traffic is still being forwarded — and every forward
+fails. Answering a hard `502 {"error":{"code":"FED_UPSTREAM_ERROR"}}` in that
+window is needless when the edge already holds a current replica.
+
+When all of the following hold, the edge serves the request from its **local
+replica** instead, with `X-Federation-State: degraded` — the same serving path
+and the same header the post-flip DEGRADED state uses:
+
+- central is **unreachable before the request body was sent** (connection
+  refused / DNS / connect timeout — the failure mode of a killed or
+  partitioned central); and
+- the request is a `/v1/*` request; and
+- the local replica is **fresh**: `federation_meta` shows runtime activity
+  (`role`/`last_state`/`lastAppliedRevision` written) **and** a central
+  watermark was advertised (`centralMaxVersion` is not NULL) **and**
+  `revisionLag == 0`.
+
+It logs `[federation] edge proxy: upstream <METHOD> <PATH> failed before the
+request body was sent; serving from the fresh local replica (state 'linked').`
+
+**This is not a new state.** Nothing in the window writes `last_state`: the
+LINKED → DEGRADED transition is still owned by the heartbeat threshold and by
+the proxy's failover hook (which fires on the same failure). The window only
+decides *how to answer one request* while the machine catches up — the same
+decision the DEGRADED state makes, one step earlier. The replica freshness
+numbers are read from the same `federation_meta` columns `local-status`
+reports, so the banner and the serving decision can never disagree.
+
+**The window stays fail-hard — by design — whenever serving locally would not
+be equivalent to serving centrally:**
+
+| condition | behavior | why |
+|---|---|---|
+| replica behind central (`revisionLag > 0`) | `502 FED_UPSTREAM_ERROR` | the replica is missing writes; answering from it would serve stale config |
+| replica never synced (`centralMaxVersion` NULL) | `502 FED_UPSTREAM_ERROR` | no baseline — lag is *unknown*, not zero |
+| runtime never started (`federation_meta` all-NULL) | `502 FED_UPSTREAM_ERROR` | there is no replica |
+| failure **after** connect (central accepted, then reset) | `502 FED_UPSTREAM_ERROR` | the client body was already consumed, so a local retry would read an empty body |
+| mutating dashboard write (`POST /api/settings`, …) | `502 FED_UPSTREAM_ERROR` | `/v1` is a read against the replica; applying a write locally while LINKED would skip `pendingWrites` and never replay. Retry after the flip → the write is queued exactly once |
+
+Once the flip lands (within the threshold), the ordinary §5.2 degraded path
+takes over for everything, including writes.
+
 **Verify** (token-less, local only — the payload never carries the token, the
 lease/fencing material or any central data):
 
