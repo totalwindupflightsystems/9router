@@ -22,7 +22,15 @@ Correction rules (Bane 2026-09-09, supersede 2026-08-07):
   floor re-poisons the pin on the project's next committing tick —
   proven 2026-09-09: h3 ran 900s against a 43200 pin for 2 days).
 
-Usage: python3 fleet-cooldown-policy.py [--apply]
+Usage: python3 fleet-cooldown-policy.py [--apply] [--dry-run] [--verify]
+
+  --apply        evaluate + PUT corrections + regenerate fleet.toml
+  --dry-run      force the read-only evaluation even with --apply present
+                 (Bane rule: dry-run must never mutate live state)
+  --verify       SCHED-GAP-121 tripwire: exit 0 = every operator pin agrees
+                 across both stores (ELEVATED_PINS vs fleet.toml vs the live
+                 DB row); exit 1 with `MISMATCH <project> <field>: db=<v>
+                 toml=<v>` lines = drift. Read-only, no evaluation loop.
 """
 import json
 import os
@@ -204,8 +212,80 @@ def api_put(path, body):
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read())
 
+def verify_pins():
+    """SCHED-GAP-121 tripwire: operator pins must agree across both stores.
+
+    For every project in ELEVATED_PINS, the fleet.toml pin and the live DB
+    row must both carry the canonical value. A pin present in only one store
+    is drift: the loader re-pins from fleet.toml at restart, so a DB-only pin
+    silently reverts (SCHED-GAP-121: hermes-dagger 900 lived only in the DB
+    while OPERATOR_7200 regenerated 7200 into fleet.toml), while a toml-only
+    pin is what the policy is about to write. Scope is the ELEVATED_PINS set
+    (the SCHED-GAP-012 whitelist) — non-canonical operator pins such as a
+    weekly 604800 cadence are honoured by the evaluation but are NOT checked
+    here, because the regen re-emits the live value for rows outside the maps
+    so they cannot drift out of the file.
+
+    Read-only: no PUT, no regen, no evaluation loop.
+    Return: list of `MISMATCH <project> <field>: db=<v> toml=<v>` strings.
+    """
+    problems = []
+    fleet_pins = read_fleet_pins()
+    try:
+        projects = api_get('/api/v1/projects').get('projects', [])
+    except Exception as exc:  # scheduler down — cannot certify, fail loud
+        return [f"MISMATCH <all> api: db=<unreachable: {exc}> toml=<n/a>"]
+    live = {p.get('name', ''): p for p in projects}
+
+    # Canonical pins must be present in BOTH stores at the pin value. One
+    # line per project: a toml/store disagreement with the canonical pin is
+    # a single finding, not two (the earlier form emitted the same mismatch
+    # twice when both stores were off-pin).
+    for name, pin in sorted(ELEVATED_PINS.items()):
+        row = live.get(name)
+        if row is None:
+            problems.append(f"MISMATCH {name} project: db=<absent> toml={fleet_pins.get(name)}")
+            continue
+        if not row.get('enabled'):
+            continue  # regen writes enabled rows only; toml pin is stale-by-design
+        db_cd = row.get('cooldown_s')
+        toml_cd = fleet_pins.get(name)
+        if db_cd != pin or toml_cd != pin:
+            problems.append(f"MISMATCH {name} cooldown_s: db={db_cd} toml={toml_cd} (canonical pin={pin})")
+
+    # TASKS-ADMISSION LAW: nothing in a tasks-admission namespace may be
+    # armed. Reported as WARN, not MISMATCH: this is the tripwire's own T1
+    # check (fleet-arming-tripwire.py) and the loader disarms key-less rows
+    # at the next restart, so it must not fail the documented pin contract.
+    try:
+        namespaces = api_get('/api/v1/namespaces').get('namespaces', [])
+    except Exception:
+        namespaces = []
+    tasks_ns = {n.get('id') for n in namespaces
+                if (n.get('admission_mode') or 'cooldown') == 'tasks'}
+    for name, row in sorted(live.items()):
+        if row.get('namespace_id') in tasks_ns and row.get('adaptive_cooldown'):
+            print(f"WARN {name} adaptive_cooldown: db=1 toml=n/a "
+                  f"(tasks-admission namespace '{row.get('namespace_id')}' — disarm; "
+                  f"tripwire owns this check)")
+    return problems
+
+
 def main():
-    apply = '--apply' in sys.argv
+    if '--verify' in sys.argv:
+        problems = verify_pins()
+        for p in problems:
+            print(p)
+        if problems:
+            print(f"\n{len(problems)} pin mismatch(es) — drift detected")
+            sys.exit(1)
+        print(f"OK: {len(ELEVATED_PINS)} canonical pin(s) agree across fleet.toml and the live DB; "
+              f"no tasks-admission lane armed")
+        sys.exit(0)
+    # --dry-run is a SAFETY override: it must win over --apply, because the
+    # documented invocation `--apply --dry-run` otherwise performs a LIVE
+    # apply (argv membership test below). Dry-run never mutates live state.
+    apply = '--apply' in sys.argv and '--dry-run' not in sys.argv
     fleet_pins = read_fleet_pins()
     projects = api_get('/api/v1/projects').get('projects', [])
 
