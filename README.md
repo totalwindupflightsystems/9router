@@ -59,7 +59,7 @@ Full design & config reference: [docs/federation-spec.md](docs/federation-spec.m
 - ✅ **RTK Token Saver** - Auto-compress tool_result content, save 20-40% tokens per request
 - ✅ **Maximize subscriptions** - Track quota, use every bit before reset
 - ✅ **Auto fallback** - Subscription → Cheap → Free, zero downtime
-- ✅ **Multi-account** - Round-robin between accounts per provider
+- ✅ **Multi-account** - Round-robin or fill-first, configurable per provider
 - ✅ **Universal** - Works with Claude Code, Codex, Cursor, Cline, any CLI tool
 
 ---
@@ -404,6 +404,56 @@ The node is live as soon as its models appear as `<prefix>/<model-id>`.
 > Re-run step 2 with `provider` set to that exact id. Note the 404 shape, not a 401:
 > to the client this looks like a missing model, which is why the trap is easy to
 > misread as a prefix/typo problem.
+
+#### Account rotation: `fill-first` by default, round-robin per provider on request
+
+With several connections on one provider, 9Router **fills the highest-priority
+account first** (`fill-first`) and only moves to the next one when the first is
+rate-limited, errored, or out of quota. Every connection created without an
+explicit strategy behaves this way — creating a second connection does **not**
+put it into rotation.
+
+Round-robin (rotate between accounts after N calls, `stickyRoundRobinLimit`) is
+a real, tested feature — it is simply **opt-in, per provider**. Pick it either
+from the dashboard or with one API call; both write the same settings key.
+
+**Where the setting lives** — one entry per provider, keyed by the provider id:
+
+```jsonc
+// settings.providerStrategies
+{
+  "<provider-id>": {
+    "fallbackStrategy": "round-robin",   // or "fill-first"
+    "stickyRoundRobinLimit": 3           // calls per account before switching (default 3)
+  }
+}
+```
+
+**Enable it with one call** — `<provider-id>` is the **provider / node id**
+(`GET /api/providers` → `connection.provider`; for a compatible node it is the
+`id` returned by `POST /api/provider-nodes`, e.g.
+`openai-compatible-chat-412551d5-…` — see the LM Studio walkthrough above):
+
+```bash
+curl -s -X PATCH http://localhost:20128/api/settings \
+  -H "Content-Type: application/json" \
+  -d '{"providerStrategies":{"<provider-id>":{"fallbackStrategy":"round-robin","stickyRoundRobinLimit":3}}}'
+```
+
+Turn it back off by setting `"fill-first"`. Note that this replaces the
+`providerStrategies` object wholesale, so re-send the other providers' entries
+if you have more than one override.
+
+**From the dashboard** (verified in `src/app/(dashboard)/dashboard/`):
+
+| Surface | Control | Source |
+| --- | --- | --- |
+| A provider's own page — built-in **and** OpenAI/Anthropic-compatible nodes | a `Round Robin` toggle plus a `Sticky` field, next to the connections list | `providers/[id]/page.js:1563` (toggle; reachable for compatible nodes too — gated on `isCompatible`, not on the built-in-only detail card) |
+| Settings → **Routing Strategy** | the **global** `fallbackStrategy` toggle (`fill-first` ↔ `round-robin`) for every provider without an override | `profile/page.js:1460` |
+| Media providers | a per-combo round-robin toggle | `media-providers/combo/[id]/page.js:87` |
+
+A per-provider entry set from a provider page wins over the global toggle
+(`src/sse/services/auth.js:139-140`).
 
 ---
 
@@ -854,7 +904,7 @@ a third party under a provider named "Self-hosted".
 | 🎯 **Smart 3-Tier Fallback**                                                      | Auto-route: Subscription → Cheap → Free                                                  | Never stop coding, zero downtime                  |
 | 📊 **Real-Time Quota Tracking**                                                   | Live token count + reset countdown                                                       | Maximize subscription value                       |
 | 🔄 **Format Translation**                                                         | OpenAI ↔ Claude ↔ Gemini ↔ Cursor ↔ Kiro ↔ Vertex                                        | Works with any CLI tool                           |
-| 👥 **Multi-Account Support**                                                      | Multiple accounts per provider                                                           | Load balancing + redundancy                       |
+| 👥 **Multi-Account Support**                                                      | Multiple accounts per provider, tried in priority order unless rotation is enabled       | Redundancy + optional load balancing              |
 | 🔄 **Auto Token Refresh**                                                         | OAuth tokens refresh automatically                                                       | No manual re-login needed                         |
 | 🎨 **Custom Combos**                                                              | Create unlimited model combinations                                                      | Tailor fallback to your needs                     |
 | 📝 **Request Logging**                                                            | Debug mode with full request/response logs                                               | Troubleshoot issues easily                        |
@@ -957,7 +1007,7 @@ Seamless translation between formats:
 ### 👥 Multi-Account Support
 
 - Add multiple accounts per provider
-- Auto round-robin or priority-based routing
+- Priority-based (`fill-first`) routing by default — round-robin is opt-in per provider
 - Fallback to next account when one hits quota
 
 ### 🔄 Auto Token Refresh
