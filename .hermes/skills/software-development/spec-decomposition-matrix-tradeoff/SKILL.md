@@ -1,7 +1,7 @@
 ---
 name: spec-decomposition-matrix-tradeoff
 description: Use when turning vague intent into an exhaustive design matrix — cascading questions, break-checks, explicit tradeoffs — before PRD or build.
-version: 1.3.0
+version: 1.4.0
 license: MIT
 metadata:
   hermes:
@@ -1649,6 +1649,50 @@ a resumed run under a changed core is a different project's matrix.
   serve the seed.** Escalate it as the highest-priority question in the run, present the
   derivation, and continue on the branch that serves the *stated* need until answered — while
   recording the derived alternative as `provisional: true`.
+
+---
+
+## 11. Running the matrix with a quorum panel
+
+The method above is one writer working one cascade. When the stakes justify it, the matrix is
+also the natural **unit of work for a judge panel** (`coding-hermes-quorum`) — but the two
+doctrines collide on exactly one thing: §7.0 says *one writer owns the artifact directory*,
+and a panel is many seats. Resolve it by separating the phases, never by sharing a directory.
+
+**Three ways to use the panel, in increasing cost:**
+
+1. **Panel as interrogators (parallel, independent).** Give N seats the *same seed* and the
+   skill, each in its own `design-<seat>/` directory. Their artifacts will diverge — different
+   domains reached, different breaks caught, different tradeoffs weighted. That divergence is
+   the product: it is a map of where the design space is genuinely contested. Merge with the
+   claim-checklist discipline in `coding-hermes-quorum`, then **keep the union of findings**,
+   not the intersection: a domain one seat reached and another marked `NOT-REACHED` is a real
+   finding about that domain's ambiguity.
+
+2. **Panel as break-check adversaries (the highest-value use).** The break-check (§5) is where
+   a single writer is weakest: you cannot check your own design against a constraint you never
+   considered. Run one primary writer to convergence, then hand each judge seat the *finished*
+   artifact read-only and ask it only: **what does this break?** Seats return break findings
+   with the affected domain, the pair, and the consequence; the primary writer applies them in
+   one scripted pass (mirroring the wave-panel residue fix in `coding-hermes-spec-lifecycle`)
+   and records each in `04-break-report.md`. The §5.3 modification rule still governs — an
+   applied finding must name what it changed.
+
+3. **Panel as tradeoff weighters only when the owner cannot answer.** §6's escalations assume
+   an owner. When the owner is absent or non-technical, a panel may *provisionally* weight a
+   decision — but the output is still `provisional: true` with the default recorded, never a
+   pretended owner decision. A panel cannot supply the one thing the method reserves for the
+   human: what they weight more.
+
+**Seat diversity is the whole mechanism.** Per `coding-hermes-quorum`, three seats from one
+model family are one seat with three opinions. Pick seats from different families, and verify
+seat identity from the session record rather than the dispatch label — a mislabelled seat has
+silently reduced you to one family more than once.
+
+**The panel does not change §7.0.** Every seat that writes has its own directory. If two seats
+must land in one tree, they take turns, and `_index.md` records the writer and the window so a
+downstream consumer can see the handoff. A panel whose seats share a directory has not run at
+quorum with the method — it has run it once, badly, and lost rows.
 
 ---
 
