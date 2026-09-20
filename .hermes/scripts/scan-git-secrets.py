@@ -53,6 +53,31 @@ SECRET_PATTERNS = [
 # on the repo) to cover those stores in a targeted run. Verified scan #98: with
 # SCAN_REPO_TIMEOUT=180 the scheduler namespace scanned clean (13,872 added lines).
 REPO_TIMEOUT_S = int(os.environ.get('SCAN_REPO_TIMEOUT', '30'))
+# Per-repo OVERRIDE (scan #102, 2026-09-19). The 30s budget was a FLAT
+# cap applied to every repo, so the busy DuckBrain namespace stores
+# (`scheduler` 386 MB .git / 87k objects, `fleet-quality` 289 MB,
+# `coding-hermes` 175 MB) blew it on EVERY fire and were reported as INFO
+# timeouts — a real, recurring coverage gap on the stores that hold the
+# fleet's ingested chat/log rows. A targeted re-scan at 300s proved
+# `scheduler` clean (42.6s, 22,191 added lines, 0 findings) and
+# `independent-sweep.py` proved the same stores clean across 863 repos, so
+# the cap — not the content — was the problem. `scheduler` reached 42.6s in
+# scan #100 and 217.9s when the diff is large; the busiest namespace stores
+# therefore get their own generous budget, while the 30s default keeps the
+# total cron runtime bounded (those three repos were the ONLY timeouts seen
+# across the last 10 fires). A repo keyed here that keeps timing out is
+# still a real gap — raise it further or `git gc` the store.
+REPO_TIMEOUT_OVERRIDES = {
+    '/home/kara/duckbrain/namespaces/scheduler': 300,
+    '/home/kara/duckbrain/namespaces/fleet-quality': 240,
+    '/home/kara/duckbrain/namespaces/coding-hermes': 180,
+    '/home/kara/duckbrain/namespaces/chat-archive': 180,
+}
+
+
+def repo_timeout(repo_dir):
+    """Effective `git log -p` budget for one repo (override map, then global default)."""
+    return REPO_TIMEOUT_OVERRIDES.get(repo_dir, REPO_TIMEOUT_S)
 
 FP_PATTERNS = [
     # Placeholder / example values
@@ -134,6 +159,15 @@ FP_PATTERNS = [
     re.compile(r'sk-(?:abc|a1b2c3)[a-z0-9]*\b'),
     # Alphabet-run GitHub PAT example: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij
     re.compile(r'ghp_ABCDEFGHI'),
+    # Documented FP class: `ghp_invalid…` (scan #102, 2026-09-19). The corpus and the
+    # report prompt both name `ghp_invalid` as a documented example token, but the
+    # existing quote-anchored rule (`["'](?:old|expired|invalid|…)…token["']`) only
+    # suppresses it when the value is quoted AND ends in the word token — an unquoted
+    # `GITHUB_TOKEN=ghp_invalid0000…` in a doc/test still flagged. Narrow by construction:
+    # the six-char `_invalid` word must sit IMMEDIATELY after the prefix, which no real
+    # PAT body does (random alphanumeric). A real `ghp_` token still trips github_token —
+    # verified against 15-char-prefix controls in the scan #102 canary.
+    re.compile(r'(?i)\bgh[pousr]_invalid[A-Za-z0-9]*'),
     # LocalStack documented fixture access-key IDs (aws/accounts.py docstring example)
     re.compile(r'AKIA(?:RZPUZDIKGB2VALC4|IOSFODNN7EXAMPLE)'),
     # Sequential Slack placeholder used in docs: xoxb-1234567890123
@@ -380,7 +414,7 @@ def scan_repo(repo_dir, since_iso):
              '--diff-filter=AM', '-p', '--no-color',
              '--no-renames',  # Skip rename detection → faster
              '-U0'],  # Zero context lines → smaller output
-            capture_output=True, timeout=REPO_TIMEOUT_S, cwd=repo_dir
+            capture_output=True, timeout=repo_timeout(repo_dir), cwd=repo_dir
         )
         stdout_text = result.stdout.decode('utf-8', errors='replace')
     except (subprocess.TimeoutExpired, OSError):
