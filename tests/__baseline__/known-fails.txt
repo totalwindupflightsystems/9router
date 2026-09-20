@@ -87,3 +87,10 @@ tests/unit/translator-request-normalization.test.js :: request normalization tra
 tests/unit/windsurf-executor.test.js :: WindsurfExecutor class PROVIDERS.windsurf baseUrl is the chat endpoint (registry in sync)
 tests/unit/windsurf-executor.test.js :: WindsurfExecutor class buildUrl returns the GetChatMessage endpoint
 tests/unit/windsurf-executor.test.js :: WindsurfExecutor class constructor wires config from PROVIDERS.windsurf
+tests/translator/bugs-claudeCode-context.test.js :: Claude Code CLI context → OpenAI tool_result image block is preserved
+tests/translator/bugs-gemini-cursor-commandcode.test.js :: OpenAI → CommandCode image content is preserved as native CommandCode image blocks
+tests/translator/bugs-openai-bridge.test.js :: bug: Claude → OpenAI bridge data loss tool_result with image block is not turned into raw JSON / dropped
+tests/unit/commandcode-to-openai.test.js :: commandcode-to-openai — error event stringifies object errors so client sees readable message
+tests/unit/kiro-external-idp.test.js :: Kiro external_idp (CLIProxyAPI) import and refresh adds CodeWhisperer external IdP headers and endpoint ordering
+tests/unit/openai-to-commandcode.test.js :: openaiToCommandCodeRequest — native image blocks maps OpenAI image_url data URI to CommandCode {type:image,image,mimeType}
+tests/unit/openai-to-commandcode.test.js :: openaiToCommandCodeRequest — native image blocks maps Claude/OpenAI base64 image source to a data-URI image block
