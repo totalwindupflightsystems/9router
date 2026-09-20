@@ -144,9 +144,11 @@ def parse_escalation_headings(text):
         eid = m.group(1)
         opts = re.findall(r"^\s*(?:-\s*)?Option ([A-Z])\s*[—-]", block, re.M)
         has_default = bool(re.search(r"if unanswered by|no-answer default|proceed with", block, re.I))
+        opt_lines = re.findall(r"^\s*(?:-\s*)?Option [A-Z]\s*[—-].*$", block, re.M)
         rows.append({
             "id": eid,
             "options": sorted(set(opts)),
+            "option_lines": opt_lines,
             "default_if_unanswered": "yes" if has_default else None,
         })
     return rows
@@ -256,6 +258,11 @@ def main():
             errors.append(f"{did} dangling core_check {cc}")
         if not scrub(d.get("reversal_cost")):
             errors.append(f"{did} missing reversal_cost")
+        # §7.6 names supersedes/superseded_by among the dangling references the gate checks
+        for fld in ("supersedes", "superseded_by"):
+            for x in as_list(d.get(fld)):
+                if x not in decisions:
+                    errors.append(f"{did} dangling {fld} {x}")
 
     # ---- tradeoffs --------------------------------------------------------
     for r in sorted(reg_rows["tradeoffs"], key=lambda x: x["id"]):
@@ -270,6 +277,15 @@ def main():
             errors.append(f"{r['id']} fewer than 2 options")
         if not scrub(r.get("default_if_unanswered")):
             errors.append(f"{r['id']} missing a no-answer default")
+        # §6.5: options are "attached with costs" — an option with no cost is a bare
+        # opinion, and §7.6 names costs explicitly. Count cost-bearing option lines.
+        opt_lines = r.get("option_lines")
+        if opt_lines and len(opt_lines) != len(r.get("options") or []):
+            pass  # parser could not pair them; do not guess
+        if opt_lines is not None and opt_lines and opts:
+            priced = sum(1 for ln in opt_lines if re.search(r"\bcosts?\b", ln, re.I))
+            if priced < len(opt_lines):
+                errors.append(f"{r['id']} has {len(opt_lines)-priced} option(s) with no stated costs")
 
     # ---- unknowns ---------------------------------------------------------
     for r in sorted(reg_rows["unknowns"], key=lambda x: x["id"]):
@@ -282,6 +298,10 @@ def main():
 
     # ---- contradictions ---------------------------------------------------
     for r in sorted(reg_rows["contradictions"], key=lambda x: x["id"]):
+        # §5.6: parties are whatever is in conflict — decision, escalation, or assumption ids
+        for x in as_list(r.get("parties")):
+            if x not in decisions and x not in e_ids and x not in a_ids:
+                errors.append(f"{r['id']} dangling party {x}")
         status = (scrub(r.get("status")) or "OPEN").upper()
         if status != "OPEN":
             if not scrub(r.get("resolution")) or not scrub(r.get("resolved_date_or_trigger")):
@@ -321,6 +341,16 @@ def main():
         errors.append(f"domain coverage missing: {missing}")
     for f in files:
         txt = read(os.path.join(ddir, f))
+        # §7.6: a branch terminating below its floor must carry a fixed-point-below-floor
+        # record. Only enforced when both numbers are machine-readably present — the skill
+        # allows a prose header, so an unparseable file is skipped rather than failed.
+        fl = re.search(r"ring_floor\s*[:=]\s*(\d+)", txt) or re.search(r"floor\s+(\d+)", txt)
+        tr = re.search(r"terminating_ring\s*[:=]\s*(\d+)", txt) or \
+             re.search(r"terminating ring\s+(\d+)", txt)
+        if fl and tr and int(tr.group(1)) < int(fl.group(1)):
+            if "fixed-point-below-floor" not in txt:
+                errors.append(f"{f}: terminated at ring {tr.group(1)} below floor "
+                              f"{fl.group(1)} without a fixed-point-below-floor record")
         # a domain is NOT-REACHED only when it says so in its own status line — a mention
         # of some OTHER domain being not-reached is not a status (that bug flagged every
         # cascaded file that referenced a skipped neighbour)

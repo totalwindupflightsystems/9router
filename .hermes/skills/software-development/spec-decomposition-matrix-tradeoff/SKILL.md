@@ -1,7 +1,7 @@
 ---
 name: spec-decomposition-matrix-tradeoff
 description: Use when turning vague intent into an exhaustive design matrix — cascading questions, break-checks, explicit tradeoffs — before PRD or build.
-version: 1.2.0
+version: 1.3.0
 license: MIT
 metadata:
   hermes:
