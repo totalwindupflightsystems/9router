@@ -1151,3 +1151,12 @@ tasks:
   status: complete
   created_at: '2026-09-19T08:27:57.857108+00:00'
   completed_at: '2026-09-19T23:58:39.500078+00:00'
+- id: FED-PR-005
+  title: 'PR 3173 dirty: merge upstream v0.5.81 into PR branch'
+  criteria:
+  - upstream/master is ancestor of PR-branch head; foreman state files preserved on
+    federation; full suite + regression gate shows no new pass-to-fail; build PASS;
+    PR 3173 still open with head advanced past 61652663
+  status: complete
+  created_at: '2026-09-20T02:59:51.186286+00:00'
+  completed_at: '2026-09-20T04:27:55.198742+00:00'
