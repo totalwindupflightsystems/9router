@@ -130,6 +130,11 @@ Then, the bounds themselves:
   records `fixed-point-below-floor` with the reason, **or** is recorded `NOT-REACHED` with a
   named reason and owner. Data, identity, concurrency, security, and deployment carry a
   ring-5 floor under the same rule.
+- **Thin-domain exemption:** a domain whose triage score is ≤6 is expected to close at ring 2.
+  When it does, record `fixed-point-below-floor: ring 2 (thin domain, score N)` — the reason
+  is the score, and that is a legal close. The ring-3 floor above applies to domains with
+  score ≥7; it is never a reason to keep interrogating a domain that already reached its
+  fixed point.
 - **Ring ceiling:** ring 8 per domain, absent an owner instruction. Ring 5 on a thin domain
   that already closed at ring 2 is a budget violation, not diligence.
 - **Domain triage:** score each domain `blast_radius × uncertainty × irreversibility` (each
@@ -203,7 +208,12 @@ It is **SHALLOW** — regardless of length — if any of the shallow tells in §
 
 ### 3.1 Answer type → next question type
 
-This is the generator. Identify what kind of answer you just wrote, then ask its row.
+Identify what kind of answer you just wrote, then ask its row. This table is the **classifier**
+— it tells you which probes a given answer owes. The actual *generators* are §3.2 (universal
+expansion, the default first ring), §3.3 (the five-class rule), and §4's domain batteries
+(the per-domain question sets). Use all three together: §4 supplies domain-specific probes,
+§3.2 the generic ten, §3.3 the class-coverage floor, and this table picks the right subset
+for the answer in front of you.
 
 | Answer type | Questions it forces |
 |---|---|
@@ -273,13 +283,19 @@ obvious" is not termination — it is truncation.
    boundary)`, lowercased, stop-words removed, sorted. A question already in the register
    with the same signature is a **duplicate or an alias**, not a new unknown — link it,
    never re-ask it. The three axes are closed sets you must pin down before the run:
-   - **`subject`** — the noun being decided, drawn from the project's own vocabulary as it
-     appears in the data dictionary (§4.5) and the store inventory (§4.6), plus the domain's
-     named entities. Extract it as the head noun of the question (the thing the question is
-     *about*). Maintain a domain-local synonym map so "record"/"entry"/"row" collapse to one
-     subject; when you cannot tell whether two subjects are the same, **do not collapse
-     them** — link them as `possible-alias` and let the reviewer decide. False merges lose
-     unknowns silently; false splits merely cost a redundant question.
+   - **`subject`** — the noun being decided. Extract it as the head noun of the question (the
+     thing the question is *about*). Build the vocabulary in the order the run produces it:
+     common nouns first (file, record, request, user, device — whatever the seed names), then
+     extend the list as §4.5's data dictionary and §4.6's store inventory land. **Ordering
+     rule, so the signature test is not circular:** a question asked before §4.5 completes
+     signs off the seed's own nouns, not off the data dictionary — and when §4.5 later renames
+     or splits a subject, re-sign only the questions that used the old noun, recording the
+     re-sign as a `possible-alias` link rather than a silent rewrite. Never block a cascade
+     waiting for §4.5; sign with what you have and re-sign on change.
+     Maintain a domain-local synonym map so "record"/"entry"/"row" collapse to one subject;
+     when you cannot tell whether two subjects are the same, **do not collapse them** — link
+     them as `possible-alias` and let the reviewer decide. False merges lose unknowns
+     silently; false splits merely cost a redundant question.
    - **`decision-class`** — a closed set, use §3.3's letters: `D F O C A S U X P` (data,
      failure, ops, cost, alternatives, security, user-experience, compatibility, proof).
    - **`affected boundary`** — which domain(s) or layer(s) the answer touches, from the §4
@@ -513,6 +529,28 @@ carry a ring-5 floor unconditionally.
 Capture per domain, in one record: answers, decisions (with ids), unknowns, break-check
 results, the terminating ring, and the required output. A domain with a heading and no
 answers is a shallow tell.
+
+**Name the outputs, or the validator can't see them.** Several domains require a table, a
+matrix, or a runbook. Those are artifacts in their own right and they carry ids, or the §7.6
+cross-reference check is blind to them:
+
+| Output kind | Id form | Lives in |
+|---|---|---|
+| data dictionary row | `DD-\d{3}` | domain file (§4.5) |
+| schema/DDL sketch | `SC-\d{3}` | domain file (§4.6) |
+| index entry | `IX-\d{3}` | domain file (§4.6) |
+| interface contract | `IF-\d{3}` | domain file (§4.8) |
+| pattern decision | `PT-\d{3}` | domain file (§4.31) |
+| candidate/library | `LB-\d{3}` | `10-research.md` (§4.32) |
+| integration seam | `IN-\d{3}` | domain file (§4.33) |
+| failure entry | `FM-\d{3}` | domain file (§4.42) |
+| runbook | `RB-\d{3}` | domain file (§4.42) |
+| alert entry | `AL-\d{3}` | domain file (§4.17) |
+| invariant | `IV-\d{3}` | `15-invariant-test-map.md` |
+| required-output row, any domain | `<domain>-out-\d{2}` | the domain's own file |
+
+A decision, ledger row, or unknown that references one of these names it by id. A table with
+prose rows only is not an output — give its rows ids at creation, not retroactively.
 
 ### 4.1 Product & people
 Who is this for, and who is it *not* for? Who pays, who operates, who is harmed when it
@@ -998,6 +1036,21 @@ unnecessary" is not a justification — it is how break-checks get skipped.
 For large decision sets (>25 load-bearing), a sparse high-risk matrix is acceptable **after**
 the full set is enumerated and the skip rule is recorded.
 
+**Precedence against the clock.** The pair walk and the domain cascades compete for the same
+budget, and the walk is not free (n load-bearing decisions is n(n−1)/2 pairs — 190 at n=20).
+Order it:
+
+1. Enumerate the full pair set first — always, because the enumerated set is what proves the
+   walk was comprehensive, and it is cheap.
+2. Then run pairs in blast-radius order: pairs where a break would be irreversible or
+   cross-domain first, reversible same-domain pairs last.
+3. If the budget runs out mid-walk, record `pair-walk-partial: <n> of <m> pairs run` in the
+   break-report and the gate read. A recorded partial walk is honest; an unrecorded one is
+   the shallow-matrix tell. **Never silently drop pairs to make the clock.**
+4. Never let the walk consume the budget a BEFORE-BUILD domain still needs — the domain
+   cascade produces the decisions the walk operates on; a walk over a thin matrix is
+   expensive theatre.
+
 ### 5.2 Outcome taxonomy
 
 Every pair resolves to one of:
@@ -1016,6 +1069,9 @@ the pass modifies decisions, opens new ones, or closes others. If your report is
 `NO-INTERACTION` across every pair, the pass did not happen; go back and look harder at
 shared data, shared resources, and shared failure modes.
 
+This is a **pass-level** test, not a per-pair one — §5.5 states the distinction and why
+requiring per-pair modification would manufacture false changes.
+
 ### 5.4 Cycles
 
 If the walk finds a loop (D1 breaks D2, D2 breaks D3, D3 breaks D1), do not pick a winner
@@ -1026,16 +1082,40 @@ walk over the affected set.
 
 ### 5.5 The mandatory `breaks` field
 
-Every decision row carries:
+Every decision row carries `breaks` as **structured fields, not one prose string** — the
+validator has to read it, and a regex over English is not a check:
 
+```yaml
+breaks:
+  - outcome: NONE | BLOCKS | REQUIRES-REDESIGN | ACCEPTED-COST | MITIGATED | UNKNOWN
+    target: D-### | IV-### | IF-### | <layer name from §4>   # what it breaks (or was checked against)
+    how: "<how it breaks — or the checked-against list item when outcome is NONE>"
+    changed: "<what the pass modified as a result>"          # required unless outcome is NONE
+    accepted_by: "<who accepts it>"                          # required only for ACCEPTED-COST
 ```
+
+- `outcome: NONE` entries are the **checked-against list** — one entry per layer/decision you
+  looked at and found nothing. An empty list is not "nothing broke," it is "nothing was
+  checked."
+- `changed` is required for every non-`NONE` outcome: a break with no consequence recorded is
+  a break that was discovered and then ignored.
+- A decision whose `breaks` is empty, absent, or all-`NONE`-with-no-`target` fails the gate.
+
+The prose form below is for *reading* in the break-report; the register always carries the
+structured version:
+
+```text
 breaks: none — checked against <explicit list of layers/decisions>
       | <component>: <how it breaks> → <outcome from 5.2> → <what changed>
       | <invariant>: <violation> → <outcome>
 ```
 
-A `breaks` field that is empty, uniformly `none`, or lacks the checked-against list fails the
-gate.
+**Pass-level vs pair-level modification.** The §5.3 rule ("a break-check that modified nothing
+was not run") is enforced at the **pass** level, not per pair: it is entirely normal for most
+pairs to end in `NONE` or `NO-INTERACTION`. What is not normal is a *whole pass* in which no
+decision anywhere was modified, no new decision opened, and no unknown created. Judge the pass
+by its totals, never by an individual pair — requiring every pair to modify something would
+manufacture changes that were not real.
 
 ### 5.6 The contradiction register
 
@@ -1219,6 +1299,25 @@ was assumed.
 One directory (convention: `design/` or project-equivalent). Each file stands alone and
 cross-references the others by id.
 
+### 7.0 The artifact directory is single-writer
+
+**One run owns the artifact directory.** Two concurrent runs — or one coordinator plus a
+partially-steered seat, or two agents sharing a worktree — will overwrite each other's
+register files, and the loss is silent: the surviving artifact looks complete while rows from
+the other writer are simply gone. This is not hypothetical; it is a measured failure mode of
+runs that share a working directory.
+
+- **One writer per artifact directory.** If two runs must share a host, give each its own
+  directory (`design-<run-id>/`) and merge deliberately, never concurrently.
+- **Stage, then publish.** Write to `design/.staging-<id>/` and move the finished tree into
+  place in one step. An artifact that appears by halves is worse than one that appears late.
+- **A run that needs to resume** takes the directory it already owns; it does not start a
+  second concurrent writer.
+- **The gate read records the writer.** `_index.md` names the run id and the write window, so
+  a downstream consumer can tell whether two writers ever overlapped.
+- The reference validator (§7.6) should write a `run.json` marker (run id, start, last write)
+  beside the registers; a mid-run change of that marker is the collision tell.
+
 ### 7.1 Files and order
 
 ```
@@ -1238,9 +1337,19 @@ design/10-research.md          prior art, candidates, probe transcripts, measure
 design/11-humans.md            human-in-the-loop inventory + contact/escalation map
 design/12-vibe-sheet.md        IS / IS NOT / must-be-true / decoded phrases. Write LAST.
 design/13-handoff.md           the handoff contract (§7.5)
+design/14-core-checks.md       the core-check rows (§7.2) — one per branch
+design/15-invariant-test-map.md  the decision→invariant→test map (§4.34) — one row per
+                               BEFORE-BUILD decision, or the §7.6 gate cannot be satisfied
 design/_index.md               the gate read (§7.4)
 design/matrix.schema.json      machine-readable schema for the register (§7.6)
 ```
+
+**Two files exist explicitly to satisfy the gate.** The validator (§7.6) fails an artifact
+that has no core-check rows and no invariant→test map, so a run that emits every other file
+and skips these two has produced an artifact that *cannot* pass its own self-gate. If either
+is legitimately empty (no BEFORE-BUILD decisions yet), write the file with an explicit
+`empty — because <reason>` line. An absent file and an empty file are different failures;
+only the second is legal.
 
 A single-file artifact may use the same section order, preserving stable ids.
 
@@ -1317,8 +1426,10 @@ escalation is unanswered and unresolved, or any contradiction is `OPEN`.
 
 `matrix.schema.json` defines the register shapes above (decisions, tradeoffs, escalations,
 unknowns, assumptions, core-checks, contradictions) with required fields, id formats, and
-cross-reference integrity rules. **Ids are regexes, not examples:**
-`D-\d{3}`, `T-\d{3}`, `ESC-\d{2}`, `U-\d{3}`, `A-\d{3}`, `C-\d{3}`, `core-check-\d+`.
+cross-reference integrity rules. **Ids are regexes, not examples:** `D-\d{3}`, `T-\d{3}`,
+`ESC-\d{2}`, `U-\d{3}`, `A-\d{3}`, `C-\d{3}`, `core-check-\d{3}` — zero-padded to a fixed
+width, so `core-check-1` and `core-check-001` are the *same* id and a collision is detectable.
+An id namespace that admits both spellings silently merges two registers.
 
 The self-gate (§8) runs a validator — an executable check, not a reading exercise — that
 fails on:
@@ -1339,9 +1450,13 @@ fails on:
 - any domain absent from the artifact entirely (a NOT-REACHED row is required, not silence).
 
 The validator is the difference between an artifact and shelfware for an agent-fleet
-consumer: a downstream worker lints this file before touching the project. Reference
-implementation: a small script over the serialized registers (`design/*.md` YAML blocks, or a
-JSON export beside them) — the report names every failure with its row id.
+consumer: a downstream worker lints this file before touching the project. **A starter
+`matrix.schema.json` ships beside this skill** — copy it into `design/`, then extend the
+register objects for the project; keep the id patterns and the required fields or the checks
+below cannot run. The schema validates *shape*; referential integrity (dangling ids, "every
+BEFORE-BUILD decision appears in the test map", "every OPEN contradiction is listed in
+`_index.md`") needs the small script over the serialized registers (`design/*.md` YAML blocks,
+or a JSON export beside them). Ship both. The report names every failure with its row id.
 
 ### 7.7 Confidentiality
 
@@ -1490,10 +1605,15 @@ per domain, the open-unknown queue, the decision ids issued, and the core statem
 so drift is detectable on resume). On resume, verify the core hash matches before continuing —
 a resumed run under a changed core is a different project's matrix.
 
-### 10.5 Seed problems
+### 10.5 Seed and budget problems
 
 - **Empty seed.** Produce a minimal viable matrix from the domain grid's MUST-ANSWER-BEFORE-BUILD
   questions, escalate the core statement itself, and mark the run `seed-thin: true`.
+- **Budget-thin run** — a clear seed but a short clock (a bounded run, a paid-ceiling run, a
+  run the owner capped). This is NOT seed-thin: the seed is fine, the budget is not. Mark the
+  run `budget-thin: true`, run domains in triage order, and let the unreached domains carry
+  `NOT-REACHED` rows. A budget-thin run is a legitimate, expected deliverable — it is the
+  difference between an honest partial matrix and a fabricated complete one.
 - **Contradictory seed** (e.g. "fast" and "fully tested" under a fixed deadline). Do not
   silently pick one. Record the contradiction as its own escalation with both readings, and
   proceed with the containment default on every branch that depends on it.

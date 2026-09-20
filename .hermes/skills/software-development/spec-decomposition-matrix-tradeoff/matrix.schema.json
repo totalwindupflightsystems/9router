@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "matrix.schema.json",
+  "title": "Spec Decomposition Matrix registers",
+  "description": "Starter schema for the design substrate. Extend the register objects; keep the id patterns and the required fields, or the §7.6 validator cannot run. Registers are serialized as JSON beside the markdown (design/registers.json) or as the YAML blocks in the design/*.md files.",
+  "type": "object",
+  "required": ["run", "decisions", "tradeoffs", "escalations", "unknowns", "assumptions", "contradictions", "core_checks"],
+  "properties": {
+    "run": {
+      "type": "object",
+      "required": ["run_id", "seed_thin", "budget_thin", "autonomous_mode", "writers"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "seed_thin": { "type": "boolean" },
+        "budget_thin": { "type": "boolean" },
+        "autonomous_mode": { "type": "boolean" },
+        "writers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "description": "§7.0 single-writer rule. More than one concurrent writer means the artifact is not trustworthy.",
+          "items": { "type": "string" }
+        },
+        "core_hash": { "type": "string" },
+        "last_write": { "type": "string" }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement", "branch", "ring", "classification", "alternatives_considered", "breaks", "depends_on", "reversal_cost", "owner"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^D-[0-9]{3}$" },
+          "statement": { "type": "string" },
+          "branch": { "type": "string" },
+          "ring": { "type": "integer", "minimum": 1 },
+          "terminating_ring": { "type": ["string", "integer", "null"] },
+          "classification": { "enum": ["BEFORE-BUILD", "BEFORE-SHIP", "DEFER-WITH-OWNER"] },
+          "alternatives_considered": { "type": "array", "minItems": 2 },
+          "evidence": { "type": "array" },
+          "breaks": {
+            "type": "array",
+            "minItems": 1,
+            "description": "§5.5 structured form. All-NONE is legal only when each NONE carries a target (the checked-against list).",
+            "items": {
+              "type": "object",
+              "required": ["outcome", "target", "how"],
+              "properties": {
+                "outcome": { "enum": ["NONE", "BLOCKS", "REQUIRES-REDESIGN", "ACCEPTED-COST", "MITIGATED", "UNKNOWN"] },
+                "target": { "type": "string" },
+                "how": { "type": "string" },
+                "changed": { "type": "string" },
+                "accepted_by": { "type": "string" }
+              }
+            }
+          },
+          "assumptions": { "type": "array", "items": { "type": "string", "pattern": "^A-[0-9]{3}$" } },
+          "depends_on": { "type": "array", "items": { "type": "string", "pattern": "^D-[0-9]{3}$" } },
+          "contradicts": { "type": "array", "items": { "type": "string", "pattern": "^C-[0-9]{3}$" } },
+          "core_check": { "type": "string", "pattern": "^core-check-[0-9]{3}$" },
+          "supersedes": { "type": ["string", "null"], "pattern": "^D-[0-9]{3}$" },
+          "superseded_by": { "type": ["string", "null"], "pattern": "^D-[0-9]{3}$" },
+          "reversal_cost": { "enum": ["low", "medium", "high", "effectively-irreversible"] },
+          "owner": { "type": "string" }
+        }
+      }
+    },
+    "tradeoffs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "core_link", "classification", "candidates", "hinge_axis", "recommendation"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^T-[0-9]{3}$" },
+          "question": { "type": "string" },
+          "core_link": { "type": "string" },
+          "classification": { "enum": ["BEFORE-BUILD", "BEFORE-SHIP", "DEFER-WITH-OWNER"] },
+          "candidates": { "type": "array", "minItems": 2 },
+          "dominated": { "type": "array" },
+          "hinge_axis": { "type": "string" },
+          "recommendation": { "enum": ["A", "B", "escalate"] },
+          "confidence": { "enum": ["high", "medium", "low"] },
+          "escalation_id": { "type": ["string", "null"], "pattern": "^ESC-[0-9]{2}$" }
+        }
+      }
+    },
+    "escalations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "options", "default_if_unanswered"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^ESC-[0-9]{2}$" },
+          "question": { "type": "string" },
+          "options": { "type": "array", "minItems": 2 },
+          "our_read": { "type": "string" },
+          "default_if_unanswered": { "type": "string" },
+          "risk_of_default": { "type": "string" },
+          "provisional": { "type": "boolean" }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "question", "owner", "deadline_or_trigger", "blocking_class", "containment_default"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^U-[0-9]{3}$" },
+          "question": { "type": "string" },
+          "why_unanswered": { "type": "string" },
+          "owner": { "type": "string" },
+          "deadline_or_trigger": { "type": "string" },
+          "blocking_class": { "enum": ["BEFORE-BUILD", "BEFORE-SHIP", "DEFER"] },
+          "containment_default": { "type": "string" },
+          "evidence_to_close": { "type": "string" },
+          "decisions_affected": { "type": "array" }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "assumption", "falsifier"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^A-[0-9]{3}$" },
+          "assumption": { "type": "string" },
+          "evidence": { "type": "array" },
+          "falsifier": { "type": "string" },
+          "when_tested": { "type": "string" },
+          "decisions_affected": { "type": "array" },
+          "containment": { "type": "string" }
+        }
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "competing_claims", "status", "owner"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^C-[0-9]{3}$" },
+          "kind": { "enum": ["decision-vs-decision", "seed-vs-seed", "seed-vs-derivation", "assumption-vs-evidence"] },
+          "parties": { "type": "array" },
+          "competing_claims": { "type": "array", "minItems": 2 },
+          "evidence": { "type": "array" },
+          "affected_decisions": { "type": "array" },
+          "detected_by": { "type": "string" },
+          "owner": { "type": "string" },
+          "containment_default": { "type": "string" },
+          "status": { "enum": ["OPEN", "RESOLVED", "ACCEPTED-COST", "SUPERSEDED"] },
+          "resolution": { "type": "string" },
+          "resolved_date_or_trigger": { "type": "string" }
+        }
+      }
+    },
+    "core_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "branch", "user_class", "jtbd", "why_needed", "result", "delta"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^core-check-[0-9]{3}$" },
+          "branch": { "type": "string" },
+          "user_class": { "type": "string" },
+          "jtbd": { "type": "string" },
+          "why_needed": { "type": "string" },
+          "result": { "enum": ["keep", "simplify", "prune", "escalate"] },
+          "delta": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "invariant_test_map": {
+      "type": "array",
+      "description": "One row per BEFORE-BUILD decision. §7.6 fails the gate on any BEFORE-BUILD decision id absent here.",
+      "items": {
+        "type": "object",
+        "required": ["decision_id", "invariant_id", "test"],
+        "properties": {
+          "decision_id": { "type": "string", "pattern": "^D-[0-9]{3}$" },
+          "invariant_id": { "type": "string", "pattern": "^IV-[0-9]{3}$" },
+          "invariant": { "type": "string" },
+          "test": { "type": "string" },
+          "level": { "enum": ["unit", "integration", "e2e"] }
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "The §7.6 validator is a script over this document. A JSON Schema validates shape; referential integrity (dangling ids, 'every BEFORE-BUILD decision in the test map', 'open contradictions listed in _index.md') needs the script. Ship both: this file for shape, and a validator for the cross-references."
+    }
+  }
+}
