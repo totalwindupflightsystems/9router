@@ -320,6 +320,91 @@ Ollama itself must be running for those models to answer. Every other provider n
 its own real credential in the same `POST /api/providers` call — no keyless
 registration path exists for them.
 
+#### Wiring a local OpenAI-compatible endpoint (LM Studio, Ollama `/v1`, llama.cpp…)
+
+**A provider is two objects, not one.** A **provider node**
+(`POST /api/provider-nodes`) declares *where* a compatible upstream lives — a
+user-defined `prefix`, an `apiType`, and a `baseUrl`. A **provider connection**
+(`POST /api/providers`) holds the *credential*. Chat traffic only works when both
+exist and the connection's `provider` field is the node's `id`
+(`src/app/api/providers/route.js:131-141` copies the node's `prefix` / `apiType` /
+`baseUrl` onto the connection; `src/sse/services/model.js:45-49` resolves
+`<prefix>/<model>` back to the node id at request time).
+
+Two obvious routes dead-end — worth knowing before you spend time on them:
+
+- `POST /api/providers` with `{"provider":"ollama-local","baseUrl":"http://localhost:1234/v1"}`
+  answers **201** but `baseUrl` is only honored by the Ollama-native executor
+  (`/api/chat`). An OpenAI-shaped upstream behind `ollama-local` answers HTTP 200
+  with **0 tokens** — a silent empty success, not a protocol error. Only use
+  `ollama-local` for a real Ollama server; send every OpenAI-shaped upstream
+  (LM Studio, llama.cpp, vLLM, Ollama's own `/v1`) through the node flow below.
+- `{"provider":"openai-compatible-chat"}` answers
+  `404 {"error":"OpenAI Compatible node not found"}` — a compatible provider id
+  **is** a node id, so a type or prefix alone is not a provider.
+
+Worked example: LM Studio (or any OpenAI-shaped server) on `http://localhost:1234/v1`.
+
+**1. Create the node** — this call stores no credential:
+
+```bash
+curl -s -X POST http://localhost:20128/api/provider-nodes \
+  -H "Content-Type: application/json" \
+  -d '{"name":"LM Studio Local","prefix":"lmstudio","apiType":"chat","baseUrl":"http://localhost:1234/v1","type":"openai-compatible"}'
+# → 201 {"node":{"id":"openai-compatible-chat-412551d5-…","type":"openai-compatible",
+#      "name":"LM Studio Local","prefix":"lmstudio","apiType":"chat",
+#      "baseUrl":"http://localhost:1234/v1","createdAt":"…","updatedAt":"…"}}
+```
+
+The generated `id` is `openai-compatible-<apiType>-<uuid>` — read it out of the
+response (`GET /api/provider-nodes` lists every node: `{"nodes":[…]}`). Fields the
+route accepts (`src/app/api/provider-nodes/route.js:35-60`):
+
+| Field | Required | Values |
+| --- | --- | --- |
+| `name` | yes | free text — 400 `Name is required` |
+| `prefix` | yes | the model-id namespace, e.g. `lmstudio` → `lmstudio/<model>` — 400 `Prefix is required`. Must not collide with a built-in provider id/alias (`src/sse/services/model.js:12-17`) |
+| `type` | no | `openai-compatible` (default), `anthropic-compatible`, `custom-embedding` |
+| `apiType` | for `openai-compatible` | `chat` (Chat Completions) or `responses` (Responses API) — anything else: 400 `Invalid OpenAI compatible API type` |
+| `baseUrl` | no | defaults to `https://api.openai.com/v1`; for a local server give the OpenAI base **including `/v1`** |
+
+**2. Add the credential connection** — `provider` is the `id` from step 1:
+
+```bash
+curl -s -X POST http://localhost:20128/api/providers \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"openai-compatible-chat-412551d5-…","apiKey":"lm-studio","name":"LM Studio Local"}'
+# → 201 {"connection":{"id":"0db751f6-…","provider":"openai-compatible-chat-412551d5-…",
+#      "authType":"apikey","name":"LM Studio Local","priority":1,"isActive":true,
+#      "providerSpecificData":{"prefix":"lmstudio","apiType":"chat",
+#      "baseUrl":"http://localhost:1234/v1","nodeName":"LM Studio Local",…}}}
+```
+
+`apiKey` is required here even for a server that ignores it — the connection is what
+gives the provider a credentials record, and any non-empty placeholder works (only
+`ollama-local` is exempt, `src/app/api/providers/route.js:119-121`). Repeat this call
+with different keys to pool several connections for the same node.
+
+**3. Verify the wiring** — with the API key your CLI tools authenticate with
+(`POST /api/keys`):
+
+```bash
+curl -s http://localhost:20128/v1/models -H "Authorization: Bearer sk-…"
+# → {"object":"list","data":[{"id":"lmstudio/qwen3.5-4b","owned_by":"lmstudio",…}, …]}
+
+curl -s http://localhost:20128/v1/chat/completions \
+  -H "Authorization: Bearer sk-…" -H "Content-Type: application/json" \
+  -d '{"model":"lmstudio/qwen3.5-4b","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
+```
+
+The node is live as soon as its models appear as `<prefix>/<model-id>`.
+
+> ⚠️ **`No active credentials for provider: openai-compatible-chat-<uuid>` (HTTP 404).**
+> The node exists but has **no credential connection** — step 1 alone is not enough.
+> Re-run step 2 with `provider` set to that exact id. Note the 404 shape, not a 401:
+> to the client this looks like a missing model, which is why the trap is easy to
+> misread as a prefix/typo problem.
+
 ---
 
 ## 🧪 Testing
