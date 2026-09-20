@@ -31,27 +31,30 @@ _validate-output.txt           that validator's output: PASS, with counts
 
 ## Read this before running the validator
 
-`tools/validate.py` is real — it performs the structural, referential, and coverage checks
-§7.6 requires (id collisions, dangling `depends_on`/`assumptions`/`core_check`/`contradicts`
-references, unknown ownership, closed contradictions carrying resolutions, open
-contradictions present in `_index.md`, BEFORE-BUILD decisions present in the invariant→test
-map, and exact 44-domain coverage). **Its input `registers.json` is not in this directory** —
-that JSON export was too large to keep beside the skill and was dropped when the run's
-scratch tree was cleaned. So `python3 tools/validate.py` here fails on a missing input, not
-on a failed check.
+`scripts/validate.py` **in the skill directory** is the runnable §7.6 gate. Point it at any
+design tree:
 
-What proves the validator ran and passed on the real run is `_validate-output.txt`:
+```bash
+python3 <skill-dir>/scripts/validate.py <design-dir>    # exit 0 = PASS, 1 = FAIL
+```
+
+It reads the markdown registers directly (YAML blocks, markdown tables, and headed escalation
+envelopes) — no JSON export needed, stdlib only. Run against this directory it returns:
 
 ```json
 { "status": "PASS",
-  "counts": { "assumptions": 8, "contradictions": 1, "core_checks": 9, "decisions": 24,
-              "escalations": 2, "tradeoffs": 9, "unknowns": 5 },
-  "canonical_domain_files": 44, "errors": [] }
+  "counts": { "decisions": 24, "tradeoffs": 9, "escalations": 2, "unknowns": 5,
+              "assumptions": 8, "contradictions": 1, "core_checks": 9, "domain_files": 44 },
+  "errors": [] }
 ```
 
-To make it runnable again, rebuild `registers.json` from the YAML blocks in
-`03-decisions.md` and the other register files, or export it directly on the next real run —
-and keep the export this time. Treat a validator you cannot run as a claim, not a check.
+Those counts are independently reproduced by the run's own validator output in
+`_validate-output.txt` (kept here as the run's evidence). Two independent readers agreeing on
+every count is the check; one reader agreeing with itself is not.
+
+The validator was also negative-tested: deleting a domain file, stripping a decision's
+alternatives, injecting a dangling `depends_on`, and duplicating an id each produce a FAIL with
+the right named error — so a PASS here is evidence, not a tautology.
 
 ## What the run established (why it is worth reading)
 

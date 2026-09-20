@@ -1450,13 +1450,22 @@ fails on:
 - any domain absent from the artifact entirely (a NOT-REACHED row is required, not silence).
 
 The validator is the difference between an artifact and shelfware for an agent-fleet
-consumer: a downstream worker lints this file before touching the project. **A starter
-`matrix.schema.json` ships beside this skill** — copy it into `design/`, then extend the
-register objects for the project; keep the id patterns and the required fields or the checks
-below cannot run. The schema validates *shape*; referential integrity (dangling ids, "every
-BEFORE-BUILD decision appears in the test map", "every OPEN contradiction is listed in
-`_index.md`") needs the small script over the serialized registers (`design/*.md` YAML blocks,
-or a JSON export beside them). Ship both. The report names every failure with its row id.
+consumer: a downstream worker lints this file before touching the project. **A runnable gate
+ships beside this skill:**
+
+```bash
+python3 <skill-dir>/scripts/validate.py <design-dir>     # exit 0 = PASS, 1 = FAIL
+```
+
+It reads the markdown registers directly — YAML blocks, markdown tables, and the headed
+escalation envelopes — so no JSON export is required, and it uses only the standard library.
+Copy it into the run's tooling or call it from where it lives; the report names every failure
+with its row id. A **starter `matrix.schema.json` also ships beside this skill** — copy it
+into `design/` and extend the register objects for the project, keeping the id patterns and
+required fields or the checks cannot run. The schema validates *shape*; `validate.py` covers
+the referential and coverage rules (dangling ids, "every BEFORE-BUILD decision appears in the
+test map", "every OPEN contradiction is listed in `_index.md`", exact 44-domain coverage).
+Use both. Treat a validator you cannot run as a claim, not a check.
 
 ### 7.7 Confidentiality
 
