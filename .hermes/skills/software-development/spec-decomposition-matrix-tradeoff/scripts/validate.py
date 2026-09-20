@@ -305,7 +305,16 @@ def main():
     # ---- domain coverage --------------------------------------------------
     ddir = os.path.join(base, "02-domains")
     files = sorted(f for f in os.listdir(ddir) if f.endswith(".md")) if os.path.isdir(ddir) else []
-    nums = {f[:4] for f in files if re.match(r"^4\.\d{2}", f)}
+    # Domain files are `4.NN-<slug>.md`. Normalise an unpadded `4.N` spelling to the same
+    # key rather than failing it: the skill's own section headings read `4.5` while filenames
+    # are padded, so a run that copies the heading form has still produced that domain, and
+    # failing it on padding would be a false positive. The gate fails on substance — a domain
+    # with no file at all — not on a format variant the skill itself models.
+    nums = set()
+    for f in files:
+        m = re.match(r"^4\.(\d{1,2})[-.]", f)
+        if m:
+            nums.add(f"4.{int(m.group(1)):02d}")
     expected = {f"4.{i:02d}" for i in range(1, 45)}
     missing = sorted(expected - nums)
     if missing:

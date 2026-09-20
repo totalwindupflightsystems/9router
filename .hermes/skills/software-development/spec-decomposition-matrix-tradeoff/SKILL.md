@@ -1,7 +1,7 @@
 ---
 name: spec-decomposition-matrix-tradeoff
 description: Use when turning vague intent into an exhaustive design matrix — cascading questions, break-checks, explicit tradeoffs — before PRD or build.
-version: 1.1.0
+version: 1.2.0
 license: MIT
 metadata:
   hermes:
@@ -525,6 +525,19 @@ not a quota.
 Every domain below gets: a triage score, a ring floor from the score, a **battery** (run it,
 answer it), and a **required output** (what the answers must produce). Domains marked ⊕
 carry a ring-5 floor unconditionally.
+
+**The grid is exactly 44 domains (4.1–4.44 as section numbers) and every one gets a file.**
+The coverage gate (§7.6) counts files in `design/02-domains/` against the canonical set
+`4.01`–`4.44`: a run that interrogates 43 domains and leaves the 44th silent fails, because
+silence and "this does not apply" are different claims. A domain that genuinely does not
+apply still gets its file, carrying `NOT-REACHED` with a reason, an owner, a trigger, and a
+containment default.
+
+**Name the files canonically `4.NN-<slug>.md`, zero-padded to two digits.** The heading above
+says *section* `4.5`; its *file* is `4.05-data.md`. `### 4.10 Build pipeline` is
+`4.10-build-pipeline.md`. Both exist because padding keeps the glob and the coverage count
+deterministic — unpadded `4.1` and padded `4.10` sort and match inconsistently. Section
+references in this document stay unpadded (`§4.5`); filenames are always padded.
 
 Capture per domain, in one record: answers, decisions (with ids), unknowns, break-check
 results, the terminating ring, and the required output. A domain with a heading and no
@@ -1323,8 +1336,10 @@ runs that share a working directory.
 ```
 design/00-seed.md              owner's intent verbatim, non-negotiables, hard/soft constraints
 design/01-scope.md             core statement, IN list, OUT list with reasons, unknown scope
-design/02-domains/             one file per domain: answers, decisions, unknowns, ring depth,
-                               required output. NOT-REACHED domains carry reason + owner
+design/02-domains/             one file per domain, named 4.NN-<slug>.md (NN = 01..44,
+                               zero-padded): answers, decisions, unknowns, ring depth,
+                               required output. NOT-REACHED domains carry reason + owner.
+                               All 44 exist, or the coverage gate fails
 design/03-decisions.md         the decision register (§7.3)
 design/04-break-report.md      the pairwise walk: conflicts, outcomes (§5.2), supersession
                                chains, what the pass modified
@@ -1447,7 +1462,8 @@ fails on:
 - any dangling id reference (`supersedes`, `superseded_by`, `depends_on`, `assumptions`,
   `core_check`, `escalation_id`, `contradicts`, `parties`, `affected_decisions`);
 - any branch that terminated below its floor without a `fixed-point-below-floor` record;
-- any domain absent from the artifact entirely (a NOT-REACHED row is required, not silence).
+- any domain absent from the artifact entirely — coverage is exact over `design/02-domains/`
+  files named `4.NN-<slug>.md` for N = 01..44 (a NOT-REACHED row is required, not silence).
 
 The validator is the difference between an artifact and shelfware for an agent-fleet
 consumer: a downstream worker lints this file before touching the project. **A runnable gate
