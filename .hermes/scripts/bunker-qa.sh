@@ -1202,7 +1202,7 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
     *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
   esac
 elif [ -n "\$BIN" ]; then
-  UI_PORTS=\${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8767 9000}
+  UI_PORTS=\${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8766 8767 9000}
   UI_BINS="\$BIN"
   case "\$BIN" in
     "go run ./cmd/"*)
