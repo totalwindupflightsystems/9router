@@ -363,7 +363,9 @@ detect_upgrade_inputs() {
   return 0
 }
 
-# ─── sync_repo <repo> <proj> — tar the tree to ~/qa-<proj> on the agent ───
+# ─── sync_repo <repo> <proj> — tar the tracked tree to ~/qa-<proj> ───
+# The payload comes from git's index plus untracked files that are not ignored;
+# this honours the source repo's .gitignore instead of walking the whole workdir.
 # Verdict comes from the REMOTE's SYNC-OK echo, not the local tar's exit code.
 # GNU tar exits non-zero on "file changed as we read it" even with
 # --warning=no-file-changed, and with `set -o pipefail` that would abort the
@@ -373,19 +375,47 @@ detect_upgrade_inputs() {
 # tracked-but-heavy DATA dirs (generated images, fixtures) would stall the SSH
 # pipe past the 1800s agent_ssh timeout (proven wojons-mythos 2026-08-31:
 # 6.4G repo / 845M projects/ + 482M packages/backend/projects at ~600KB/s).
+# BUNKER_QA_SYNC_MAX_BYTES: source-file byte guard, default 300 MB.
 # Returns 1 on failure with the remote's last 2 lines in SYNC_ERR.
 sync_repo() {
   local repo="$1" proj="$2"
   local sync_excludes="${BUNKER_QA_SYNC_EXCLUDES:-}"
+  local sync_max="${BUNKER_QA_SYNC_MAX_BYTES:-314572800}"
+  local sync_list sync_bytes sync_out sync_ok sync_oversize
   local -a sync_excl=()
   if [ -n "$sync_excludes" ]; then read -ra sync_excl <<< "$sync_excludes"; fi
-  local sync_out sync_ok
-  sync_out=$(tar --warning=no-file-changed -C "$repo" --exclude='.git' --exclude='node_modules' --exclude='target' --exclude='.next' \
-      --exclude='.pnpm-store' --exclude='.turbo' --exclude='.cache' --exclude='dist' --exclude='build' --exclude='coverage' \
-      --exclude='*.tsbuildinfo' --exclude='*.tsbuildinfo.json' \
-      "${sync_excl[@]}" \
-      -cf - . |
+
+  sync_list=$(mktemp) || { SYNC_ERR='SYNC-LIST-ERROR: could not create file list'; return 1; }
+  if ! git -C "$repo" ls-files -z --cached --others --exclude-standard > "$sync_list"; then
+    SYNC_ERR="SYNC-LIST-ERROR: git ls-files failed for $repo"
+    rm -f "$sync_list"
+    return 1
+  fi
+  case "$sync_max" in
+    ''|*[!0-9]*)
+      SYNC_ERR="SYNC-LIMIT-ERROR: BUNKER_QA_SYNC_MAX_BYTES is not an integer: $sync_max"
+      rm -f "$sync_list"
+      return 1
+      ;;
+  esac
+  if ! sync_bytes=$(cd "$repo" && du -cb --files0-from="$sync_list" | awk 'END {print $1}'); then
+    SYNC_ERR="SYNC-SIZE-ERROR: could not measure payload for $repo"
+    rm -f "$sync_list"
+    return 1
+  fi
+  sync_bytes=${sync_bytes:-0}
+  if [ "$sync_bytes" -gt "$sync_max" ]; then
+    sync_oversize="SYNC-OVERSIZE: $sync_bytes > $sync_max (set BUNKER_QA_SYNC_MAX_BYTES to override)"
+    printf '%s\n' "$sync_oversize" >&2
+    SYNC_ERR="$sync_oversize"
+    rm -f "$sync_list"
+    return 1
+  fi
+
+  sync_out=$(tar --warning=no-file-changed --null --verbatim-files-from -C "$repo" \
+      "${sync_excl[@]}" -T "$sync_list" -cf - |
     agent_ssh "mkdir -p ~/qa-$proj && tar -C ~/qa-$proj -xf - && cd ~/qa-$proj && git init -q && git -c user.name='qa-bot' -c user.email='qa@bunker' add -A && git -c user.name='qa-bot' -c user.email='qa@bunker' commit -q -m 'qa-sync' && echo SYNC-OK" 2>&1)
+  rm -f "$sync_list"
   sync_ok=$(printf '%s' "$sync_out" | grep -c 'SYNC-OK')
   if [ "$sync_ok" -eq 0 ]; then
     SYNC_ERR=$(printf '%s' "$sync_out" | tail -2)
