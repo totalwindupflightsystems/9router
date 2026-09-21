@@ -734,6 +734,7 @@ if command -v make >/dev/null 2>&1; then
   cell toolchain-bootstrap OK "make available (\${MAKE_BIN:+bootstrapped GNU make into \$MAKE_BIN}\${MAKE_BIN:-preinstalled}) — \$(make --version 2>/dev/null | head -1)"
 elif [ -f Makefile ]; then
   cell toolchain-bootstrap INFO "no make on agent and user-space bootstrap failed — make-based cells will grade ENV-BLOCKED (\$(tail -2 \$LOGD/make.log 2>/dev/null | tr '\n' ' '))"
+fi
 # FIX 1 · system-dep probe (QA-WARPFS-9 rework 3, 2026-09-19): the zig leg above
 # supplies a C toolchain, but a rust repo ALSO links against system libraries
 # whose DEVELOPMENT files ship in separate packages — and nothing in user space
