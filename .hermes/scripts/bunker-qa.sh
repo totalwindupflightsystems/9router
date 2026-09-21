@@ -730,11 +730,15 @@ fi
 # v3 (same tick, battery 23ae94ab kept-agent autopsy): configure failed on bare agents with "no acceptable ld
 # found in \$PATH" (no binutils) — the zig loop now also emits an ld wrapper (zig ld.lld), and configure/build.sh
 # output is captured into make.log (the inner >/dev/null redirects made every failure an EMPTY, undiagnosable log).
+# v4 (same tick, battery 7561ba71): configure then died on "Something went wrong bootstrapping makefile fragments
+# for automatic dependency tracking" — configure wants an already-working make; the make-4.4.1 bootstrap DOES NOT
+# need one (build.sh is self-contained, proven locally: make built + toy target OK). So: --disable-dependency-tracking
+# plus an exit-code-tolerant configure so build.sh always runs, with configure's rc echoed into make.log.
 MAKE_BIN=""
 if ! command -v make >/dev/null 2>&1; then
   if [ ! -x ~/tools/make/bin/make ]; then
     mkdir -p ~/tools/make/build
-    ( cd ~/tools/make/build && curl -sL -o make.tar.gz '$MAKE_URL' && tar -xzf make.tar.gz && cd make-4.4.1 && bash ./configure --disable-nls && bash ./build.sh && mkdir -p ~/tools/make/bin && cp make ~/tools/make/bin/make ) >\$LOGD/make.log 2>&1
+    ( cd ~/tools/make/build && curl -sL -o make.tar.gz '$MAKE_URL' && tar -xzf make.tar.gz && cd make-4.4.1 && { bash ./configure --disable-nls --disable-dependency-tracking || echo "configure rc=\$? — GNU make has no make yet to bootstrap its dependency-tracking fragments; build.sh below does the real bootstrap"; } && bash ./build.sh && mkdir -p ~/tools/make/bin && cp make ~/tools/make/bin/make ) >\$LOGD/make.log 2>&1
   fi
   if [ -x ~/tools/make/bin/make ]; then
     export PATH="\$HOME/tools/make/bin:\$PATH"
