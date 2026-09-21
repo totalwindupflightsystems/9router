@@ -1160,3 +1160,44 @@ tasks:
   status: complete
   created_at: '2026-09-20T02:59:51.186286+00:00'
   completed_at: '2026-09-20T04:27:55.198742+00:00'
+- id: DF-9ROUTER-34
+  title: Combo model-scoped fallback
+  criteria:
+  - A combo whose first model returns a model-scoped 4xx (e.g. 400 model_not_found)
+    tries its NEXT model and answers the client with the next model's 200, instead
+    of returning the first model's raw 400
+  - 'Account-scoped fallback semantics are unchanged: tests/unit/account-fallback-4xx.test.js
+    still passes (401/402/403/404/429 still fall back; request-scoped 400 still does
+    not cool the account)'
+  status: complete
+  created_at: '2026-09-20T19:38:18.636146+00:00'
+  completed_at: '2026-09-20T20:08:33.999783+00:00'
+- id: DF-9ROUTER-35
+  title: Compatible node model listing
+  criteria:
+  - A freshly created openai-compatible provider node whose upstream advertises ~N
+    model ids exposes those ids through GET /v1/models (prefix + upstream id) with
+    no manual catalog step
+  - Default /v1/models LLM filtering and the per-kind lists keep their existing behavior
+  status: complete
+  created_at: '2026-09-20T19:38:19.034282+00:00'
+  completed_at: '2026-09-20T20:57:25.508559+00:00'
+- id: DF-9ROUTER-36
+  title: Round-robin default disclosure and toggle
+  criteria:
+  - README does not claim round-robin is the active default; it states fill-first
+    is the default and documents how to enable per-provider rotation
+  - README-claimed deployment artifacts still parse (docker compose config exits 0)
+  status: complete
+  created_at: '2026-09-20T19:38:19.243437+00:00'
+  completed_at: '2026-09-20T20:10:25.553611+00:00'
+- id: DF-9ROUTER-37
+  title: provider-nodes POST validation
+  criteria:
+  - POST /api/provider-nodes with an unsupported or missing apiType returns 400 naming
+    the allowed set {chat,responses}
+  - 'The route never invents a prefix from the type string: a supplied prefix is stored
+    verbatim, and an omitted/blank prefix still returns 400 Prefix is required'
+  status: complete
+  created_at: '2026-09-20T19:38:19.441889+00:00'
+  completed_at: '2026-09-20T20:11:57.309666+00:00'
