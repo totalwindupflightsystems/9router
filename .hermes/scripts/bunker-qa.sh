@@ -265,17 +265,43 @@ preflights() {
   fi
 }
 
-# ─── detect_cmds <repo> <agent> → DETECT_INSTALL / DETECT_NATIVE / DETECT_CI ───
+# ─── detect_cmds <repo> <agent> → DETECT_INSTALL / DETECT_NATIVE / DETECT_CI / DETECT_BIN ───
 # Extracted verbatim from run() (2026-09-15) so run() and launch() can never
 # drift on the command set they ship to the agent. Globals, because
 # build_remote_script() bakes them (and $agent) into the generated script.
+# DETECT_BIN (QA-9ROUTER-22, 2026-09-21) is the HOST-side mirror of the start
+# command the generated script re-detects on the agent AFTER the install (the
+# agent-side ladder in build_remote_script is authoritative at runtime because
+# start scripts may materialize console shims only once deps exist); DETECT_BIN
+# exists so tests and callers can assert the ladder without spawning an agent.
+# KEEP THE TWO LADDERS IN SYNC.
 detect_cmds() {
   local repo="$1" agent="$2"
+  local tpkg="" start_script="" gofirst=""
   # escape hatches when the auto-detect guesses wrong (e.g. suite needs extras)
   DETECT_INSTALL="${BUNKER_QA_INSTALL_CMD:-}"
   if [ -z "$DETECT_INSTALL" ]; then
   if [ -f "$repo/pnpm-lock.yaml" ]; then DETECT_INSTALL="corepack enable 2>/dev/null; corepack prepare --activate 2>/dev/null; pnpm install --frozen-lockfile"
-  elif [ -f "$repo/package.json" ]; then DETECT_INSTALL="npm ci --ignore-scripts --no-audit --no-fund"
+  elif [ -f "$repo/package.json" ]; then
+    # QA-9ROUTER-26 (2026-09-21): the old branch installed ONLY the root
+    # package, so a repo with an INDEPENDENT test package (tests/ or test/
+    # with its own package.json declaring dependencies/devDependencies —
+    # 9router pins vitest ^4.0.0 in tests/ and documents the two-step
+    # `npm install && cd tests && npm install`) never got its runner
+    # installed: the suite died with "tests/node_modules is missing — vitest
+    # cannot be resolved" and chaos-disconnect graded that rc as OK "fails
+    # fast on disconnect" (a false PASS on a suite that never ran). Detect an
+    # independent test package and install it too, keeping the repo's own npm
+    # flags for both steps. The generated script runs the install with cwd at
+    # the repo root (fresh-install/upgrade cells wrap it in a subshell), so
+    # the relative `cd` is correct.
+    DETECT_INSTALL="npm ci --ignore-scripts --no-audit --no-fund"
+    for tpkg in tests test; do
+      if [ -f "$repo/$tpkg/package.json" ] && jq -e '(.dependencies // {}) + (.devDependencies // {}) | length > 0' "$repo/$tpkg/package.json" >/dev/null 2>&1; then
+        DETECT_INSTALL="npm ci --ignore-scripts --no-audit --no-fund && cd $tpkg && npm ci --ignore-scripts --no-audit --no-fund"
+        break
+      fi
+    done
   elif [ -f "$repo/go.mod" ]; then DETECT_INSTALL="go build ./..."
   elif [ -f "$repo/pyproject.toml" ]; then DETECT_INSTALL="pip install -e .[dev] 2>/dev/null || pip install -e ."
   elif [ -f "$repo/Cargo.toml" ]; then DETECT_INSTALL="cargo build --workspace"
@@ -342,6 +368,44 @@ detect_cmds() {
   fi
   DETECT_NATIVE="$native_cmd"
   DETECT_CI="$ci_cmd"
+  # QA-9ROUTER-22 (2026-09-21): host-side mirror of the agent-side start
+  # command ladder (build_remote_script). Same precedence: custom-server.js >
+  # server.js > start.sh > package.json .scripts.start > src/index.js (only if
+  # the file exists) > empty. Never a bare guess — "node src/index.js" for a
+  # package.json repo whose src/index.js does not exist is what made
+  # chaos-corruption/chaos-errorpath grade vacuous rc=1 verdicts on 9router.
+  DETECT_BIN=""
+  if [ -f "$repo/custom-server.js" ]; then
+    DETECT_BIN="node custom-server.js"
+  elif [ -f "$repo/server.js" ]; then
+    DETECT_BIN="node server.js"
+  elif [ -f "$repo/start.sh" ] && [ -x "$repo/start.sh" ]; then
+    DETECT_BIN="sh start.sh"
+  elif [ -f "$repo/package.json" ]; then
+    start_script="$(jq -r '.scripts.start // ""' "$repo/package.json" 2>/dev/null)"
+    case "$start_script" in
+      # npm lifecycle no-ops are not a start command; and a start script that
+      # is literally "node server.js" is exactly what the server.js arm above
+      # already covers (keeps one canonical form instead of duplicating it).
+      ""|"echo "*|"exit "*|":") : ;;
+      "node server.js") DETECT_BIN="node server.js" ;;
+      *) DETECT_BIN="npm start" ;;
+    esac
+    # No real start script? Fall through the ladder (it is not the end of it):
+    # src/index.js is the LAST resort and only when the file actually exists —
+    # the old code guessed it for EVERY package.json repo (9router has none,
+    # so both chaos cells started "Cannot find module" and graded the refusal).
+    if [ -z "$DETECT_BIN" ] && [ -f "$repo/src/index.js" ]; then
+      DETECT_BIN="node src/index.js"
+    fi
+  elif [ -f "$repo/src/index.js" ]; then
+    DETECT_BIN="node src/index.js"
+  fi
+  # Mirror the agent-side interpreter-resolvability guard: an interpreter that
+  # cannot be resolved here means "not observable", same as empty.
+  if [ -n "$DETECT_BIN" ] && ! command -v "${DETECT_BIN%% *}" >/dev/null 2>&1; then
+    DETECT_BIN=""
+  fi
   detect_upgrade_inputs "$repo"
 }
 
@@ -569,6 +633,23 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
   grep -qE 'exec: "[a-z][a-z-]*": executable file not found in [$]PATH' "\$gf" 2>/dev/null || return 1
   grep -qE -- '--- FAIL|^FAIL' "\$gf" 2>/dev/null || return 1
   true
+}
+# suite_deps_missing — is this suite rc a MISSING-TEST-DEPS refusal instead of a
+# product result? (QA-9ROUTER-26, 2026-09-21.) 9router's own `npm test` entry
+# runs a preflight (scripts/check-test-deps.mjs) that exits 1 with
+#   9router: tests/node_modules is missing — vitest cannot be resolved.
+# when the independent tests/ package was never installed (tests/package.json
+# pins vitest and has its OWN dependency tree). Before the two-step install
+# detection (detect_cmds, QA-9ROUTER-26) every repo of that shape hit exactly
+# this on a fresh agent, and chaos-disconnect graded the resulting rc=1 as
+# OK "fails fast on disconnect" — a FALSE PASS on a suite that NEVER RAN, the
+# same class build_incomplete/go_suite_env_failure already handle: an infra
+# refusal upstream of the chaos condition is never a product verdict.
+suite_deps_missing_cause() { # <logfile> — print the line proving deps were missing
+  grep -m1 -E 'tests?/node_modules is missing|vitest cannot be resolved|check-test-deps\.mjs' "\$1" 2>/dev/null | cut -c1-220
+}
+suite_deps_missing() { # <logfile> — 0 when the log carries the missing-test-deps signature
+  [ -n "\$(suite_deps_missing_cause "\$1")" ]
 }
 # corr_grade — pure chaos-corruption decision. The caller owns truncation,
 # restart, and restoration; this function only grades the observed evidence.
@@ -815,7 +896,39 @@ else cell fresh-install FAIL "rc=\$inst_rc: \$(tail -2 \$LOGD/inst.log)"; fi
 # must also be resolvable, so callers say "not observable" instead of failing
 # on a 127.
 BIN=""
-if [ -f package.json ]; then BIN="node src/index.js"
+# QA-9ROUTER-22 (2026-09-21): the old first arm guessed BIN="node src/index.js"
+# for EVERY repo with a root package.json, unconditionally — 9router has no
+# src/index.js, so chaos-corruption and chaos-errorpath both started
+# "Error: Cannot find module .../src/index.js" and graded the refusal as the
+# app's verdict (vacuous: it asserts nothing about the app). Detection is now
+# OBSERVABLE: a start command is claimed only when the file it names exists in
+# the tree (the project's own install has already run at this point), with
+# custom-server.js > server.js > start.sh > package.json .scripts.start >
+# src/index.js (last resort, only if present) > empty. Empty = "not
+# observable", the state the chaos cells already grade INFO/N/A instead of a
+# product verdict.
+if [ -f package.json ]; then
+  if [ -f custom-server.js ]; then BIN="node custom-server.js"
+  elif [ -f server.js ]; then BIN="node server.js"
+  elif [ -f start.sh ] && [ -x start.sh ]; then BIN="sh start.sh"
+  else
+    # package.json .scripts.start is a real start command only when it is not
+    # an npm-lifecycle no-op (echo/exit/:). A script that is literally
+    # "node server.js" is kept in the canonical "node server.js" form the
+    # server.js arm above already produces (one form, one interpreter guard).
+    BIN=\$(node -e 'const s=(require("./package.json").scripts||{}).start||""; process.exit(s && !/^(echo|exit)\\b|^:\\s*\$/.test(s.trim()) ? 0 : 1)' 2>/dev/null && printf npm_start || true)
+    if [ "\$BIN" = "npm_start" ]; then
+      if [ "\$(node -e 'process.stdout.write(((require("./package.json").scripts||{}).start||"").trim())' 2>/dev/null)" = "node server.js" ]; then
+        BIN="node server.js"
+      else
+        BIN="npm start"
+      fi
+    else
+      BIN=""
+    fi
+    # LAST resort: src/index.js only when the file actually exists.
+    if [ -z "\$BIN" ] && [ -f src/index.js ]; then BIN="node src/index.js"; fi
+  fi
 elif [ -f go.mod ]; then
   # QA-OFF-BY-ONE-15 (2026-09-17): the old detection hardcoded BIN="go run ." for
   # any go.mod repo — off-by-one has NO root main package (entrypoint cmd/…), so
@@ -1029,10 +1142,34 @@ else cell docker-deploy N/A "no compose file"; fi
 # an answering port kills unrelated socket-holders (measured: it killed a
 # process that merely HELD A CONNECTION to :5173).
 if [ -f package.json ] && grep -qE '"dev"|"start"' package.json; then
+  # QA-9ROUTER-21 (2026-09-21): the old probe curled / with NO -L and accepted
+  # only 200, so any redirect-first UI graded a guaranteed false FAIL —
+  # 9router serves / -> 307 /dashboard -> 307 /login -> 200 (auth-guard
+  # redirect-first routing is the app's normal shape) and the cell recorded
+  # ui-probe FAIL "UI not serving (http=307)" while the UI was up the whole
+  # time. Now: follow the redirect chain (-L), accept ANY 2xx (a served page
+  # is a served page; the code is recorded), and keep the real negative —
+  # 4xx/5xx/000 still FAIL, naming the code AND the landing path.
+  # Teardown fix in the same cell: the old bare `pkill -f 'npm run dev'`
+  # matched by command line (it once killed an UNRELATED process whose argv
+  # merely contained the pattern — the frontend/ arm below documents the live
+  # incident) and still LEAKED the node listener. Replaced with the arm's own
+  # PID + process-GROUP kill (custom-server style wrappers fork a child, so
+  # the group is what dies together), with the fuser sweep as the catch-all.
   ( npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & ); sleep 15
-  UP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
-  pkill -f 'npm run dev' 2>/dev/null || true
-  case "\$UP" in 200) cell ui-probe OK "UI serves 200 on :3111" ;; *) cell ui-probe FAIL "UI not serving (http=\$UP): \$(tail -2 \$LOGD/ui.log)" ;; esac
+  UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
+  UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  LAND=\$(curl -sL -o /dev/null -w '%{url_effective}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
+  if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
+    kill -- -\$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 -- -\$UI_NPM_PID 2>/dev/null || true
+  fi
+  kill \$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 \$UI_NPM_PID 2>/dev/null || true
+  fuser -k 3111/tcp >/dev/null 2>&1 || true
+  case "\$UP" in
+    2??) cell ui-probe OK "UI serves \$UP on :3111 (landed: \${LAND:-/})" ;;
+    *) cell ui-probe FAIL "UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
+  esac
 elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.json; then
   # FIX · ui-probe frontend/ (QA-HERMES-CANOPY-9, 2026-09-21): a repo whose UI
   # is a Vite/npm app under frontend/ (NO root package.json) was graded N/A
@@ -1052,14 +1189,18 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
   ( cd frontend && setsid npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & )
   sleep 15
   UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
-  UP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  LAND=\$(curl -sL -o /dev/null -w '%{url_effective}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
   UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
   if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
     kill -- -\$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 -- -\$UI_NPM_PID 2>/dev/null || true
   fi
   kill \$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 \$UI_NPM_PID 2>/dev/null || true
   fuser -k 3111/tcp >/dev/null 2>&1 || true
-  case "\$UP" in 200) cell ui-probe OK "UI serves 200 on :3111 (frontend/)" ;; *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP): \$(tail -2 \$LOGD/ui.log)" ;; esac
+  case "\$UP" in
+    2??) cell ui-probe OK "UI serves \$UP on :3111 (frontend/, landed: \${LAND:-/})" ;;
+    *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
+  esac
 elif [ -n "\$BIN" ]; then
   UI_PORTS=\${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8767 9000}
   UI_BINS="\$BIN"
@@ -1122,6 +1263,7 @@ elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network 
 elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
 elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
 elif go_suite_env_failure \$LOGD/disc.log; then cell chaos-disconnect INFO "ENV-BLOCKED: the go suite failed because the test host lacks a build tool (\`make\` on JIT agents, measured 2026-09-19) — the disconnect cut was exercised against a broken build, no disconnect finding (rc=\$disc_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/disc.log)"
+elif suite_deps_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "missing test dependencies — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result (rc=\$disc_rc): \$(suite_deps_missing_cause \$LOGD/disc.log)"
 else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head -2 \$LOGD/disc.log)"; fi
 
 # 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
@@ -1218,6 +1360,7 @@ elif [ \$res_rc -eq 127 ]; then cell chaos-resource UNVERIFIED "command not foun
 elif grep -qiE 'killed|out of memory' \$LOGD/res.log; then cell chaos-resource INFO "OOM under cap (expected for heavy suites, \$cap_note): \$(tail -2 \$LOGD/res.log)"
 elif build_incomplete \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the build never completed under the 3G cap, so the cap was NEVER exercised (rc=\$res_rc, \$cap_note; environment or code, never memory) — not a memory finding: \$(build_incomplete_cause \$LOGD/res.log)"
 elif go_suite_env_failure \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the suite died because the test host lacks a build tool — cap WAS applied, but the failure is the missing tool, not memory (\$cap_note, rc=\$res_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/res.log)"
+elif suite_deps_missing \$LOGD/res.log; then cell chaos-resource UNVERIFIED "missing test dependencies — the suite NEVER RAN under the cap, so no memory finding either way (rc=\$res_rc, \$cap_note): \$(suite_deps_missing_cause \$LOGD/res.log)"
 else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$LOGD/res.log)"; fi
 
 # 10 · chaos-errorpath — missing config: clean usage or panic?
@@ -1230,7 +1373,11 @@ if [ -n "\$BIN" ]; then
   ep_status=\$(printf '%s' "\$ep_result" | cut -f1)
   ep_detail=\$(printf '%s' "\$ep_result" | cut -f2-)
   cell chaos-errorpath "\$ep_status" "\$ep_detail"
-else cell chaos-errorpath N/A "no single-binary entrypoint"; fi
+else
+  # QA-9ROUTER-22: empty BIN = no start command detected / entrypoint not
+  # observable. Never a product verdict — the missing-config probe never ran.
+  cell chaos-errorpath INFO "no start command detected / entrypoint not observable — missing-config behavior UNVERIFIED"
+fi
 
 echo CELLS-DONE
 touch ~/qa-run.finished
@@ -1638,10 +1785,16 @@ case "${1:-}" in
   # test hook: print the generated script. `agent` is a placeholder here — the
   # real caller (run/launch) sets it before build_remote_script, and without a
   # default `set -u` aborts the heredoc expansion entirely (no output at all).
-  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
+  # DETECT_BIN is defaulted to the same set even though the generated script
+  # re-detects the start command on the agent (the agent-side ladder is the
+  # authoritative runtime detection); the hook's default keeps the variable
+  # contract complete for tests.
+  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
   # QA-CRIER-20 test hook: detect_cmds is a pure function of the repo dir
   # (reads files, sets DETECT_* globals), so this is safe to run against any
   # directory. "$3" defaults to the same placeholder agent __gen-remote uses.
-  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" ;;
+  # DETECT_BIN (QA-9ROUTER-22) is the host-side mirror of the generated
+  # script's start-command ladder; empty = "not observable".
+  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\nDETECT_BIN=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" "$DETECT_BIN" ;;
   *) echo "usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>" ;;
 esac
