@@ -748,6 +748,21 @@ if ! [ -x ~/.docker/cli-plugins/docker-compose ]; then
     echo "WARN: compose plugin install failed (offline agent?) — docker compose cells will fail rc=125 on this environment gap: \$(tail -1 \$LOGD/compose.log 2>/dev/null)" >&2
   fi
 fi
+# FIX 2 · buildx plugin (QA-CHIMERA-V2-32, 2026-09-21): compose v5.5.1's build
+# path REQUIRES buildx >= 0.17 — 'docker compose up -d --build' died rc=1
+# "compose build requires buildx 0.17.0 or later" on every JIT agent because the
+# static docker-28.5.2.tgz ships NEITHER compose NOR buildx (FIX 1 above covers
+# compose only). Same best-effort user-space pattern as FIX 1: the plugin goes
+# into ~/.docker/cli-plugins (the CLI's default discovery dir); an offline
+# agent logs a WARN and continues — the build cells then grade the environment
+# gap, not a repo defect.
+if ! [ -x ~/.docker/cli-plugins/docker-buildx ]; then
+  if curl -sSL -o ~/.docker/cli-plugins/docker-buildx https://github.com/docker/buildx/releases/latest/download/docker-buildx-linux-x86_64 >\$LOGD/buildx.log 2>&1 && chmod +x ~/.docker/cli-plugins/docker-buildx >> \$LOGD/buildx.log 2>&1; then
+    cell toolchain-bootstrap OK "buildx plugin installed (\$(~/.docker/cli-plugins/docker-buildx version 2>/dev/null | head -1 || echo 'version n/a'))"
+  else
+    echo "WARN: buildx plugin install failed (offline agent?) — compose build cells will fail rc=1 'requires buildx 0.17.0 or later' on this environment gap: \$(tail -1 \$LOGD/buildx.log 2>/dev/null)" >&2
+  fi
+fi
 # Bootstrap-end verification (QA-WARPFS-11): a client-side 'docker compose
 # version' proves CLI + plugin are discovered together. HARNESS-COMPOSE=ok/missing
 # is printed for the run log and recorded as a cell so the evidence shows
