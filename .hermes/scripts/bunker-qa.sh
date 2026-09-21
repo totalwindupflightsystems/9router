@@ -746,7 +746,7 @@ if ! command -v make >/dev/null 2>&1; then
   fi
 fi
 if command -v make >/dev/null 2>&1; then
-  cell toolchain-bootstrap OK "make available (\${MAKE_BIN:+bootstrapped GNU make into \$MAKE_BIN}\${MAKE_BIN:-preinstalled}) — \$(make --version 2>/dev/null | head -1)"
+  cell toolchain-bootstrap OK "make available (\${MAKE_BIN:+bootstrapped GNU make}\${MAKE_BIN:-preinstalled}) — \$(make --version 2>/dev/null | head -1)"
 elif [ -f Makefile ]; then
   cell toolchain-bootstrap INFO "no make on agent and user-space bootstrap failed — make-based cells will grade ENV-BLOCKED (\$(tail -2 \$LOGD/make.log 2>/dev/null | tr '\n' ' '))"
 fi
