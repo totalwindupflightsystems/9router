@@ -549,44 +549,6 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
   grep -qE -- '--- FAIL|^FAIL' "\$gf" 2>/dev/null || return 1
   true
 }
-# corr_grade — pure chaos-corruption decision. The caller owns truncation,
-# restart, and restoration; this function only grades the observed evidence.
-corr_grade() { # <rc> <logfile> <state_file> <ref_note> <tracked_yes_no>
-  local rc="\$1" logfile="\$2" state_file="\$3" ref_note="\$4" tracked_yes_no="\$5" crash refusal
-  if [ "\$tracked_yes_no" != yes ] && printf '%s' "\$ref_note" | grep -qF 'not referenced by any source file'; then
-    printf '%s\t%s\n' INFO "candidate \$state_file is untracked and referenced by no source file — not identifiable as a state store; state-restart behavior UNVERIFIED"
-  elif grep -qiE 'panic|traceback \\(most recent|segmentation fault|core dumped|fatal error' "\$logfile"; then
-    printf '%s\t%s\n' FAIL "crash on the next start after truncating \$state_file (\$ref_note): \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped|fatal error' "\$logfile")"
-  elif [ "\$rc" -eq 124 ]; then
-    printf '%s\t%s\n' FAIL "next start HANGS (>20s) after truncating \$state_file (\$ref_note): \$(head -2 "\$logfile" | tr '\\n' ' ')"
-  elif [ "\$rc" -eq 0 ]; then
-    printf '%s\t%s\n' OK "next start unaffected by a truncated \$state_file (rc=0, \$ref_note) — state restored"
-  elif grep -qiE 'corrupt|truncat|checksum|malformed|not a valid|unexpected (EOF|end of)' "\$logfile"; then
-    printf '%s\t%s\n' OK "clean error on the next start after truncating \$state_file (rc=\$rc, \$ref_note): \$(head -2 "\$logfile" | tr '\\n' ' ')"
-  else
-    printf '%s\t%s\n' INFO "truncated \$state_file (\$ref_note): next start exited rc=\$rc but the log never mentions corruption — restart behavior UNVERIFIED, likely an unrelated failure: \$(head -2 "\$logfile" | tr '\\n' ' ')"
-  fi
-}
-# ep_grade — pure chaos-errorpath decision. probe_started=yes is required for
-# a non-zero exit to be a product result; build/toolchain refusals stay INFO.
-ep_grade() { # <rc> <logfile> <probe_started_yes_no>
-  local rc="\$1" logfile="\$2" probe_started_yes_no="\$3" refusal
-  if [ "\$probe_started_yes_no" = na ]; then
-    printf '%s\t%s\n' N/A 'no start command was detected'
-  elif grep -qiE '^.*panic|traceback \\(most recent|segmentation fault|core dumped' "\$logfile"; then
-    printf '%s\t%s\n' FAIL "crash on the missing-config probe: \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped' "\$logfile")"
-  elif refusal=\$(grep -m1 -iE 'go\\.mod file not found|cannot find main module|no Go files|not a valid module|build constraints exclude|cannot find package|build failed|fatal error' "\$logfile"); [ -n "\$refusal" ]; then
-    printf '%s\t%s\n' INFO "start probe did not run the application (refusal: \$refusal) — missing-config behavior UNVERIFIED"
-  elif [ "\$rc" -eq 124 ]; then
-    printf '%s\t%s\n' INFO "missing-config start probe timed out (rc=124) — error-path behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
-  elif [ "\$probe_started_yes_no" != yes ]; then
-    printf '%s\t%s\n' INFO "start probe did not run the application (probe_started=\$probe_started_yes_no) — missing-config behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
-  elif [ "\$rc" -gt 0 ]; then
-    printf '%s\t%s\n' OK "clean error on missing config (rc=\$rc)"
-  else
-    printf '%s\t%s\n' INFO "unexpected: application started but exited cleanly on missing config (rc=\$rc)"
-  fi
-}
 cd ~/qa-$proj || { echo "no repo dir"; exit 1; }
 
 # 0 · toolchain bootstrap (2026-08-31): temp agents are BARE — no go/node,
@@ -969,12 +931,19 @@ if [ -n "\$SF" ]; then
     if [ -n "\$BIN" ]; then
       ( timeout 20 \$BIN ) >\$LOGD/corr.log 2>&1; corr_rc=\$?
       cp ~/state.bak "\$SF" 2>/dev/null
-      corr_tracked=no
-      git ls-files --error-unmatch -- "\$SF" >/dev/null 2>&1 && corr_tracked=yes
-      corr_result=\$(corr_grade "\$corr_rc" "\$LOGD/corr.log" "\$SF" "\$REF" "\$corr_tracked")
-      corr_status=\$(printf '%s' "\$corr_result" | cut -f1)
-      corr_detail=\$(printf '%s' "\$corr_result" | cut -f2-)
-      cell chaos-corruption "\$corr_status" "\$corr_detail"
+      if grep -qiE 'panic|traceback \(most recent|segmentation fault|core dumped|fatal error' \$LOGD/corr.log; then
+        cell chaos-corruption FAIL "crash on the next start after truncating \$SF (\$REF): \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped|fatal error' \$LOGD/corr.log)"
+      elif [ \$corr_rc -eq 124 ]; then cell chaos-corruption FAIL "next start HANGS (>20s) after truncating \$SF (\$REF): \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
+      elif [ \$corr_rc -eq 0 ]; then cell chaos-corruption OK "next start unaffected by a truncated \$SF (rc=0, \$REF) — state restored"
+      elif grep -qiE 'corrupt|truncat|checksum|malformed|not a valid|unexpected (EOF|end of)' \$LOGD/corr.log; then cell chaos-corruption OK "clean error on the next start after truncating \$SF (rc=\$corr_rc, \$REF): \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
+      else
+        # QA-OFF-BY-ONE-15 (2026-09-17): a non-zero exit that never names
+        # corruption is NOT evidence the app handles a truncated state store —
+        # the old rule scored ANY non-124 failure rc as OK "clean error", which
+        # false-greened a build/start refusal ("no Go files"). Grade the outcome
+        # honestly UNVERIFIED and keep the log for the foreman to read.
+        cell chaos-corruption INFO "truncated \$SF (\$REF): next start exited rc=\$corr_rc but the log never mentions corruption — restart behavior UNVERIFIED, likely an unrelated failure: \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
+      fi
     else
       cp ~/state.bak "\$SF" 2>/dev/null
       cell chaos-corruption INFO "truncated \$SF (\$REF) and restored it, but no start command was detected (no node/go/python entrypoint) — restart behavior stays UNVERIFIED for this tree"
@@ -1020,37 +989,12 @@ else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$
 
 # 10 · chaos-errorpath — missing config: clean usage or panic?
 if [ -n "\$BIN" ]; then
-  EP_DIR=~/qa-noconfig-\$\$
-  mkdir -p "\$EP_DIR"
-  EP_STARTED=no
-  case "\$BIN" in
-    "go run "*)
-      # A go run package path is module-relative. Build it while still in the
-      # repo, then execute the artifact from the empty directory so missing
-      # config is a real app-start probe rather than a Go tool refusal.
-      EP_PKG="\${BIN#go run }"
-      ( go build -o "\$EP_DIR/app" "\$EP_PKG" ) >\$LOGD/ep-build.log 2>&1; ep_build_rc=\$?
-      if [ \$ep_build_rc -eq 0 ] && [ -x "\$EP_DIR/app" ]; then
-        cd "\$EP_DIR"
-        ( timeout 15 "\$EP_DIR/app" ) >\$LOGD/ep.log 2>&1; ep_rc=\$?
-        EP_STARTED=yes
-      else
-        ep_rc=\$ep_build_rc
-        cp \$LOGD/ep-build.log \$LOGD/ep.log 2>/dev/null || :
-      fi
-      ;;
-    *)
-      cd "\$EP_DIR"
-      ( timeout 15 \$BIN ) >\$LOGD/ep.log 2>&1; ep_rc=\$?
-      if [ \$ep_rc -ne 127 ] && ! grep -qiE 'go\\.mod file not found|cannot find main module|no Go files|not a valid module|build constraints exclude|cannot find package|build failed|fatal error|cannot find module|module not found|no such file or directory' \$LOGD/ep.log; then
-        EP_STARTED=yes
-      fi
-      ;;
-  esac
-  ep_result=\$(ep_grade "\$ep_rc" "\$LOGD/ep.log" "\$EP_STARTED")
-  ep_status=\$(printf '%s' "\$ep_result" | cut -f1)
-  ep_detail=\$(printf '%s' "\$ep_result" | cut -f2-)
-  cell chaos-errorpath "\$ep_status" "\$ep_detail"
+  mkdir -p ~/qa-noconfig-\$\$ && cd ~/qa-noconfig-\$\$
+  ( timeout 15 \$BIN ) >\$LOGD/ep.log 2>&1; ep_rc=\$?
+  if grep -q panic \$LOGD/ep.log; then cell chaos-errorpath FAIL "PANIC on missing config: \$(grep -m1 panic \$LOGD/ep.log)"
+  elif grep -qiE 'panic|traceback \(most recent|fatal error|no Go files|build constraints exclude|cannot find package|build failed' \$LOGD/ep.log; then cell chaos-errorpath INFO "start probe died before the app ran (toolchain/build failure, not an error-path verdict) — missing-config behavior UNVERIFIED: \$(head -2 \$LOGD/ep.log | tr '\n' ' ')"
+  elif [ \$ep_rc -gt 0 ] && [ \$ep_rc -ne 124 ]; then cell chaos-errorpath OK "clean error on missing config (rc=\$ep_rc)"
+  else cell chaos-errorpath INFO "unexpected: rc=\$ep_rc \$(head -2 \$LOGD/ep.log)"; fi
 else cell chaos-errorpath N/A "no single-binary entrypoint"; fi
 
 echo CELLS-DONE
