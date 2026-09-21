@@ -1,0 +1,1367 @@
+#!/usr/bin/env bash
+# bunker-qa.sh — QA FOREMAN pipeline: FULL fresh-system CI pass on a JIT bunker agent.
+# The stand-in PM's sibling: where the PM finds work/gaps on boards, this finds
+# BRITTLENESS by running the project on a CLEAN machine (Bane doctrine 08-24:
+# "not just we have valid code but does that code give us things that are brittle").
+#
+# Cells: fresh-install · ci-pass (act --bind) · docker-deploy · ui-probe · upgrade
+#        chaos-disconnect · chaos-shutdown · chaos-corruption · chaos-resource · chaos-errorpath
+#
+# Architecture: ALL remote commands run from a generated script (qa-run.sh) shipped
+# base64 to the agent — never nested shell strings through ssh layers (quoting hell
+# observed 2026-08-27: PIPESTATUS eaten by inner pipes, $(..) expanded locally,
+# syntax errors misread as "HANGS").
+#
+# Usage:
+#   bunker-qa.sh run     <repo-dir> [--server X] [--ttl 4h] [--keep]
+#                                             — SYNCHRONOUS compat mode: waits for
+#                                               the whole battery, then pulls
+#   bunker-qa.sh launch  <repo-dir> [--keep]  — PHASE A: preflights + spawn + sync +
+#                                               START the battery DETACHED on the
+#                                               agent (~60-120s). Writes $EVIDENCE.meta
+#                                               and one launch cell. Waits on NO cells.
+#   bunker-qa.sh collect --evidence <path>    — PHASE B: poll → pull → destroy.
+#                                               Idempotent; prints RUNNING (rc=0, no
+#                                               destroy) while the battery is alive.
+#   bunker-qa.sh status
+#
+# WHY THE SPLIT (QA-HERMES-CANOPY-8, 2026-09-15): a full fresh-system battery
+# (spawn, sync, toolchain bootstrap, act CI, native suite, compose, 4 chaos
+# cells) takes 7-15 min, but a single Hermes terminal tool call is killed at
+# ~420s. The synchronous form therefore killed the battery mid-run, the
+# cleanup traps died with the call, and the resulting 0-byte evidence file
+# reads as "no cells" = UNVERIFIED (143 of 751 /tmp/bunker-qa-evidence-*.jsonl
+# on this box are 0 bytes — a systemic class, not a one-off). Every launch/
+# collect tool call is designed to finish far under that cap.
+# NOTE: NO `set -e` on purpose — every cell records its own status via RC echoes.
+set -uo pipefail
+
+# Default server: bunker-las-03 was REMOVED from ~/.bunker/config.yaml
+# (stale default produced 4 consecutive days of P1 "spawn failed" findings,
+# 27+ re-files — QA-DAGGER-GUARD 2026-09-10). bunker-las-02 is the verified
+# live default. Override with BUNKER_QA_SERVER.
+SERVER="${BUNKER_QA_SERVER:-bunker-las-02}"
+TTL="${BUNKER_QA_TTL:-4h}"
+ACT_URL="https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz"
+EVIDENCE="${BUNKER_QA_EVIDENCE:-/tmp/bunker-qa-evidence.jsonl}"
+# TR-085: the shared default evidence path is how one run's meta gets read by the
+# next run's collect (dogfood 2026-09-20 probed a 2-day-old agent). Callers that
+# accept the default get a per-run suffix unless they explicitly opt out —
+# set BUNKER_QA_ALLOW_SHARED_EVIDENCE=1 to keep the historical path.
+if [ -z "${BUNKER_QA_EVIDENCE:-}" ] && [ "${BUNKER_QA_ALLOW_SHARED_EVIDENCE:-0}" != "1" ]; then
+  EVIDENCE="/tmp/bunker-qa-evidence-$(date -u +%Y%m%dT%H%M%SZ)-$$.jsonl"
+fi
+
+log()  { echo "→ $*"; }
+
+# ─── qa_destroy_agent <id> <evidence-file|''> (QA-BUNKER-19 b+c, 2026-09-21) ───
+# Destroy with SURFACING + best-effort post-destroy absence verify. Replaces the
+# bare `bunker destroy … || true` swallow in the cleanup/collect paths, which
+# defeated the destroy-failure escalation contract (QA-BUNKER-19: a failed
+# cleanup destroy left agent 230abb5b running with no trace in any log).
+#   * destroy rc != 0 → stderr "destroy FAILED …" + one FAIL evidence row
+#     (cell destroy-verify, matching the file's cell-name convention) naming the
+#     agent id and rc, appended when <evidence-file> is non-empty.
+#   * destroy rc == 0 → ONE bounded re-list (single attempt, fixed 10s timeout):
+#     if the id still appears, stderr "STILL PRESENT AFTER DESTROY" + the same
+#     FAIL evidence row. The list probe is best-effort: a failed/unparseable
+#     list is silence, never a failure.
+# Never fails the caller (returns 0 unconditionally) — a cleanup/verify probe
+# must not become the run's verdict; the destroy rc is surfaced, not propagated.
+# spawn_agent()'s pre-retry destroy stays inline (stderr only): no evidence file
+# is open there yet, and the retry loop needs no extra list round-trip.
+qa_destroy_agent() {
+  local id="$1" evfile="$2" drc=0 lst row=""
+  bunker destroy "$id" --server "$SERVER" >/dev/null 2>&1 || drc=$?
+  if [ "$drc" -ne 0 ]; then
+    echo "destroy FAILED: agent $id rc=$drc server=$SERVER" >&2
+    row="bunker destroy FAILED: agent=$id server=$SERVER rc=$drc — temp agent may still hold a slot until TTL (verify with: bunker list --server $SERVER)"
+  else
+    lst=$(timeout 10 bunker list --server "$SERVER" 2>/dev/null || true)
+    if printf '%s' "$lst" | grep -qF -- "$id"; then
+      echo "STILL PRESENT AFTER DESTROY: agent $id on $SERVER" >&2
+      row="STILL PRESENT AFTER DESTROY: agent=$id server=$SERVER — destroy exited rc=0 but the server list still names the id"
+    fi
+  fi
+  if [ -n "$row" ] && [ -n "$evfile" ]; then
+    printf '{"cell":"destroy-verify","status":"FAIL","detail":"%s","ts":"%s"}\n' \
+      "$(printf '%s' "$row" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$evfile"
+  fi
+  return 0
+}
+
+spawn_agent() {
+  # QA-HERMES-CANOPY-16 (2026-09-21): an agent that spawns server-side but is
+  # unreachable for the launch is an ORPHAN (holds a slot until TTL, no
+  # evidence points at it; field evidence agent cefd6920, bunker-las-02,
+  # 2026-09-17). Contract: capture the id at spawn time; if the attempt cannot
+  # be handed off (spawn produced no usable id, or the ssh reachability probe
+  # fails), DESTROY that id before retrying or failing.
+  # stdout contract unchanged: success prints ONLY the agent id, rc 0;
+  # total failure prints nothing on stdout, rc 1.
+  local out id drc
+  for attempt in 1 2 3; do
+    out=$(bunker spawn --server "$SERVER" --ttl "$TTL" 2>&1)
+    id=$(echo "$out" | grep -oP 'keys/\K[a-f0-9]+' | head -1)
+    if [ -z "$id" ]; then
+      [ $attempt -lt 3 ] && { echo "  spawn attempt $attempt failed: $(echo "$out" | tail -1)" >&2; sleep "${BUNKER_QA_RETRY_SLEEP:-5}"; }
+      continue
+    fi
+    # Reachability gate: the agent must answer ssh BEFORE it is handed off,
+    # so an unreachable spawn never leaks to the caller as a "success".
+    if timeout "${BUNKER_QA_PROBE_TIMEOUT:-15}" ssh -i "$HOME/.bunker/keys/$id" -o IdentitiesOnly=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$id@$SERVER" true 2>/dev/null; then
+      echo "$id"
+      return 0
+    fi
+    echo "spawn attempt $attempt produced agent $id but was unusable — destroyed before retry" >&2
+    # QA-BUNKER-19 b+c: surfaced, not swallowed — stderr only (no evidence file
+    # is open inside spawn_agent, and the retry loop needs no extra list
+    # round-trip); rc captured so `set -o pipefail` alone can never see it as
+    # handled silence.
+    drc=0
+    bunker destroy "$id" --server "$SERVER" >/dev/null 2>&1 || drc=$?
+    [ "$drc" -ne 0 ] && echo "destroy FAILED: agent $id rc=$drc server=$SERVER (pre-retry cleanup)" >&2
+    [ $attempt -lt 3 ] && sleep "${BUNKER_QA_RETRY_SLEEP:-5}"
+  done
+  echo "$out" | tail -3 >&2
+  return 1
+}
+agent_ssh() { timeout "${BUNKER_QA_SSH_TIMEOUT:-1800}" ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$agent@$SERVER" "$@"; }
+
+status() {
+  echo "BUNKER QA — $(date -u +%Y-%m-%dT%H:%M:%SZ) — server $SERVER"
+  timeout 12 ssh -o ConnectTimeout=6 -o StrictHostKeyChecking=no "$SERVER" \
+    'echo "bunkerd=$(systemctl is-active bunkerd) docker=$(command -v docker >/dev/null && echo yes || echo no) act=$(command -v act >/dev/null && echo yes || echo no) uidmap=$(command -v newuidmap >/dev/null && echo yes || echo no)"' 2>/dev/null \
+    || echo "  $SERVER: UNREACHABLE"
+}
+
+# ─── bunker capacity probe (QA-OFF-BY-ONE-9, 2026-09-15) ───
+# Once the pool is full, `bunker spawn` fails DETERMINISTICALLY, not
+# transiently: either
+#   "port range allocation: no free port ranges available"  (port-pool class)
+#   "capacity full: C/C agents"                             (agent-ceiling class)
+# so spawn_agent()'s 3x retry loop buys nothing but latency and turns one
+# actionable finding into a retry ladder (triage reference:
+# skills/verification/qa-foreman-interpretation/references/bunker-server-portpool-exhaustion.md).
+#
+# Source of truth is the CLI — bunkerd speaks connect/gRPC, raw HTTP probes
+# against /api/v1/* 404 without proving anything:
+#   bunker status --server <srv>            →  "  Agents:   N/MAX"
+#   bunker list --server <srv> --status all →  "Total: N agents"
+#
+# parse_bunker_capacity <srv> <status-output> → "USED MAX" | "" (unparseable).
+# Pure (text in, text out) so the parse is provable without a live host.
+parse_bunker_capacity() {
+  local srv="$1" out="$2" line used max
+  [ -n "$out" ] || return 0
+  # `status --all` prints one "── <name> ──" section per host — scope to ours
+  # first, then fall back to a whole-output scan (status --server = one section).
+  line=$(printf '%s\n' "$out" | awk -v s="$srv" '
+    index($0, "──") && index($0, s) { inside=1; next }
+    inside && index($0, "──") { inside=0 }
+    inside && /Agents:[[:space:]]*[0-9]+[[:space:]]*\/[[:space:]]*[0-9]+/ { print; exit }')
+  if [ -z "$line" ]; then
+    # No section matched. Only trust a whole-output scan when there is exactly
+    # ONE Agents line (status --server = a single section); with several
+    # sections and none naming $srv, another host's numbers are not ours.
+    if [ "$(printf '%s\n' "$out" | grep -cE 'Agents:[[:space:]]*[0-9]+[[:space:]]*\/[[:space:]]*[0-9]+')" = "1" ]; then
+      line=$(printf '%s\n' "$out" | grep -m1 -E 'Agents:[[:space:]]*[0-9]+[[:space:]]*\/[[:space:]]*[0-9]+' || true)
+    fi
+  fi
+  [ -n "$line" ] || return 0
+  used=$(printf '%s' "$line" | sed -E 's/^[^0-9]*([0-9]+).*/\1/')
+  max=$(printf '%s' "$line" | sed -E 's#.*/[[:space:]]*([0-9]+).*#\1#')
+  case "$used" in ''|*[!0-9]*) return 0 ;; esac
+  case "$max"  in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s %s\n' "$used" "$max"
+}
+
+# bunker_capacity <srv> → "USED MAX" | "USED -" (ceiling unreadable) | "" (unknown)
+# At most TWO cheap bunkerd probes: `bunker status` first, `bunker list` only
+# when status yielded no usable "Agents: N/MAX" pair. Callers must treat a
+# missing ceiling as UNKNOWN, never as full — blocking the battery on a probe
+# hiccup would wedge the QA lane for every project on that host.
+bunker_capacity() {
+  local srv="$1" out cap used max
+  out=$(timeout "${BUNKER_QA_CAPACITY_TIMEOUT:-20}" bunker status --server "$srv" 2>/dev/null) || out=""
+  cap=$(parse_bunker_capacity "$srv" "$out")
+  if [ -n "$cap" ]; then printf '%s\n' "$cap"; return 0; fi
+  # Fallback (used count only): `Total: N agents`, with the ceiling taken from
+  # any "N/M" pair still present in the status output.
+  used=$(printf '%s\n' "$(timeout "${BUNKER_QA_CAPACITY_TIMEOUT:-20}" bunker list --server "$srv" --status all 2>/dev/null)" \
+           | sed -nE 's/^Total:[[:space:]]*([0-9]+)[[:space:]]*agents.*/\1/p' | head -1)
+  max=$(printf '%s\n' "$out" | sed -nE 's#.*[^0-9]([0-9]+)[[:space:]]*/[[:space:]]*([0-9]+).*#\2#p' | head -1)
+  case "$used" in ''|*[!0-9]*) return 0 ;; esac
+  case "$max" in ''|*[!0-9]*) max="-" ;; esac
+  printf '%s %s\n' "$used" "$max"
+}
+
+# ─── write_fail_if_empty — never leave a 0-byte evidence file ───
+# Now top-level (2026-09-15) because run() AND launch() share it. Rationale
+# unchanged from 2026-09-07 (QA-DEXDAT-CORE-1): a tool-level SIGTERM (Hermes
+# terminal cap) or a sync-fail exit kills the battery mid-run leaving a 0-byte
+# evidence file — parse_cells then sees cells:[] and the DAG reports
+# UNVERIFIED silently, indistinguishable from "nothing to check".
+# Idempotent: TERM + EXIT traps firing together produce exactly one line.
+write_fail_if_empty() {
+  local reason="${1:-battery terminated before any cell recorded}"
+  if ! grep -q '^{' "$EVIDENCE" 2>/dev/null; then
+    printf '{"cell":"run_battery","status":"FAIL","detail":"%s","ts":"%s"}\n' \
+      "$reason" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+  fi
+}
+
+# ─── shared preflights (extracted verbatim from run(), 2026-09-15) ───
+# launch() needs the SAME deterministic-failure gates as run(), so they live
+# here and both call preflights(). Contract (unchanged): record exactly ONE
+# actionable FAIL row in $EVIDENCE and exit rc=2 — a removed/stale server, an
+# unreachable host, or a full pool is a STATIC error, not transient congestion,
+# so spawn_agent's 3x retry loop buys nothing but latency and turns one
+# actionable finding into a retry ladder.
+#   config  : BUNKER_QA_SERVER must exist in ~/.bunker/config.yaml (QA-DAGGER-GUARD 09-10)
+#   ssh     : the host must answer over tailscale before any spawn
+#   capacity: a FULL pool fails spawn deterministically (QA-OFF-BY-ONE-9 09-15);
+#             BUNKER_QA_SKIP_PREFLIGHT=1 bypasses THIS probe only.
+preflights() {
+  if ! grep -q "^    $SERVER:" "$HOME/.bunker/config.yaml" 2>/dev/null; then
+    printf '{"cell":"run_battery","status":"FAIL","detail":"server %s not present in ~/.bunker/config.yaml — stale BUNKER_QA_SERVER default; run bunker config / pick a live server (no spawn attempted)","ts":"%s"}\n' \
+      "$SERVER" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    echo "ERROR: server '$SERVER' not in ~/.bunker/config.yaml — refusing to spawn (deterministic config error)" >&2
+    exit 2
+  fi
+  if ! timeout 12 ssh -o ConnectTimeout=6 -o StrictHostKeyChecking=no -o BatchMode=yes "$SERVER" 'true' 2>/dev/null; then
+    printf '{"cell":"run_battery","status":"FAIL","detail":"server %s unreachable via ssh (tailscale) preflight — no spawn attempted","ts":"%s"}\n' \
+      "$SERVER" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    echo "ERROR: server '$SERVER' unreachable — refusing to spawn (deterministic reachability error)" >&2
+    exit 2
+  fi
+  # Capacity preflight: a FULL pool is a deterministic spawn failure, so the
+  # retry loop in spawn_agent() would burn 3 attempts and report the
+  # exhaustion as if it were transient congestion. Probe cost: at most 2 cheap
+  # bunkerd CLI calls, no spawn, no polling.
+  if [ "${BUNKER_QA_SKIP_PREFLIGHT:-0}" = "1" ]; then
+    log "capacity preflight skipped (BUNKER_QA_SKIP_PREFLIGHT=1)"
+  else
+    local cap_used cap_max cap
+    cap=$(bunker_capacity "$SERVER")
+    if [ -z "$cap" ]; then
+      # Probe failed / unparseable ≠ full. Warn and continue: refusing here
+      # would wedge QA on any bunkerd hiccup.
+      echo "WARN: bunker capacity unknown on $SERVER (capacity probe failed) — proceeding without capacity preflight" >&2
+    else
+      cap_used="${cap%% *}"; cap_max="${cap##* }"
+      if [ "$cap_max" = "-" ]; then
+        echo "WARN: bunker capacity ceiling unreadable on $SERVER ($cap_used agents live) — proceeding without capacity preflight" >&2
+      elif [ "$cap_used" -ge "$cap_max" ]; then
+        printf '{"cell":"run_battery","status":"FAIL","detail":"bunker capacity exhausted on %s (%s/%s agents) — pool full, no spawn attempted (capacity preflight)","ts":"%s"}\n' \
+          "$SERVER" "$cap_used" "$cap_max" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+        echo "PREFLIGHT FAIL: bunker capacity exhausted on $SERVER ($cap_used/$cap_max agents) — refusing to spawn (deterministic capacity error)" >&2
+        exit 2
+      fi
+    fi
+  fi
+}
+
+# ─── detect_cmds <repo> <agent> → DETECT_INSTALL / DETECT_NATIVE / DETECT_CI ───
+# Extracted verbatim from run() (2026-09-15) so run() and launch() can never
+# drift on the command set they ship to the agent. Globals, because
+# build_remote_script() bakes them (and $agent) into the generated script.
+detect_cmds() {
+  local repo="$1" agent="$2"
+  # escape hatches when the auto-detect guesses wrong (e.g. suite needs extras)
+  DETECT_INSTALL="${BUNKER_QA_INSTALL_CMD:-}"
+  if [ -z "$DETECT_INSTALL" ]; then
+  if [ -f "$repo/pnpm-lock.yaml" ]; then DETECT_INSTALL="corepack enable 2>/dev/null; corepack prepare --activate 2>/dev/null; pnpm install --frozen-lockfile"
+  elif [ -f "$repo/package.json" ]; then DETECT_INSTALL="npm ci --ignore-scripts --no-audit --no-fund"
+  elif [ -f "$repo/go.mod" ]; then DETECT_INSTALL="go build ./..."
+  elif [ -f "$repo/pyproject.toml" ]; then DETECT_INSTALL="pip install -e .[dev] 2>/dev/null || pip install -e ."
+  elif [ -f "$repo/Cargo.toml" ]; then DETECT_INSTALL="cargo build --workspace"
+  elif [ -f "$repo/Makefile" ]; then DETECT_INSTALL="make build"
+  else DETECT_INSTALL="echo no-standard-install-path"
+  fi
+  fi
+  local ci_cmd="" native_cmd="${BUNKER_QA_NATIVE_CMD:-}"
+  if [ -z "$native_cmd" ]; then
+  if [ -f "$repo/pnpm-lock.yaml" ]; then native_cmd="pnpm test"
+  elif [ -f "$repo/package.json" ]; then
+  # --runInBand is a Jest flag; vitest dies with CACError on it (proven 9router
+  # 2026-09-15: `cd tests && npx vitest run --runInBand` rc=1, zero tests ran).
+  # Detect vitest by the test script's own text or a root vitest config and use
+  # vitest's serial flag instead. Note: this only fixes HARNESS-induced crashes;
+  # if the repo's root `npm test` npx-resolves an unpinned vitest, that hazard
+  # belongs to the project (file a board row, do not mask it here).
+  if jq -r '.scripts.test // ""' "$repo/package.json" 2>/dev/null | grep -q vitest || ls "$repo"/vitest.config.* >/dev/null 2>&1; then
+    native_cmd="npm test -- --no-file-parallelism"
+  else
+    native_cmd="npm test -- --runInBand"
+  fi
+  elif [ -f "$repo/go.mod" ]; then native_cmd="go test ./... -count=1"
+  elif [ -f "$repo/pyproject.toml" ]; then native_cmd="pytest -x -q"
+  elif [ -f "$repo/Cargo.toml" ]; then native_cmd="cargo test --workspace"
+  elif [ -f "$repo/Makefile" ]; then native_cmd="make test"
+  else native_cmd="echo no-test-path"
+  fi
+  fi
+  # QA-CRIER-20 (2026-09-18): unfiltered act runs EVERY workflow in the repo
+  # under test, so infra-gated workflows (ghcr publish, pages deploys) that can
+  # never pass inside act (no live bunker server, no ghcr credentials, no real
+  # push event) give the ci-pass cell a PERMANENT red leg — crier's bunker-e2e
+  # was 5/5 green on hosted CI at the same HEAD while act stayed red. The CI
+  # workflow is the simulated-runner-relevant one; with no ci.yml keep the
+  # unfiltered form, and with no workflows at all native suite remains the
+  # fallback grade.
+  if ls "$repo"/.github/workflows/*.yml >/dev/null 2>&1; then
+    if [ -f "$repo/.github/workflows/ci.yml" ]; then
+      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull -W $repo/.github/workflows/ci.yml"
+    else
+      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull"
+    fi
+  else
+    ci_cmd="$native_cmd"  # no workflow → native IS the CI pass
+  fi
+  DETECT_NATIVE="$native_cmd"
+  DETECT_CI="$ci_cmd"
+  detect_upgrade_inputs "$repo"
+}
+
+# ─── detect_upgrade_inputs <repo> — inputs the upgrade cell cannot detect itself ───
+# QA-GITREINS-POC-004 (2026-09-17): the upgrade cell used to run `git tag` INSIDE
+# the battery, but sync_repo ships the tree with `.git` excluded and then re-inits
+# a synthetic single-commit repo on the agent, so `git tag` there is ALWAYS empty.
+# The cell therefore reported `upgrade N/A "no release tags in repo"` for repos
+# that do have tags — gitreins-poc (40 tags, latest v0.13.0) and
+# coding-hermes-boardctl (3) on the 2026-09-12 cycle — and the upgrade path was
+# silently recorded as not-applicable instead of untested. Detect the tag list
+# HERE, where `.git` really exists, and bake the values into the generated script
+# along with the previous release's package coordinates so the cell can install
+# that release and re-install HEAD over it on the agent.
+# Sets global: DETECT_TAG_COUNT / DETECT_PREV_TAG / DETECT_PREV_VERSION /
+# DETECT_PKG_NAME / DETECT_PKG_ECOSYSTEM ("" when unknown — never guessed).
+detect_upgrade_inputs() {
+  local repo="$1"
+  DETECT_TAG_COUNT=0; DETECT_PREV_TAG=""; DETECT_PREV_VERSION=""
+  DETECT_PKG_NAME=""; DETECT_PKG_ECOSYSTEM=""
+  [ -d "$repo/.git" ] || return 0
+  DETECT_TAG_COUNT=$(git -C "$repo" tag 2>/dev/null | grep -c . || true)
+  [ "${DETECT_TAG_COUNT:-0}" = "0" ] && return 0
+  DETECT_PREV_TAG=$(git -C "$repo" tag 2>/dev/null | sort -V | tail -2 | head -1)
+  DETECT_PREV_VERSION="${DETECT_PREV_TAG#v}"
+  # Package coordinates for the index-install half of the upgrade test. Only the
+  # two ecosystems whose install command the battery already runs are wired;
+  # anything else stays "" and the cell reports the gap instead of guessing.
+  if [ -f "$repo/pyproject.toml" ]; then
+    DETECT_PKG_ECOSYSTEM="pip"
+    DETECT_PKG_NAME=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" | head -1)
+    [ -z "$DETECT_PKG_NAME" ] && DETECT_PKG_NAME=$(sed -n "s/^[[:space:]]*name[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$repo/pyproject.toml" | head -1)
+  elif [ -f "$repo/package.json" ]; then
+    DETECT_PKG_ECOSYSTEM="npm"
+    DETECT_PKG_NAME=$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/package.json" | head -1)
+  fi
+  # The value is interpolated into the generated script inside single quotes.
+  DETECT_PKG_NAME=${DETECT_PKG_NAME//\'/}
+  DETECT_PREV_TAG=${DETECT_PREV_TAG//\'/}
+  return 0
+}
+
+# ─── sync_repo <repo> <proj> — tar the tree to ~/qa-<proj> on the agent ───
+# Verdict comes from the REMOTE's SYNC-OK echo, not the local tar's exit code.
+# GNU tar exits non-zero on "file changed as we read it" even with
+# --warning=no-file-changed, and with `set -o pipefail` that would abort the
+# whole battery although the remote extraction succeeded. Live repos (actively
+# written during tar) trip this constantly.
+# BUNKER_QA_SYNC_EXCLUDES: extra --exclude args for monster repos whose
+# tracked-but-heavy DATA dirs (generated images, fixtures) would stall the SSH
+# pipe past the 1800s agent_ssh timeout (proven wojons-mythos 2026-08-31:
+# 6.4G repo / 845M projects/ + 482M packages/backend/projects at ~600KB/s).
+# Returns 1 on failure with the remote's last 2 lines in SYNC_ERR.
+sync_repo() {
+  local repo="$1" proj="$2"
+  local sync_excludes="${BUNKER_QA_SYNC_EXCLUDES:-}"
+  local -a sync_excl=()
+  if [ -n "$sync_excludes" ]; then read -ra sync_excl <<< "$sync_excludes"; fi
+  local sync_out sync_ok
+  sync_out=$(tar --warning=no-file-changed -C "$repo" --exclude='.git' --exclude='node_modules' --exclude='target' --exclude='.next' \
+      --exclude='.pnpm-store' --exclude='.turbo' --exclude='.cache' --exclude='dist' --exclude='build' --exclude='coverage' \
+      --exclude='*.tsbuildinfo' --exclude='*.tsbuildinfo.json' \
+      "${sync_excl[@]}" \
+      -cf - . |
+    agent_ssh "mkdir -p ~/qa-$proj && tar -C ~/qa-$proj -xf - && cd ~/qa-$proj && git init -q && git -c user.name='qa-bot' -c user.email='qa@bunker' add -A && git -c user.name='qa-bot' -c user.email='qa@bunker' commit -q -m 'qa-sync' && echo SYNC-OK" 2>&1)
+  sync_ok=$(printf '%s' "$sync_out" | grep -c 'SYNC-OK')
+  if [ "$sync_ok" -eq 0 ]; then
+    SYNC_ERR=$(printf '%s' "$sync_out" | tail -2)
+    return 1
+  fi
+  return 0
+}
+
+# ─── build the remote cell script (all quoting handled HERE, once) ───
+build_remote_script() { # args: proj install_cmd ci_cmd native_cmd
+  local proj="$1" install_cmd="$2" ci_cmd="$3" native_cmd="$4"
+  cat <<EOF
+#!/usr/bin/env bash
+# qa-run.sh — generated by bunker-qa.sh for $proj (do not edit)
+PROJ='$proj'
+EVID=~/qa-evidence.jsonl
+# Per-run log dir in HOME — /tmp/*.log is shared across agents and the
+# sticky bit makes a fresh agent uid unable to overwrite a previous
+# agent's files (Permission denied + stale content read-back). A
+# run-unique dir sidesteps both.
+LOGD=~/qa-logs-\$\$
+mkdir -p \$LOGD
+: > \$EVID
+# Completion marker (QA-HERMES-CANOPY-8): collect()'s cheap probe — present ⇒
+# the battery is DONE (whichever exit path it took), absent + no live process
+# ⇒ the agent/process is gone. The EXIT trap guarantees the marker even on the
+# early "no repo dir" bail; the explicit touch after CELLS-DONE is the normal path.
+trap 'touch ~/qa-run.finished' EXIT
+cell() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys,datetime; print(json.dumps({"project":"'\$PROJ'","cell":sys.argv[1],"status":sys.argv[2],"detail":sys.argv[3],"ts":datetime.datetime.now(datetime.timezone.utc).isoformat()}))' "\$1" "\$2" "\$3" >> \$EVID
+  else
+    local d; d=\$(printf '%s' "\$3" | tr '\n\t\r' '   ' | sed 's/"/'"'"'/g'); echo "{\"project\":\"\$PROJ\",\"cell\":\"\$1\",\"status\":\"\$2\",\"detail\":\"\$d\",\"ts\":\"\$(date -u +%FT%TZ)\"}" >> \$EVID
+  fi
+}
+fail_detail() { # <rc> <logfile> <cmd...> — ACTIONABLE-FAILURE CONTRACT
+  local frc="\$1" flog="\$2"; shift 2
+  printf 'rc=%s cmd=[%s] — %s' "\$frc" "\$*" "\$(grep -v '^[[:space:]]*\$' "\$flog" 2>/dev/null | head -40 | tr '\n' '|' | cut -c1-1500)"
+}
+# act_failure_context — act's '❌ Failure - Main <step> [Xs]' line names the step
+# but never the cause; the step's own output is printed ABOVE the marker, so
+# return the 18 lines preceding the first ❌ plus the marker itself.
+act_failure_context() { # <act log>
+  local lf="\$1" n
+  n=\$(grep -n '❌' "\$lf" 2>/dev/null | head -1 | cut -d: -f1)
+  if [ -n "\$n" ]; then sed -n "\$(( n > 18 ? n - 18 : 1 )),\${n}p" "\$lf" | tr '\n' '|' | cut -c1-1400
+  else tail -8 "\$lf" 2>/dev/null | tr '\n' '|' | cut -c1-1400; fi
+}
+# build_env_failure — is this failure the AGENT's missing C toolchain instead of a
+# repo defect? (QA-WARPFS-9, 2026-09-19.) rust links EVERY crate build script
+# through the \`cc\` linker, so on a toolchain-bare agent (no cc/gcc/clang, no sudo)
+# the first crate with a build script dies with
+#   error: linker \`cc\` not found
+#   error: could not compile \`libc\` (build script) due to 1 previous error   (rc=101)
+# That is an ENVIRONMENT gap, not a finding — the pre-QA-WARPFS-9 harness graded it
+# fresh-install FAIL ("repo defect"), chaos-resource FAIL ("proves nothing about the
+# 3G cap") and chaos-disconnect OK "fails fast on disconnect" (a FALSE PASS: the
+# network cut was never exercised, the build died first). A log that ALSO carries a
+# genuine rustc diagnostic (error[E####]) is a real compile error and must keep its
+# FAIL grade, so this returns 0 only for the bare toolchain shape.
+build_env_failure() { # <logfile> — 0 when the log carries the toolchain signature only
+  local bf="\$1"
+  [ -f "\$bf" ] || return 1
+  grep -qE 'linker \`cc\` not found|could not compile .*\(build script\)' "\$bf" 2>/dev/null || return 1
+  ! grep -qE '^error\[E[0-9]{4}\]' "\$bf" 2>/dev/null
+}
+# build_sys_dep_failure — did a *-sys crate's build script fail to find a system
+# library? (QA-WARPFS-9 rework 3, 2026-09-19.) The live round-2 shape, on the same
+# bare agent once the zig leg had fixed the linker:
+#   error: failed to run custom build command for \`openssl-sys v0.9.117\`
+#   Could not find directory of OpenSSL installation ...
+#   Make sure you also have the development packages of openssl installed.
+# A *-sys crate is the binding layer for a C library, so its build script dying on
+# a missing header / pkg-config file means a MISSING SYSTEM PACKAGE (libssl-dev,
+# libfuse3-dev, pkg-config, make) — not a repo defect — and a bare agent has no
+# sudo to install one. This predicate is the LOG half ONLY: the caller must ALSO
+# require RUST_MISSING_SYS_DEPS (the probe above, which knows what this agent
+# lacks) to be non-empty, so a *-sys failure on an agent that HAS the deps is
+# still graded FAIL. And exactly as in build_env_failure(), a genuine rustc
+# diagnostic (error[E####]) outranks it: code errors keep their FAIL grade.
+build_sys_dep_failure() { # <logfile> — 0 when the log carries the missing-system-library shape
+  local sf="\$1"
+  [ -f "\$sf" ] || return 1
+  grep -qE 'failed to run custom build command for [^ ]*-sys([ \`]|\$)|Make sure you also have the development packages' "\$sf" 2>/dev/null || return 1
+  ! grep -qE '^error\[E[0-9]{4}\]' "\$sf" 2>/dev/null
+}
+# build_incomplete — did the build even FINISH? (QA-WARPFS-9 rework 2, 2026-09-19.)
+# build_env_failure() above is deliberately NARROW (the bare-toolchain shape only,
+# so a genuine rustc diagnostic keeps its FAIL). A build can also die BEFORE the
+# chaos condition is reached, for a reason that IS the chaos condition's subject —
+# observed live on the same agent: the \`ring\` crate's build script hands the RUST
+# target triple straight to the C compiler as
+#   --target=x86_64-unknown-linux-gnu
+# and zig's target syntax carries no vendor segment, so cc dies with
+#   error: unable to parse target query 'x86_64-unknown-linux-gnu': UnknownOperatingSystem
+#   error: failed to run custom build command for \`ring v0.17.14\`
+#   warning: build failed, waiting for other jobs to finish...          (rc=101)
+# Neither shape is a network or memory finding, and neither reached the chaos
+# condition, so chaos-disconnect must not grade OK "fails fast on disconnect" and
+# chaos-resource must not grade FAIL "rc!=0 under cap" on either of them. This
+# predicate is therefore BROAD by design: ANY incomplete build → the two chaos
+# cells grade INFO UNVERIFIED / ENV-BLOCKED, whatever the cause (environment OR
+# code). It is used ONLY by those two chaos cells; fresh-install keeps
+# build_env_failure() so a real compile error stays a repo defect.
+# build_incomplete_cause() is the detail-text companion — it prints the first line
+# that proves the build never finished, so a cell never has to guess the cause
+# from a noisy tail (and the pattern list lives in exactly ONE place). It also
+# matches an explicit rustc diagnostic (^error[E####]) because that is the FIRST
+# line a compile error prints: the detail then names the real defect instead of
+# cargo's summary line further down.
+build_incomplete_cause() { # <logfile> — print the line proving the build never finished
+  grep -m1 -E 'linker \`cc\` not found|could not compile|failed to run custom build command|warning: build failed, waiting for other jobs|^error\[E[0-9]{4}\]' "\$1" 2>/dev/null | cut -c1-220
+}
+build_incomplete() { # <logfile> — 0 when the log shows the build never completed
+  [ -n "\$(build_incomplete_cause "\$1")" ]
+}
+# go_suite_env_failure — is this go-suite FAIL the test HOST's missing build
+# tool instead of a repo defect? (QA-CRIER-23/QA-CRIER-7, 2026-09-20; measured
+# 2026-09-19 on bunker-las-02: cmd/server TestServerVersionCLIFlags "Makefile
+# stamps the symbols the binary reads" shells to \`make -n build\`, the JIT
+# agent's PATH has no make, and the suite dies with
+#   --- FAIL: TestServerVersionCLIFlags ...
+#   main_test.go:1358: make -n build: exec: "make": executable file not found in $PATH
+# while hosted CI is GREEN at that exact HEAD and the same test PASSES on any
+# host with make. A tool-less host says NOTHING about the code, so the two
+# chaos cells must not grade this shape and ci-pass must NAME what failed.)
+go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by exec: "<tool>": executable file not found
+  local gf="\$1"
+  [ -f "\$gf" ] || return 1
+  grep -qE 'exec: "[a-z][a-z-]*": executable file not found in [$]PATH' "\$gf" 2>/dev/null || return 1
+  grep -qE -- '--- FAIL|^FAIL' "\$gf" 2>/dev/null || return 1
+  true
+}
+cd ~/qa-$proj || { echo "no repo dir"; exit 1; }
+
+# 0 · toolchain bootstrap (2026-08-31): temp agents are BARE — no go/node,
+#    no sudo (password required), but the home is writable and the agent
+#    has internet. Install the toolchain the repo declares into ~/tools
+#    (user-space tarballs) BEFORE the cells, so fresh-install tests the
+#    project's own install step on a genuinely fresh system.
+mkdir -p ~/tools
+if [ -f go.mod ] && ! command -v go >/dev/null 2>&1 && [ ! -x ~/tools/go/bin/go ]; then
+  ( curl -sL -o ~/tools/go.tgz https://go.dev/dl/go1.26.5.linux-amd64.tar.gz && tar -C ~/tools -xzf ~/tools/go.tgz && rm ~/tools/go.tgz ) >\$LOGD/toolchain.log 2>&1 \
+    && cell toolchain-bootstrap OK "go 1.26.5 installed (~/tools/go)" \
+    || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/toolchain.log)"
+fi
+if [ -f package.json ] && ! command -v node >/dev/null 2>&1 && [ ! -x ~/tools/node/bin/node ]; then
+  ( curl -sL -o ~/tools/node.tar.xz https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-x64.tar.xz && tar -C ~/tools -xf ~/tools/node.tar.xz && mv ~/tools/node-v22.22.3-linux-x64 ~/tools/node && rm ~/tools/node.tar.xz ) >\$LOGD/toolchain.log 2>&1 \
+    && cell toolchain-bootstrap OK "node v22.22.3 installed (~/tools/node)" \
+    || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/toolchain.log)"
+fi
+if [ -f pyproject.toml ] && [ ! -x ~/tools/venv/bin/python ]; then
+  ( python3 -m venv ~/tools/venv && ~/tools/venv/bin/pip install --upgrade pip setuptools wheel ) >\$LOGD/venv.log 2>&1 \
+    && cell toolchain-bootstrap OK "python venv ready (~/tools/venv)" \
+    || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/venv.log)"
+fi
+if [ -f Cargo.toml ] && ! command -v cargo >/dev/null 2>&1 && [ ! -x ~/tools/cargo/bin/cargo ]; then
+  ( export CARGO_HOME=~/tools/cargo RUSTUP_HOME=~/tools/rustup; curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path ) >\$LOGD/rustup.log 2>&1 \
+    && cell toolchain-bootstrap OK "rust stable installed (~/tools/cargo + ~/tools/rustup)" \
+    || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/rustup.log)"
+fi
+[ -x ~/tools/go/bin/go ] && export PATH="\$HOME/tools/go/bin:\$PATH"
+[ -x ~/tools/node/bin/node ] && export PATH="\$HOME/tools/node/bin:\$PATH"
+[ -x ~/tools/venv/bin/python ] && export PATH="\$HOME/tools/venv/bin:\$PATH"
+[ -x ~/tools/cargo/bin/cargo ] && export CARGO_HOME="\$HOME/tools/cargo" RUSTUP_HOME="\$HOME/tools/rustup" && export PATH="\$HOME/tools/cargo/bin:\$PATH"
+# C toolchain (QA-WARPFS-9, 2026-09-19): rust links EVERY crate build script
+# through the \`cc\` linker, so a repo with Cargo.toml cannot build AT ALL on a bare
+# agent — rustup --profile minimal brings rustc/cargo but no C compiler, and there
+# is no sudo to apt-get build-essential (the repo's README already documents
+# build-essential, so the repo needs no change). zig ships a self-contained
+# clang + linker and unpacks into ~/tools with no root, so the rust cells below get
+# a real C toolchain; if the install cannot be done the rust build cells grade
+# ENV-BLOCKED via build_env_failure() instead of blaming the repo.
+if [ -f Cargo.toml ] && ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+  if [ ! -x ~/tools/zig/zig ]; then
+    ( cd ~/tools && curl -sL -o zig.tar.xz https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz && tar -xJf zig.tar.xz && rm -f zig.tar.xz && { [ -e zig ] || mv zig-x86_64-linux-0.15.2 zig; } ) >\$LOGD/zig.log 2>&1
+  fi
+  ZIGB=\$(ls -d ~/tools/zig/zig ~/tools/zig*/zig 2>/dev/null | head -1)
+  if [ -n "\$ZIGB" ] && [ -x "\$ZIGB" ]; then
+    mkdir -p ~/tools/bin
+    for zt in cc c++ ar ranlib; do
+      case "\$zt" in
+        cc|c++)
+          # QA-WARPFS-9 rework 2 (2026-09-19): cargo/cc-rs hands the RUST target
+          # triple to the C compiler as --target=x86_64-unknown-linux-gnu, and
+          # zig's target syntax has NO "-unknown-" vendor segment — it answers
+          #   error: unable to parse target query 'x86_64-unknown-linux-gnu':
+          #          UnknownOperatingSystem
+          # so the ring crate's build script dies before the repo builds at all.
+          # Translate the --target VALUE only (drop the vendor segment; gnu and
+          # musl both), leaving every other argument byte-identical: rotate the
+          # positional params one at a time (shift + append) so no argument is
+          # ever re-quoted or word-split. Only the joined "--target=<triple>"
+          # spelling is handled, because that is what cc-rs emits for a
+          # clang-family compiler (the live argv quoted above is verbatim
+          # cc-rs output) — and it is the only spelling that CAN be fixed here:
+          # measured against real zig 0.15.2, the split form is rejected at the
+          # FLAG level ("error: Unknown Clang option: '--target'"), so rewriting
+          # the value alone could not rescue it. A stray "--target=..." with a
+          # non-gnu/non-musl target is passed through untouched (the sed only
+          # matches the "-unknown-linux-" prefix).
+          printf '#!/bin/sh\nn=\$#\ni=0\nwhile [ \$i -lt \$n ]; do\n  a=\$1; shift\n  case "\$a" in\n    --target=*) a=\$(printf "%%s" "\$a" | sed "s/-unknown-linux-/-linux-/") ;;\n  esac\n  set -- "\$@" "\$a"\n  i=\$((i+1))\ndone\nexec "%s" %s "\$@"\n' "\$ZIGB" "\$zt" > ~/tools/bin/"\$zt" ;;
+        *)
+          # ar/ranlib take no target triple — forwarded verbatim as before.
+          printf '#!/bin/sh\nexec "%s" %s "\$@"\n' "\$ZIGB" "\$zt" > ~/tools/bin/"\$zt" ;;
+      esac
+      chmod +x ~/tools/bin/"\$zt"
+    done
+    export PATH="\$HOME/tools/bin:\$PATH"
+    export CC=cc CXX=c++
+    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ar/ranlib wrappers → ~/tools/zig/zig) — rust build scripts can link"
+  else
+    export RUST_NO_CC=1
+    cell toolchain-bootstrap INFO "no C toolchain on agent (no sudo) and zig install failed — rust build cells graded ENV-BLOCKED (\$(tail -2 \$LOGD/zig.log))"
+  fi
+fi
+# FIX 1 · system-dep probe (QA-WARPFS-9 rework 3, 2026-09-19): the zig leg above
+# supplies a C toolchain, but a rust repo ALSO links against system libraries
+# whose DEVELOPMENT files ship in separate packages — and nothing in user space
+# substitutes for a missing system package. Observed live on the round-2 agent
+# (bare Debian 13, no sudo) once the ring/zig failure was fixed, the build died
+# at the next crate that needs headers:
+#   error: failed to run custom build command for \`openssl-sys v0.9.117\`
+#   Could not find directory of OpenSSL installation ...
+#   Make sure you also have the development packages of openssl installed.
+# (openssl reaches this repo through git2; hilo-fuse needs libfuse3-dev; both are
+# README-documented.) Measured on that agent: make=NO perl=yes pkg-config=NO
+# cc=NO gcc=NO. A fully bare agent therefore CANNOT build this class of project,
+# so the harness STOPS CHASING and REPORTS: probe the known-required deps, export
+# the missing ones, and grade the cells that die on them ENV-BLOCKED with the
+# precise list (build_sys_dep_failure() + the fresh-install branch below). This
+# list is CONTEXT, never a verdict on its own — the ENV-BLOCKED grade still needs
+# an actual *-sys build failure in the log (fuser probes fuse3 first and happily
+# falls back to libfuse2, so a missing fuse3 alone proves nothing broke).
+RUST_MISSING_SYS_DEPS=""
+if [ -f Cargo.toml ]; then
+  for sd in make pkg-config; do
+    command -v "\$sd" >/dev/null 2>&1 || RUST_MISSING_SYS_DEPS="\${RUST_MISSING_SYS_DEPS:+\$RUST_MISSING_SYS_DEPS }\$sd"
+  done
+  # openssl/fuse3 are only observable THROUGH pkg-config, so probe them only when
+  # the tool itself is present — otherwise the list already says pkg-config, and a
+  # missing probe tool must not be reported as a missing library.
+  if command -v pkg-config >/dev/null 2>&1; then
+    pkg-config --exists openssl >/dev/null 2>&1 || RUST_MISSING_SYS_DEPS="\${RUST_MISSING_SYS_DEPS:+\$RUST_MISSING_SYS_DEPS }openssl(libssl-dev)"
+    pkg-config --exists fuse3 >/dev/null 2>&1 || RUST_MISSING_SYS_DEPS="\${RUST_MISSING_SYS_DEPS:+\$RUST_MISSING_SYS_DEPS }fuse3(libfuse3-dev)"
+  fi
+  if [ -n "\$RUST_MISSING_SYS_DEPS" ]; then
+    cell toolchain-bootstrap INFO "bare agent missing system deps: \$RUST_MISSING_SYS_DEPS — rust build cells graded ENV-BLOCKED when they fail on these (no sudo to apt install)"
+  fi
+fi
+export RUST_MISSING_SYS_DEPS
+command -v go >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && cell toolchain-bootstrap OK "go+node ready"
+
+# 1 · fresh-install — REAL rc through a log file
+( $install_cmd ) >\$LOGD/inst.log 2>&1; inst_rc=\$?
+# FIX 2 / QA-WARPFS-9 rework 3 (2026-09-19): the condition above catches the bare
+# C toolchain. The OTHER environment failure the live agent produced is a rust
+# repo whose crates link a system library (openssl via git2, fuse3 via hilo-fuse):
+# a bare agent has no sudo to apt-install libssl-dev/libfuse3-dev/pkg-config, so
+# the build dies inside a *-sys build script long after the toolchain is fine.
+# ENV-BLOCKED fires only when BOTH halves hold — the probe found missing system
+# deps (RUST_MISSING_SYS_DEPS) AND the log carries the *-sys build-script shape —
+# and the INFO detail names the missing list so the row is actionable.
+if [ \$inst_rc -eq 0 ]; then cell fresh-install OK "\$(tail -1 \$LOGD/inst.log)"
+elif [ \$inst_rc -eq 127 ] || grep -qi 'command not found' \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: the agent lacks a build tool the install step calls (\$(grep -m1 -oE '[a-zA-Z0-9_.-]+: command not found' \$LOGD/inst.log || echo rc=\$inst_rc)) and has no sudo to install it — harness env, not a repo defect: \$(tail -1 \$LOGD/inst.log)"
+elif build_env_failure \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: agent has no C toolchain (build-script link failure) — not a repo defect; README documents build-essential"
+elif [ -n "\$RUST_MISSING_SYS_DEPS" ] && build_sys_dep_failure \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: agent is missing system deps [\$RUST_MISSING_SYS_DEPS] and the build died in a *-sys build script — no sudo to apt install, not a repo defect; README documents the full dependency set: \$( { grep -m1 -E 'failed to run custom build command' \$LOGD/inst.log 2>/dev/null || grep -m1 'development packages' \$LOGD/inst.log 2>/dev/null; } | cut -c1-200 )"
+else cell fresh-install FAIL "rc=\$inst_rc: \$(tail -2 \$LOGD/inst.log)"; fi
+
+# Shared "start the project" command — used by chaos-corruption and
+# chaos-errorpath. QA-GITREINS-POC-6/004 (2026-09-17): the old inline detection
+# knew only node + go, so a Python CLI — the shape both of those cells care
+# about — reported N/A "no single-binary entrypoint" and the corruption probe
+# had nothing to start. A console script declared in [project.scripts] IS that
+# entrypoint. ⚠️ This block must stay AFTER cell 1: on a fresh agent the console
+# script does not exist until the project's own install ran, so detecting
+# earlier dropped the value and chaos-corruption reported "no start command was
+# detected" on the first live run (bunker-las-02, 2026-09-17). The interpreter
+# must also be resolvable, so callers say "not observable" instead of failing
+# on a 127.
+BIN=""
+if [ -f package.json ]; then BIN="node src/index.js"
+elif [ -f go.mod ]; then
+  # QA-OFF-BY-ONE-15 (2026-09-17): the old detection hardcoded BIN="go run ." for
+  # any go.mod repo — off-by-one has NO root main package (entrypoint cmd/…), so
+  # every start-probe died with "no Go files" and the chaos cells scored the
+  # toolchain refusal as the app's verdict. cmd/ wins over a root main because
+  # root .go files can exist yet be build-tag-excluded (release-engineer
+  # 2026-09-20: "build constraints exclude all Go files" for a root go run).
+  gofirst=""
+  if [ -d cmd ]; then
+    gofirst=\$(grep -rlsE '^package main' cmd --include='*.go' 2>/dev/null | sort | head -1)
+  fi
+  if [ -n "\$gofirst" ]; then BIN="go run ./\$(dirname "\$gofirst")"
+  elif ls ./*.go >/dev/null 2>&1 && grep -qsE '^package main' ./*.go; then BIN="go run ."
+  fi
+elif [ -f pyproject.toml ]; then
+  BIN=\$(grep -A6 '^\[project\.scripts\]' pyproject.toml 2>/dev/null | grep -oE '^[A-Za-z0-9_.-]+[[:space:]]*=' | head -1 | tr -d ' =')
+fi
+if [ -n "\$BIN" ] && ! command -v \${BIN%% *} >/dev/null 2>&1; then BIN=""; fi
+
+# 2 · ci-pass — act first (simulated GH runner); NATIVE suite is the authoritative
+#    fallback (act + rootless dockerd = fatal EOF observed 2026-08-27 on las-03)
+command -v ~/bin/act >/dev/null 2>&1 || (mkdir -p ~/bin && cd ~ && curl -sL -o act.tar.gz '$ACT_URL' && tar -xzf act.tar.gz -C ~/bin && rm act.tar.gz)
+# Pre-configure act to avoid interactive image selection prompt on first run
+mkdir -p ~/.config/act && [ ! -f ~/.config/act/actrc ] && echo "-P ubuntu-latest=catthehacker/ubuntu:act-latest" > ~/.config/act/actrc
+# FIX 2 · QA-WARPFS-2-3 (2026-09-19): this pull used to be a single curl —
+# no retry, no alternate source — so one external-DNS blip hard-failed the
+# bootstrap and the battery graded a transient network failure as if the
+# repo were broken (same class as hermes-canopy 2026-09-05: exit 6 "Could
+# not resolve host" on the rootless-installer download). Now a logged
+# ladder: 3 attempts on the pinned static tarball (backoff 5s/15s), then
+# ONE fallback to the docker-rootless-extras tarball on download.docker.com
+# — a different artifact that vendors the rootless runtime (rootlesskit,
+# vpnkit, dockerd-rootless-setuptool.sh) the docker cells exercise. No
+# --resolve / --dns-servers IP pinning by design: the ladder must outlive a
+# resolver blip, not depend on a hand-pinned address.
+if ! [ -x ~/bin/docker ]; then
+  mkdir -p ~/bin
+  : > \$LOGD/docker-cli.log
+  DOCKER_DL_OK=0
+  for att in 1 2 3; do
+    echo "== attempt \$att/3: docker-28.5.2.tgz (download.docker.com)" >> \$LOGD/docker-cli.log
+    if curl -sSL -o ~/bin/docker.tgz https://download.docker.com/linux/static/stable/x86_64/docker-28.5.2.tgz >> \$LOGD/docker-cli.log 2>&1 && tar -xzf ~/bin/docker.tgz -C ~/bin --strip-components=1 docker/docker >> \$LOGD/docker-cli.log 2>&1; then
+      rm -f ~/bin/docker.tgz
+      DOCKER_DL_OK=1
+      break
+    fi
+    echo "attempt \$att failed" >> \$LOGD/docker-cli.log
+    case \$att in 1) sleep 5 ;; 2) sleep 15 ;; esac
+  done
+  if [ \$DOCKER_DL_OK -eq 0 ]; then
+    echo "== fallback: docker-rootless-extras-28.5.2.tgz (alternate artifact, download.docker.com)" >> \$LOGD/docker-cli.log
+    if curl -sSL -o ~/bin/rootless-extras.tgz https://download.docker.com/linux/static/stable/x86_64/docker-rootless-extras-28.5.2.tgz >> \$LOGD/docker-cli.log 2>&1 && tar -xzf ~/bin/rootless-extras.tgz -C ~/bin --strip-components=1 >> \$LOGD/docker-cli.log 2>&1; then
+      rm -f ~/bin/rootless-extras.tgz
+      chmod +x ~/bin/rootlesskit ~/bin/rootlesskit-docker-proxy ~/bin/vpnkit ~/bin/dockerd-rootless-setuptool.sh 2>/dev/null || true
+      echo "fallback extras tarball extracted (rootless runtime vendored; docker CLI itself still absent)" >> \$LOGD/docker-cli.log
+    else
+      echo "fallback also failed" >> \$LOGD/docker-cli.log
+    fi
+  fi
+  if [ -x ~/bin/docker ]; then
+    cell toolchain-bootstrap OK "docker cli installed (~/bin/docker)"
+  else
+    cell toolchain-bootstrap FAIL "docker toolchain unavailable after 3 attempts + rootless-extras fallback — external download unreachable (DNS/network environment), not a repo defect: \$(tail -2 \$LOGD/docker-cli.log | tr '\n' ' ')"
+  fi
+fi
+# FIX 1 · compose plugin (QA-WARPFS-11, 2026-09-19): the static tarball above
+# ships ONLY the docker CLI — the compose plugin is a separate binary — so
+# 'docker compose up -d' died rc=125 "unknown shorthand flag: 'd'" on every
+# JIT agent and docker-deploy + chaos-shutdown graded FAIL for an environment
+# gap instead of a repo defect. Install the plugin user-space into the CLI's
+# default discovery dir (~/.docker/cli-plugins), best-effort: an offline
+# agent logs a WARNING and continues, it must not hard-fail the bootstrap.
+mkdir -p ~/.docker/cli-plugins
+if ! [ -x ~/.docker/cli-plugins/docker-compose ]; then
+  if curl -sSL -o ~/.docker/cli-plugins/docker-compose https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 >\$LOGD/compose.log 2>&1 && chmod +x ~/.docker/cli-plugins/docker-compose >> \$LOGD/compose.log 2>&1; then
+    cell toolchain-bootstrap OK "compose plugin installed (~/.docker/cli-plugins/docker-compose)"
+  else
+    echo "WARN: compose plugin install failed (offline agent?) — docker compose cells will fail rc=125 on this environment gap: \$(tail -1 \$LOGD/compose.log 2>/dev/null)" >&2
+  fi
+fi
+# Bootstrap-end verification (QA-WARPFS-11): a client-side 'docker compose
+# version' proves CLI + plugin are discovered together. HARNESS-COMPOSE=ok/missing
+# is printed for the run log and recorded as a cell so the evidence shows
+# whether a docker gap belongs to the harness or the agent.
+HARNESS_COMPOSE=missing
+if [ -x ~/bin/docker ] && ~/bin/docker compose version >/dev/null 2>&1; then HARNESS_COMPOSE=ok; fi
+echo "HARNESS-COMPOSE=\$HARNESS_COMPOSE"
+if [ "\$HARNESS_COMPOSE" = ok ]; then
+  cell toolchain-bootstrap OK "HARNESS-COMPOSE=ok (docker compose version passes)"
+else
+  cell toolchain-bootstrap INFO "HARNESS-COMPOSE=missing — docker compose unavailable (CLI or plugin install failed); docker-deploy/chaos-shutdown will fail on this environment gap, not a repo defect"
+fi
+# Point docker at the agent's own rootless daemon — bare 'docker' defaults to
+# /var/run/docker.sock (rootful, permission-denied for the agent uid) or the
+# user-socket guess /run/user/\$UID/docker.sock (proven chimera-v2 run 09-01).
+[ -x ~/bin/docker ] && export DOCKER_HOST="unix:///run/bunker/$agent/docker.sock"
+for i in \$(seq 1 20); do [ -S /run/bunker/$agent/docker.sock ] && break; sleep 2; done
+( timeout \${BUNKER_QA_ACT_TIMEOUT:-2400} bash -c "$ci_cmd" ) >\$LOGD/ci.log 2>&1; ci_rc=\$?
+if [ \$ci_rc -eq 0 ]; then
+  cell ci-pass OK "act: \$(grep -cE 'Job succeeded|✅ Success' \$LOGD/ci.log || true) jobs green — rc=0"
+else
+  ( $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
+  if [ \$nat_rc -eq 0 ]; then
+    cell ci-pass OK "act failed (rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)) — native suite PASS"
+  else
+    NCTX=""; build_env_failure \$LOGD/native.log && NCTX=" (environment: no C toolchain)"
+    NFAIL="\$(grep -v '^[[:space:]]*\$' \$LOGD/native.log 2>/dev/null | grep -E -- '^(--- FAIL|FAIL|ok  )' | tail -8 | tr '\n' '|')"
+    [ -n "\$NFAIL" ] || NFAIL="\$(grep -v '^[[:space:]]*\$' \$LOGD/native.log 2>/dev/null | tail -4 | tr '\n' '|')"
+    GOCTX=""; go_suite_env_failure \$LOGD/native.log && GOCTX=" (environment: missing build tool on the test host — not a code finding; FAIL lines below name the real failures)"
+    cell ci-pass FAIL "act rc=\$ci_rc (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX"
+  fi
+fi
+
+# 3 · upgrade — previous release → HEAD reinstall
+# QA-GITREINS-POC-004: the synced tree carries no .git history (sync_repo
+# excludes .git and re-inits one synthetic commit), so an in-cell 'git tag' is
+# ALWAYS empty and the old cell reported N/A "no release tags in repo" for repos
+# with 40 tags. Tags are detected on the HOST (detect_upgrade_inputs) and baked
+# in below; the cell then installs the previous release and re-installs HEAD over
+# it. If no previous release can be installed the cell FAILs with the reason —
+# never a silent N/A.
+QA_TAG_COUNT='$DETECT_TAG_COUNT'
+QA_PREV_TAG='$DETECT_PREV_TAG'
+QA_PREV_VERSION='$DETECT_PREV_VERSION'
+QA_PKG_NAME='$DETECT_PKG_NAME'
+QA_ECOSYSTEM='$DETECT_PKG_ECOSYSTEM'
+TREE_TAG=\$(git tag 2>/dev/null | sort -V | tail -2 | head -1)
+if [ -n "\$TREE_TAG" ]; then
+  git checkout -q --detach "\$TREE_TAG" 2>/dev/null && ( $install_cmd ) >\$LOGD/up1.log 2>&1 && git checkout -q --detach HEAD 2>/dev/null && ( $install_cmd ) >\$LOGD/up2.log 2>&1 && cell upgrade OK "tag \$TREE_TAG → HEAD reinstall clean (in-tree history)" || cell upgrade FAIL "\$(tail -2 \$LOGD/up1.log \$LOGD/up2.log | head -3)"
+elif [ "\$QA_TAG_COUNT" = "0" ]; then cell upgrade N/A "no release tags in repo"
+elif [ "\$QA_ECOSYSTEM" = "pip" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_VERSION" ]; then
+  ( pip install "\$QA_PKG_NAME==\$QA_PREV_VERSION" ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
+  ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
+  if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "pip \$QA_PKG_NAME==\$QA_PREV_VERSION (tag \$QA_PREV_TAG, the previous release) → HEAD install clean"
+  elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PKG_NAME==\$QA_PREV_VERSION would not install (tag \$QA_PREV_TAG): \$(fail_detail \$up1_rc \$LOGD/up1.log "pip install \$QA_PKG_NAME==\$QA_PREV_VERSION")"
+  else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME==\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log "$install_cmd")"; fi
+elif [ "\$QA_ECOSYSTEM" = "npm" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_VERSION" ]; then
+  ( npm install -g "\$QA_PKG_NAME@\$QA_PREV_VERSION" ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
+  ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
+  if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "npm -g \$QA_PKG_NAME@\$QA_PREV_VERSION (tag \$QA_PREV_TAG, the previous release) → HEAD install clean"
+  elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PKG_NAME@\$QA_PREV_VERSION would not install (tag \$QA_PREV_TAG): \$(fail_detail \$up1_rc \$LOGD/up1.log "npm install -g \$QA_PKG_NAME@\$QA_PREV_VERSION")"
+  else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME@\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log "$install_cmd")"; fi
+else cell upgrade FAIL "upgrade path UNVERIFIED: the repo has \$QA_TAG_COUNT release tag(s) (previous \$QA_PREV_TAG) but the synced tree carries no history to check out and no installable previous release was detected (ecosystem='\$QA_ECOSYSTEM' package='\$QA_PKG_NAME') — treat the cell as untested, not as not-applicable"; fi
+
+# 4 · docker-deploy — compose up + probe + down
+# ACTIONABLE-FAILURE (QA-CHIMERA-V2-8, 2026-09-14): the FAIL branch used to emit
+# 'tail -3 dc.log', which for a docker CLI failure is its generic footer
+# ("For more help on how to use Docker, head to https://docs.docker.com/go/guides/")
+# — docker prints the REAL error FIRST and the footer LAST, so the cell read FAIL
+# with no diagnosis and the deployment stayed unverified. FAIL now names the
+# command, its rc, and the log's leading lines via fail_detail().
+if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
+  DC_CMD="docker compose up -d --build"
+  ( \$DC_CMD ) >\$LOGD/dc.log 2>&1; dc_rc=\$?
+  if [ \$dc_rc -eq 0 ]; then
+    HP=""; for p in \$(grep -oE '"[0-9]+:[0-9]+"' docker-compose*.yml | head -3 | cut -d'"' -f2 | cut -d: -f1); do HP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:\$p/ 2>/dev/null) && [ -n "\$HP" ] && break; done
+    case "\$HP" in 200|301|302) cell docker-deploy OK "compose up + probe \$HP" ;; [0-9]*) cell docker-deploy INFO "compose up OK, probe \$HP" ;; *) cell docker-deploy OK "compose up clean (no probe port)" ;; esac
+    docker compose down >/dev/null 2>&1
+  else cell docker-deploy FAIL "\$(fail_detail \$dc_rc \$LOGD/dc.log \$DC_CMD)"; fi
+else cell docker-deploy N/A "no compose file"; fi
+
+# 5 · ui-probe
+if [ -f package.json ] && grep -qE '"dev"|"start"' package.json; then
+  ( npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & ); sleep 15
+  UP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  pkill -f 'npm run dev' 2>/dev/null || true
+  case "\$UP" in 200) cell ui-probe OK "UI serves 200 on :3111" ;; *) cell ui-probe FAIL "UI not serving (http=\$UP): \$(tail -2 \$LOGD/ui.log)" ;; esac
+else cell ui-probe N/A "no web UI detected"; fi
+
+# 6 · chaos-disconnect — network cut via dead proxy: clean fail or HANG?
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 timeout \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} bash -c "$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+if [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
+elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network is cut (timeout \${BUNKER_QA_DISCONNECT_TIMEOUT:-240}s — window sized above the ~2.5min natural offline suite duration so a normal long run cannot be misread as a hang) — \$(head -3 \$LOGD/disc.log)"
+elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
+elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
+elif go_suite_env_failure \$LOGD/disc.log; then cell chaos-disconnect INFO "ENV-BLOCKED: the go suite failed because the test host lacks a build tool (\`make\` on JIT agents, measured 2026-09-19) — the disconnect cut was exercised against a broken build, no disconnect finding (rc=\$disc_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/disc.log)"
+else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head -2 \$LOGD/disc.log)"; fi
+
+# 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
+if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
+  ( docker compose up -d >/dev/null 2>&1 && sleep 4 && docker compose stop >/dev/null 2>&1 && echo STOP=\$? && docker compose start >/dev/null 2>&1 && echo RESTART=\$? && docker compose kill >/dev/null 2>&1 && sleep 2 && docker compose start >/dev/null 2>&1 && echo KILLRECOVER=\$? && docker compose down >/dev/null 2>&1 ) >\$LOGD/sd.log 2>&1; sd_rc=\$?
+  if grep -qE 'STOP=0' \$LOGD/sd.log && grep -qE 'KILLRECOVER=0' \$LOGD/sd.log; then cell chaos-shutdown OK "SIGTERM + SIGKILL recovery clean"
+  elif grep -qE 'STOP=0' \$LOGD/sd.log; then cell chaos-shutdown INFO "graceful ok, kill-recovery issue: \$(cat \$LOGD/sd.log)"
+  else cell chaos-shutdown FAIL "\$(fail_detail \$sd_rc \$LOGD/sd.log 'docker compose up -d; stop; start; kill; start; down')"; fi
+else cell chaos-shutdown N/A "no compose file"; fi
+
+# 8 · chaos-corruption — truncate a state file, OBSERVE the next start, restore
+# QA-GITREINS-POC-6 (2026-09-17): the old cell truncated the first *.db that
+# find returned and recorded INFO "state file truncated: \$SF — watch crash
+# behavior on next start". No start was ever observed (that WAS the finding), the
+# truncated file was left in place for the cells that run after it, and the cell
+# could not tell a real state store from a stray — for gitreins-poc it picked
+# ./dev.db, an untracked leftover that no source file in the tree references.
+# Now: candidates exclude tool caches, a candidate whose basename appears in the
+# project's own source wins, the next start IS run under a timeout, the outcome
+# is classified, and ~/state.bak is restored either way.
+CAND=\$(find . -maxdepth 3 \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) \
+  -not -path './.git/*' -not -path './node_modules/*' -not -path './.mypy_cache/*' \
+  -not -path './.pytest_cache/*' -not -path './.ruff_cache/*' -not -path './.vfs/*' \
+  -not -path './.venv/*' -not -path './venv/*' 2>/dev/null | sort)
+state_ref() { # <candidate> → first OTHER source file that mentions its basename
+  local b; b=\$(basename "\$1")
+  grep -rIl --exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules \
+    --exclude-dir=.mypy_cache --exclude-dir=.coding-hermes --exclude-dir=.gitreins \
+    --include='*.py' --include='*.js' --include='*.ts' --include='*.go' --include='*.rs' \
+    --include='*.rb' --include='*.java' --include='*.sh' --include='*.toml' \
+    --include='*.yaml' --include='*.yml' -F "\$b" . 2>/dev/null | grep -vF "\$1" | head -1
+}
+SF=""; SF_REF=""
+for c in \$CAND; do r=\$(state_ref "\$c"); if [ -n "\$r" ]; then SF="\$c"; SF_REF="\$r"; break; fi; done
+[ -z "\$SF" ] && [ -n "\$CAND" ] && SF=\$(printf '%s\n' "\$CAND" | head -1)
+if [ -n "\$SF" ]; then
+  if cp "\$SF" ~/state.bak 2>/dev/null && head -c 64 "\$SF" > ~/trunc 2>/dev/null && cp ~/trunc "\$SF" 2>/dev/null; then
+    REF="not referenced by any source file"
+    [ -n "\$SF_REF" ] && REF="referenced by \$SF_REF"
+    if [ -n "\$BIN" ]; then
+      ( timeout 20 \$BIN ) >\$LOGD/corr.log 2>&1; corr_rc=\$?
+      cp ~/state.bak "\$SF" 2>/dev/null
+      if grep -qiE 'panic|traceback \(most recent|segmentation fault|core dumped|fatal error' \$LOGD/corr.log; then
+        cell chaos-corruption FAIL "crash on the next start after truncating \$SF (\$REF): \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped|fatal error' \$LOGD/corr.log)"
+      elif [ \$corr_rc -eq 124 ]; then cell chaos-corruption FAIL "next start HANGS (>20s) after truncating \$SF (\$REF): \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
+      elif [ \$corr_rc -eq 0 ]; then cell chaos-corruption OK "next start unaffected by a truncated \$SF (rc=0, \$REF) — state restored"
+      elif grep -qiE 'corrupt|truncat|checksum|malformed|not a valid|unexpected (EOF|end of)' \$LOGD/corr.log; then cell chaos-corruption OK "clean error on the next start after truncating \$SF (rc=\$corr_rc, \$REF): \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
+      else
+        # QA-OFF-BY-ONE-15 (2026-09-17): a non-zero exit that never names
+        # corruption is NOT evidence the app handles a truncated state store —
+        # the old rule scored ANY non-124 failure rc as OK "clean error", which
+        # false-greened a build/start refusal ("no Go files"). Grade the outcome
+        # honestly UNVERIFIED and keep the log for the foreman to read.
+        cell chaos-corruption INFO "truncated \$SF (\$REF): next start exited rc=\$corr_rc but the log never mentions corruption — restart behavior UNVERIFIED, likely an unrelated failure: \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
+      fi
+    else
+      cp ~/state.bak "\$SF" 2>/dev/null
+      cell chaos-corruption INFO "truncated \$SF (\$REF) and restored it, but no start command was detected (no node/go/python entrypoint) — restart behavior stays UNVERIFIED for this tree"
+    fi
+  else cell chaos-corruption FAIL "could not truncate \$SF: \$(tail -1 ~/trunc 2>/dev/null || echo cp-error)"; fi
+else cell chaos-corruption N/A "no db/state files in repo"; fi
+
+# 9 · chaos-resource — suite under 3G memory cap
+# QA-TASK-ROUTER-3: a green/red result is VACUOUS unless the log PROVES the cap
+# applied — the finding was that with the wrong PATH the wrapper was dropped and
+# the suite ran uncapped while the cell still reported a result. Record the cap
+# AND prove it inside the capped child (ulimit -v read back from the child, not
+# from the parent), then require that evidence in the verdict.
+CAP_KB=3145728
+export CAP_KB   # the single-quoted probe expands CAP_KB inside \`bash -c\`, so it must be in the child env
+# Single-quoted on purpose: the $(ulimit -v) must expand INSIDE the capped
+# child, not at assignment time in the uncapped parent. The old double-quoted
+# form froze "CAP_EFFECTIVE=unlimited" into the probe text before the cap was
+# set, so every run reported "cap NOT applied" regardless of the real limit
+# (warpfs 09-19, off-by-one 09-20 x2 — probe artifact, not a real defect;
+# the subshell probe in res.log proves the ulimit itself applies).
+cap_probe='echo CAP_EFFECTIVE=\$(ulimit -v) CAP_REQUESTED=\$CAP_KB'
+# QA-OFF-BY-ONE-11 / warpfs 09-19 / off-by-one 09-20 (3 runs): the child kept
+# reporting CAP_EFFECTIVE=unlimited even though the subshell sets ulimit -v
+# first. Probe EVERY layer so the next run names where the cap is lost:
+# parent shell -> subshell right after ulimit -> the capped child itself.
+echo PARENT_CAP=\$(ulimit -v) >\$LOGD/res.log
+( ulimit -v \$CAP_KB; echo SUBSHELL_CAP=\$(ulimit -v); bash -c "\$cap_probe; $native_cmd" ) >>\$LOGD/res.log 2>&1; res_rc=\$?
+cap_seen=\$(sed -n 's/^CAP_EFFECTIVE=//p' \$LOGD/res.log | head -1)
+sub_seen=\$(sed -n 's/^SUBSHELL_CAP=//p' \$LOGD/res.log | head -1)
+par_seen=\$(sed -n 's/^PARENT_CAP=//p' \$LOGD/res.log | head -1)
+cap_note="cap=\${CAP_KB}KB child_saw=\${cap_seen:-NONE} subshell_saw=\${sub_seen:-NONE} parent_saw=\${par_seen:-NONE}"
+if [ "\$cap_seen" != "\$CAP_KB" ]; then
+  # the child did not see the cap: the wrapper was dropped (PATH/shape problem).
+  # A result from this run says NOTHING about memory behaviour.
+  cell chaos-resource UNVERIFIED "cap NOT applied in the child (\$cap_note) — the suite ran UNCAPPED, so no memory finding either way (harness defect, not a repo result): rc=\$res_rc"
+elif [ \$res_rc -eq 0 ]; then cell chaos-resource PASS "suite survives 3G memory cap (\$cap_note)"
+elif [ \$res_rc -eq 127 ]; then cell chaos-resource UNVERIFIED "command not found under cap (rc=127, \$cap_note) — the suite NEVER RAN; INFRA-FAIL, not a result: \$(tail -2 \$LOGD/res.log)"
+elif grep -qiE 'killed|out of memory' \$LOGD/res.log; then cell chaos-resource INFO "OOM under cap (expected for heavy suites, \$cap_note): \$(tail -2 \$LOGD/res.log)"
+elif build_incomplete \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the build never completed under the 3G cap, so the cap was NEVER exercised (rc=\$res_rc, \$cap_note; environment or code, never memory) — not a memory finding: \$(build_incomplete_cause \$LOGD/res.log)"
+elif go_suite_env_failure \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the suite died because the test host lacks a build tool — cap WAS applied, but the failure is the missing tool, not memory (\$cap_note, rc=\$res_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/res.log)"
+else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$LOGD/res.log)"; fi
+
+# 10 · chaos-errorpath — missing config: clean usage or panic?
+if [ -n "\$BIN" ]; then
+  mkdir -p ~/qa-noconfig-\$\$ && cd ~/qa-noconfig-\$\$
+  ( timeout 15 \$BIN ) >\$LOGD/ep.log 2>&1; ep_rc=\$?
+  if grep -q panic \$LOGD/ep.log; then cell chaos-errorpath FAIL "PANIC on missing config: \$(grep -m1 panic \$LOGD/ep.log)"
+  elif grep -qiE 'panic|traceback \(most recent|fatal error|no Go files|build constraints exclude|cannot find package|build failed' \$LOGD/ep.log; then cell chaos-errorpath INFO "start probe died before the app ran (toolchain/build failure, not an error-path verdict) — missing-config behavior UNVERIFIED: \$(head -2 \$LOGD/ep.log | tr '\n' ' ')"
+  elif [ \$ep_rc -gt 0 ] && [ \$ep_rc -ne 124 ]; then cell chaos-errorpath OK "clean error on missing config (rc=\$ep_rc)"
+  else cell chaos-errorpath INFO "unexpected: rc=\$ep_rc \$(head -2 \$LOGD/ep.log)"; fi
+else cell chaos-errorpath N/A "no single-binary entrypoint"; fi
+
+echo CELLS-DONE
+touch ~/qa-run.finished
+EOF
+}
+
+run() {
+  local repo="${1:?usage: bunker-qa.sh run <repo-dir> [--keep]}"
+  shift
+  local keep=0
+  for a in "$@"; do [ "$a" = "--keep" ] && keep=1; done
+
+  local PROJ; PROJ=$(basename "$repo")
+  : > "$EVIDENCE"
+
+  # Timeout/empty-evidence traps (2026-09-07, QA-DEXDAT-CORE-1): a tool-level
+  # SIGTERM (Hermes terminal cap) or a sync-fail exit kills the battery mid-run
+  # leaving a 0-byte evidence file — parse_cells then sees cells:[] and the DAG
+  # reports UNVERIFIED silently, indistinguishable from "nothing to check".
+  # write_fail_if_empty() (top-level, shared with launch()) appends exactly one
+  # FAIL cell — idempotent: TERM + EXIT traps firing together produce one line.
+  # Repo sanity runs AFTER truncate+traps (QA-GITREINS-POC-QA-1): a stand-in
+  # workdir (no .git) must yield an actionable FAIL row, not a silent exit.
+  trap 'write_fail_if_empty "battery terminated by SIGTERM (tool timeout) before any cell recorded"; exit 124' TERM
+  trap 'write_fail_if_empty "battery interrupted by SIGINT before any cell recorded"; exit 130' INT
+  trap 'write_fail_if_empty "battery exited rc=$? before any cell recorded"' EXIT
+
+  if [ ! -d "$repo/.git" ]; then
+    local git_top
+    git_top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
+    echo "ERROR: $repo is not a git repo (git resolves toplevel: ${git_top:-none}) — dispatch against the primary repo workdir" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"run refused: %s is not a git repo (git resolves toplevel: %s) — a role-lane workdir was dispatched instead of the primary repo; re-dispatch against the real workdir","ts":"%s"}\n' \
+      "$repo" "${git_top:-none}" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  fi
+
+  log "QA project: $PROJ — fresh-system pass on $SERVER (ttl $TTL)"
+
+  # Deterministic-failure preflights (config / ssh / capacity) — SHARED with
+  # launch(); see preflights() for the record-one-FAIL-row + rc=2 contract.
+  preflights
+
+  local agent key spawn_err
+  spawn_err=$(mktemp)
+  agent=$(spawn_agent 2>"$spawn_err") || {
+    # QA-2 (2026-09-03): hard-fail loudly — record a FAIL cell so the DAG's
+    # parse_cells never interprets an empty evidence file as "nothing to
+    # check". UNVERIFIED must be distinguishable from a clean battery.
+    # The REAL spawn stderr (e.g. "port range allocation: no free port
+    # ranges available") is captured into the cell detail so interpreters
+    # never have to re-diagnose the failure manually.
+    local err_detail
+    err_detail=$(tail -3 "$spawn_err" | tr '\n' ' ' | cut -c1-300)
+    rm -f "$spawn_err"
+    echo "ERROR: spawn failed on $SERVER: $err_detail" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"spawn failed on %s: %s","ts":"%s"}\n' \
+      "$SERVER" "$err_detail" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  }
+  rm -f "$spawn_err"
+  key="$HOME/.bunker/keys/$agent"
+  BUNKER_QA_AGENT="$agent"
+  # QA-BUNKER-19 b+c (2026-09-21): cleanup destroy failures are SURFACED, not
+  # swallowed — the old `|| true` defeated the destroy-failure escalation
+  # contract (a failed destroy left agent 230abb5b running, invisible to the
+  # run log). qa_destroy_agent() emits "destroy FAILED"/"STILL PRESENT AFTER
+  # DESTROY" on stderr + a FAIL evidence row; the evidence path is the $EVIDENCE
+  # global so the EXIT trap needs nothing captured at definition time.
+  cleanup() { log "destroying temp agent $BUNKER_QA_AGENT"; qa_destroy_agent "$BUNKER_QA_AGENT" "$EVIDENCE"; }
+  [ "$keep" = 1 ] || trap cleanup EXIT
+  log "agent=$agent @ $SERVER (tailscale)"
+
+  # Pre-flight hygiene (2026-08-31): temp-agent homes PERSIST across runs
+  # (spawn is idempotent, no userdel), so a previous project's
+  # ~/qa-evidence.jsonl, ~/qa-run.sh and /tmp/*.log (owned by the old
+  # agent's uid) survive into this run. That caused (a) stale evidence
+  # cells from the prior project to be appended to this run's evidence
+  # file, and (b) "Permission denied" on /tmp/inst.log etc. because the
+  # fresh agent uid can't overwrite the old agent's files. Clear them
+  # before shipping anything.
+  agent_ssh "rm -f ~/qa-run.sh ~/qa-evidence.jsonl /tmp/inst.log /tmp/ci.log /tmp/native.log /tmp/disc.log /tmp/ep.log /tmp/sd.log /tmp/res.log" >/dev/null 2>&1 || true
+
+  # detect tooling LOCALLY (one place, no quoting layers) — SHARED with launch()
+  # (BUNKER_QA_INSTALL_CMD / BUNKER_QA_NATIVE_CMD escape hatches live in detect_cmds)
+  detect_cmds "$repo" "$agent"
+  local install_cmd="$DETECT_INSTALL" ci_cmd="$DETECT_CI" native_cmd="$DETECT_NATIVE"
+
+  log "CELL fresh-install: sync repo → ~/qa-$PROJ"
+  # Sync verdict/logic lives in sync_repo() (shared with launch(); see its
+  # comment for why the REMOTE's SYNC-OK echo is the truth, not tar's rc).
+  if ! sync_repo "$repo" "$PROJ"; then
+    echo "ERROR: repo sync failed — $SYNC_ERR"
+    exit 1
+  fi
+
+  # ship the remote script base64 (the ONLY quoting-safe path through ssh)
+  local b64
+  b64=$(build_remote_script "$PROJ" "$install_cmd" "$ci_cmd" "$native_cmd" | base64 -w0)
+  agent_ssh "echo '$b64' | base64 -d > ~/qa-run.sh && bash ~/qa-run.sh" | tail -1
+
+  # pull evidence back
+  agent_ssh "cat ~/qa-evidence.jsonl 2>/dev/null" >> "$EVIDENCE" || true
+
+  log "QA pass complete — evidence: $EVIDENCE"
+  echo "EVIDENCE=$EVIDENCE"
+}
+
+# ─── launch — PHASE A: preflights + spawn + sync + START the battery DETACHED ───
+# Returns as soon as `qa-run.sh` is running on the agent — it NEVER waits on a
+# cell. This is what keeps every Hermes tool call far under the ~420s terminal
+# cap that killed the synchronous battery (QA-HERMES-CANOPY-8).
+# Side effects: spawns the temp agent (it OUTLIVES this call by design — collect
+# or its TTL tears it down), syncs the repo, writes $EVIDENCE.meta (agent=,
+# server=, evidence=, launched=, keep=) and the ONE launch cell that makes a
+# 0-byte evidence file impossible.
+launch() {
+  local repo="${1:?usage: bunker-qa.sh launch <repo-dir> [--keep]}"
+  shift
+  local keep=0
+  for a in "$@"; do [ "$a" = "--keep" ] && keep=1; done
+
+  local PROJ; PROJ=$(basename "$repo")
+  : > "$EVIDENCE"
+
+  # TR-085: a launch killed before it finished (tool cap, SIGTERM, crash) used to
+  # leave NO record at all — the meta file was written only on the success path,
+  # so `collect` fell back to the shared default evidence path and probed whatever
+  # agent id that STALE meta named (dogfood 2026-09-20: collect probed a 2-day-old
+  # agent while the real one ran on unrecorded). Write an EARLY record now, and
+  # keep it up to date as the id becomes known. collect() refuses a mismatch.
+  local meta="$EVIDENCE.meta"
+  write_meta() { # agent server keep project
+    printf 'agent=%s\nserver=%s\nevidence=%s\nlaunched=%s\nkeep=%s\nproject=%s\n' \
+      "${1:-}" "${2:-}" "$EVIDENCE" "${3:-$(date -u +%FT%TZ)}" "${4:-0}" "${5:-$PROJ}" > "$meta"
+  }
+  write_meta "" "$SERVER" "$(date -u +%FT%TZ)" 0 "$PROJ"
+
+  # Traps + evidence truncate MUST precede the repo sanity check: a
+  # stand-in-workdir dispatch (no .git — QA-GITREINS-POC-QA-1, 2026-09-17)
+  # used to exit here silently, leaving a 0-byte evidence file and no FAIL
+  # row, which collect then read as "launch phase never executed".
+  trap 'write_fail_if_empty "launch terminated by SIGTERM (tool timeout) before the launch cell was recorded"; exit 124' TERM
+  trap 'write_fail_if_empty "launch interrupted by SIGINT before the launch cell was recorded"; exit 130' INT
+  trap 'write_fail_if_empty "launch exited rc=$? before the launch cell was recorded"' EXIT
+
+  if [ ! -d "$repo/.git" ]; then
+    local git_top
+    git_top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
+    echo "ERROR: $repo is not a git repo (git resolves toplevel: ${git_top:-none}) — dispatch against the primary repo workdir" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"launch refused: %s is not a git repo (git resolves toplevel: %s) — a role-lane workdir was dispatched instead of the primary repo; re-dispatch against the real workdir","ts":"%s"}\n' \
+      "$repo" "${git_top:-none}" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  fi
+
+  log "QA LAUNCH project: $PROJ — detached battery on $SERVER (ttl $TTL)"
+  preflights
+
+  local spawn_err
+  spawn_err=$(mktemp)
+  agent=$(spawn_agent 2>"$spawn_err") || {
+    # Same contract as run(): hard-fail loudly with ONE actionable FAIL cell
+    # (the real spawn stderr) so parse_cells can never read an empty evidence
+    # file as "nothing to check".
+    local err_detail
+    err_detail=$(tail -3 "$spawn_err" | tr '\n' ' ' | cut -c1-300)
+    rm -f "$spawn_err"
+    echo "ERROR: spawn failed on $SERVER: $err_detail" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"spawn failed on %s: %s","ts":"%s"}\n' \
+      "$SERVER" "$err_detail" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  }
+  rm -f "$spawn_err"
+  key="$HOME/.bunker/keys/$agent"
+  BUNKER_QA_AGENT="$agent"
+  # TR-085: record the real agent id the moment it is known, so a kill anywhere
+  # after this point leaves collect() a CORRECT id to poll (or destroy).
+  write_meta "$agent" "$SERVER" "$(date -u +%FT%TZ)" "$keep" "$PROJ"
+  # NO destroy trap here ON PURPOSE: the agent must outlive this call — that is
+  # the entire point of the split. collect() destroys it once the battery has
+  # finished; otherwise its TTL does.
+  log "agent=$agent @ $SERVER (tailscale)"
+
+  # Pre-flight hygiene (2026-08-31): temp-agent homes PERSIST across runs, so a
+  # previous project's script/evidence/marker/logs survive into this run.
+  # Clearing the finish marker matters here: a stale one would make collect()
+  # read "finished" while this run's battery is barely started.
+  agent_ssh "rm -f ~/qa-run.sh ~/qa-run.finished ~/qa-run.log ~/qa-evidence.jsonl /tmp/inst.log /tmp/ci.log /tmp/native.log /tmp/disc.log /tmp/ep.log /tmp/sd.log /tmp/res.log" >/dev/null 2>&1 || true
+
+  detect_cmds "$repo" "$agent"
+
+  log "CELL fresh-install: sync repo → ~/qa-$PROJ"
+  if ! sync_repo "$repo" "$PROJ"; then
+    echo "ERROR: repo sync failed — $SYNC_ERR" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"repo sync failed in launch phase (server=%s agent=%s): %s","ts":"%s"}\n' \
+      "$SERVER" "$agent" "$(printf '%s' "$SYNC_ERR" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  fi
+
+  # Ship the remote script base64 (the ONLY quoting-safe path through ssh) and
+  # START it detached. Deviations from the naive one-liner, both deliberate:
+  #  * the decode runs in the FOREGROUND (so a mangled b64 cannot print
+  #    LAUNCHED over an empty ~/qa-run.sh), and `wc -c` records the shipped size;
+  #  * the start is grouped `( ... & )` with </dev/null so the battery is fully
+  #    orphaned (setsid + nohup + no stdin) and the ssh channel closes at once.
+  local b64 launch_out launch_rc
+  b64=$(build_remote_script "$PROJ" "$DETECT_INSTALL" "$DETECT_CI" "$DETECT_NATIVE" | base64 -w0)
+  launch_out=$(agent_ssh "echo '$b64' | base64 -d > ~/qa-run.sh && echo SCRIPT_BYTES=\$(wc -c < ~/qa-run.sh) && ( nohup setsid bash ~/qa-run.sh </dev/null >~/qa-run.log 2>&1 & ) && echo LAUNCHED" 2>&1)
+  launch_rc=$?
+  if ! printf '%s' "$launch_out" | grep -q 'LAUNCHED'; then
+    echo "ERROR: could not start the battery on agent=$agent ($SERVER): $(printf '%s' "$launch_out" | tail -1)" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"qa-run.sh could not be started on agent=%s (%s) rc=%s: %s","ts":"%s"}\n' \
+      "$agent" "$SERVER" "$launch_rc" "$(printf '%s' "$launch_out" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  fi
+
+  local launched meta script_bytes
+  launched=$(date -u +%FT%TZ)
+  script_bytes=$(printf '%s' "$launch_out" | sed -n 's/^SCRIPT_BYTES=//p' | tail -1)
+  write_meta "$agent" "$SERVER" "$launched" "$keep" "$PROJ"
+  printf '{"project":"%s","cell":"launch","status":"OK","detail":"agent=%s server=%s ttl=%s script_bytes=%s — battery started detached (qa-run.sh); phase B: bunker-qa.sh collect --evidence %s","ts":"%s"}\n' \
+    "$PROJ" "$agent" "$SERVER" "$TTL" "${script_bytes:-unknown}" "$EVIDENCE" "$launched" >> "$EVIDENCE"
+  log "QA launch complete — no cells waited on locally (phase B: collect --evidence $EVIDENCE)"
+  echo "LAUNCHED agent=$agent evidence=$EVIDENCE"
+}
+
+# ─── collect — PHASE B: poll → pull → destroy (idempotent) ───
+# While the battery is still alive on the agent this prints RUNNING, exits 0 and
+# DESTROYS NOTHING, so a short-poll loop can call it repeatedly until the
+# 7-15 min battery finishes. Once it is done: merge-dedupe the agent's
+# ~/qa-evidence.jsonl into the local evidence file (idempotent on the row "ts"
+# field), append ONE collect cell, destroy the temp agent, print COLLECTED.
+# Failures (no launch record / unreachable agent / pull failed) record a collect
+# FAIL cell and exit 0 — collect is a poll, not the battery's verdict.
+collect() {
+  local evidence=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --evidence|-e) evidence="${2:-}"; shift 2 ;;
+      --evidence=*) evidence="${1#--evidence=}"; shift ;;
+      -*) echo "ERROR: unknown collect flag: $1" >&2; exit 2 ;;
+      *) evidence="$1"; shift ;;
+    esac
+  done
+  [ -n "$evidence" ] || { echo "usage: bunker-qa.sh collect --evidence <path>" >&2; exit 2; }
+  [ -f "$evidence" ] || : > "$evidence"
+  local meta="$evidence.meta"
+
+  append_collect_row() { # <status> <detail>
+    printf '{"cell":"collect","status":"%s","detail":"%s","ts":"%s"}\n' \
+      "$1" "$(printf '%s' "$2" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$evidence"
+  }
+
+  if [ ! -f "$meta" ]; then
+    append_collect_row FAIL "no launch record at $meta — nothing to collect (launch phase never ran, or a different evidence path)"
+    echo "COLLECT-FAIL no-launch-record"
+    exit 0
+  fi
+  # Idempotency: a successful collect already recorded its cell — re-calling is a
+  # no-op instead of a spurious "unreachable agent" FAIL (the agent is destroyed
+  # by then, so the probe below would be empty).
+  if grep -q '"cell":"collect","status":"OK"' "$evidence" 2>/dev/null; then
+    echo "COLLECTED already-collected"
+    exit 0
+  fi
+
+  local agent="" server="" ev="" keep=0
+  agent=$(sed -n 's/^agent=//p' "$meta" | head -1)
+  server=$(sed -n 's/^server=//p' "$meta" | head -1)
+  ev=$(sed -n 's/^evidence=//p' "$meta" | head -1)
+  [ "$(sed -n 's/^keep=//p' "$meta" | head -1)" = "1" ] && keep=1
+  [ -n "$server" ] && SERVER="$server"
+  [ -n "$ev" ] && [ "$ev" != "$evidence" ] && echo "WARN: launch record names evidence=$ev but collect was asked for $evidence (using $evidence)" >&2
+  if [ -z "$agent" ]; then
+    append_collect_row FAIL "launch record $meta has no agent= line — cannot poll the battery (the launch was killed before the agent id was recorded; check \`bunker list --server $server\` for an orphan and destroy it)"
+    echo "COLLECT-FAIL no-agent"
+    exit 0
+  fi
+  # TR-085: the meta names an agent that is not OURS. A stale meta from an earlier
+  # run (or a different evidence path) makes collect probe/destroy the wrong
+  # machine while the real agent runs unrecorded. Refuse loudly instead.
+  if [ -n "$ev" ] && [ "$ev" != "$evidence" ]; then
+    append_collect_row FAIL "launch record $meta belongs to a different run: it names evidence=$ev but collect was asked for $evidence (agent=$agent NOT probed or destroyed — verify with \`bunker list --server $server\`)"
+    echo "COLLECT-FAIL evidence-mismatch"
+    exit 0
+  fi
+  # An agent id only exists for runs that reached the spawn step. If the record
+  # predates this collect by more than the TTL the id cannot be live any more.
+  local rec_launched rec_age
+  rec_launched=$(sed -n 's/^launched=//p' "$meta" | head -1)
+  if [ -n "$rec_launched" ]; then
+    rec_age=$(python3 - "$rec_launched" <<'PY' 2>/dev/null || echo ""
+import sys, datetime
+try:
+    t = datetime.datetime.strptime(sys.argv[1], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+    print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds()))
+except Exception:
+    print("")
+PY
+)
+    if [ -n "$rec_age" ] && [ "$rec_age" -gt 86400 ]; then
+      append_collect_row FAIL "launch record $meta is ${rec_age}s old (>24h, TTL=$TTL) — agent=$agent cannot still be live; refusing to probe a stale id. Check \`bunker list --server $server\` and re-launch if the battery never ran"
+      echo "COLLECT-FAIL stale-record"
+      exit 0
+    fi
+  fi
+  key="$HOME/.bunker/keys/$agent"
+  # collect must stay SHORT: bound the agent ssh at BUNKER_QA_COLLECT_SSH_TIMEOUT
+  # (120s) instead of agent_ssh's 1800s battery default, so a wedged host cannot
+  # blow the tool cap again.
+  local ssh_to="${BUNKER_QA_COLLECT_SSH_TIMEOUT:-120}"
+
+  # ONE cheap probe classifies the remote state. The pgrep pattern is
+  # bracket-escaped ([q]a-run\.sh) so this PROBE's own shell argv — which
+  # contains the pattern text — can never match itself and report RUNNING forever.
+  local probe
+  probe=$(BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh "if [ -f ~/qa-run.finished ]; then echo FINISHED; elif pgrep -f '[q]a-run\.sh' >/dev/null 2>&1; then echo RUNNING; else echo GONE; fi" 2>/dev/null | tail -1)
+
+  case "$probe" in
+    RUNNING)
+      log "battery still running on agent=$agent ($SERVER) — agent left intact"
+      echo "RUNNING agent=$agent evidence=$evidence"
+      exit 0
+      ;;
+    FINISHED|GONE)
+      : ;;  # marker present, or the process is gone → pull what it produced
+    *)
+      append_collect_row FAIL "cannot reach agent=$agent on $SERVER (ssh probe returned no state) — agent left intact"
+      echo "COLLECT-FAIL unreachable-agent"
+      exit 0
+      ;;
+  esac
+
+  local tmp errf pull_rc
+  tmp=$(mktemp); errf=$(mktemp)
+  BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh "cat ~/qa-evidence.jsonl 2>/dev/null" > "$tmp" 2>"$errf"
+  pull_rc=$?
+  if [ "$pull_rc" -ne 0 ] && [ ! -s "$tmp" ]; then
+    append_collect_row FAIL "could not pull ~/qa-evidence.jsonl from agent=$agent ($SERVER) rc=$pull_rc: $(head -1 "$errf")"
+    rm -f "$tmp" "$errf"
+    echo "COLLECT-FAIL pull-failed"
+    exit 0
+  fi
+  rm -f "$errf"
+
+  # Merge-dedupe on the row "ts" field: re-calling collect after a successful
+  # pull adds nothing. The merge is atomic (temp file + os.replace) so a crash
+  # mid-merge cannot truncate the local evidence file.
+  if [ -s "$tmp" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$evidence" "$tmp" <<'PY' || cat "$tmp" >> "$evidence"
+import json, os, sys
+
+dest, src = sys.argv[1], sys.argv[2]
+seen, out = set(), []
+for path in (dest, src):
+    try:
+        fh = open(path)
+    except OSError:
+        continue
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            key = row.get("ts")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(json.dumps(row))
+tmp_dest = dest + ".merge.tmp"
+with open(tmp_dest, "w") as fh:
+    fh.write("\n".join(out) + ("\n" if out else ""))
+os.replace(tmp_dest, dest)
+PY
+  elif [ -s "$tmp" ]; then
+    cat "$tmp" >> "$evidence"   # no python3: a duplicate row beats an unpulled battery
+  fi
+  local pulled
+  pulled=$(grep -c '^{' "$tmp" 2>/dev/null || true)
+  rm -f "$tmp"
+
+  local detail="agent=$agent ($SERVER) — pulled ${pulled:-0} evidence row(s), merge-deduped by ts"
+  if [ "$keep" = 1 ]; then
+    detail="$detail; agent KEPT (launched with --keep) — destroy it manually"
+  else
+    # QA-BUNKER-19 b+c (2026-09-21): surfaced destroy + post-destroy absence
+    # verify (qa_destroy_agent appends its own FAIL row to $evidence when the
+    # destroy fails or the id still lists). Replaces the bare `|| true` swallow.
+    qa_destroy_agent "$agent" "$evidence"
+    detail="$detail; temp agent destroyed"
+  fi
+  append_collect_row OK "$detail"
+  log "QA collect complete — evidence: $evidence"
+  echo "COLLECTED agent=$agent rows=${pulled:-0} evidence=$evidence"
+}
+
+case "${1:-}" in
+  status) status ;;
+  run) run "$2" "${@:3}" ;;
+  launch) launch "$2" "${@:3}" ;;
+  collect) collect "${@:2}" ;;
+  # test hook: print the generated script. `agent` is a placeholder here — the
+  # real caller (run/launch) sets it before build_remote_script, and without a
+  # default `set -u` aborts the heredoc expansion entirely (no output at all).
+  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
+  # QA-CRIER-20 test hook: detect_cmds is a pure function of the repo dir
+  # (reads files, sets DETECT_* globals), so this is safe to run against any
+  # directory. "$3" defaults to the same placeholder agent __gen-remote uses.
+  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" ;;
+  *) echo "usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>" ;;
+esac
