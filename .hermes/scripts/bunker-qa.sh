@@ -942,7 +942,8 @@ if [ \$ci_rc -eq 0 ]; then
 else
   ( $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
   if [ \$nat_rc -eq 0 ]; then
-    cell ci-pass OK "act failed (rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)) — native suite PASS"
+    ACTCTXOK=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTXOK=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
+    cell ci-pass OK "act failed (rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)) — native suite PASS\$ACTCTXOK"
   else
     NCTX=""; build_env_failure \$LOGD/native.log && NCTX=" (environment: no C toolchain)"
     NFAIL="\$(grep -v '^[[:space:]]*\$' \$LOGD/native.log 2>/dev/null | grep -E -- '^(--- FAIL|FAIL|ok  )' | tail -8 | tr '\n' '|')"
