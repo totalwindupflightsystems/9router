@@ -678,7 +678,7 @@ fi
   ZIGB=\$(ls -d ~/tools/zig/zig ~/tools/zig*/zig 2>/dev/null | head -1)
   if [ -n "\$ZIGB" ] && [ -x "\$ZIGB" ]; then
     mkdir -p ~/tools/bin
-    for zt in cc c++ ar ranlib; do
+    for zt in cc c++ ld ar ranlib; do
       case "\$zt" in
         cc|c++)
           # QA-WARPFS-9 rework 2 (2026-09-19): cargo/cc-rs hands the RUST target
@@ -700,6 +700,14 @@ fi
           # non-gnu/non-musl target is passed through untouched (the sed only
           # matches the "-unknown-linux-" prefix).
           printf '#!/bin/sh\nn=\$#\ni=0\nwhile [ \$i -lt \$n ]; do\n  a=\$1; shift\n  case "\$a" in\n    --target=*) a=\$(printf "%%s" "\$a" | sed "s/-unknown-linux-/-linux-/") ;;\n  esac\n  set -- "\$@" "\$a"\n  i=\$((i+1))\ndone\nexec "%s" %s "\$@"\n' "\$ZIGB" "\$zt" > ~/tools/bin/"\$zt" ;;
+        ld)
+          # QA-H3-14 v3 (2026-09-21, battery 23ae94ab): bare agents lack binutils
+          # entirely and GNU make's ./configure aborts with "no acceptable ld
+          # found in $PATH" — ld is NOT a zig subcommand, so it cannot ride the
+          # plain-forward *) branch. zig serves lld as `zig ld.lld`. Live-proven
+          # on the kept battery agent: with this wrapper configure passes,
+          # build.sh produces GNU Make 4.4.1, and a toy target runs (TOY_OK).
+          printf '#!/bin/sh\nexec "%s" ld.lld "\$@"\n' "\$ZIGB" > ~/tools/bin/"\$zt" ;;
         *)
           # ar/ranlib take no target triple — forwarded verbatim as before.
           printf '#!/bin/sh\nexec "%s" %s "\$@"\n' "\$ZIGB" "\$zt" > ~/tools/bin/"\$zt" ;;
@@ -708,7 +716,7 @@ fi
     done
     export PATH="\$HOME/tools/bin:\$PATH"
     export CC=cc CXX=c++
-    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ar/ranlib wrappers -> ~/tools/zig/zig) — C toolchain for make bootstrap + rust build scripts"
+    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ld/ar/ranlib wrappers -> ~/tools/zig/zig) — C toolchain for make bootstrap + rust build scripts"
   else
     export RUST_NO_CC=1
     cell toolchain-bootstrap INFO "no C toolchain on agent (no sudo) and zig install failed - C-toolchain-dependent cells (make bootstrap, rust build scripts) grade ENV-BLOCKED (\$(tail -2 \$LOGD/zig.log))"
@@ -719,11 +727,14 @@ fi
 # and becomes UNCONDITIONAL (a user-space C toolchain serves make configure AND rust build scripts; re-verified
 # locally with cc masked: zig 0.15.2 bootstraps, make 4.4.1 builds a toy target). The make subshell drops its
 # CC=${CC:-cc} default — CC arrives from the zig export or the cell grades ENV-BLOCKED with the real cause.
+# v3 (same tick, battery 23ae94ab kept-agent autopsy): configure failed on bare agents with "no acceptable ld
+# found in \$PATH" (no binutils) — the zig loop now also emits an ld wrapper (zig ld.lld), and configure/build.sh
+# output is captured into make.log (the inner >/dev/null redirects made every failure an EMPTY, undiagnosable log).
 MAKE_BIN=""
 if ! command -v make >/dev/null 2>&1; then
   if [ ! -x ~/tools/make/bin/make ]; then
     mkdir -p ~/tools/make/build
-    ( cd ~/tools/make/build && curl -sL -o make.tar.gz '$MAKE_URL' && tar -xzf make.tar.gz && cd make-4.4.1 && bash ./configure --disable-nls >/dev/null 2>&1 && bash ./build.sh >/dev/null 2>&1 && mkdir -p ~/tools/make/bin && cp make ~/tools/make/bin/make ) >\$LOGD/make.log 2>&1
+    ( cd ~/tools/make/build && curl -sL -o make.tar.gz '$MAKE_URL' && tar -xzf make.tar.gz && cd make-4.4.1 && bash ./configure --disable-nls && bash ./build.sh && mkdir -p ~/tools/make/bin && cp make ~/tools/make/bin/make ) >\$LOGD/make.log 2>&1
   fi
   if [ -x ~/tools/make/bin/make ]; then
     export PATH="\$HOME/tools/make/bin:\$PATH"
