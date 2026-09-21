@@ -43,6 +43,9 @@ set -uo pipefail
 SERVER="${BUNKER_QA_SERVER:-bunker-las-02}"
 TTL="${BUNKER_QA_TTL:-4h}"
 ACT_URL="https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz"
+# QA-H3-14 (2026-09-21): userspace GNU make bootstrap for make-less JIT agents
+# (agentuid install into ~/tools/make; build.sh needs no preexisting make).
+MAKE_URL="https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz"
 EVIDENCE="${BUNKER_QA_EVIDENCE:-/tmp/bunker-qa-evidence.jsonl}"
 # TR-085: the shared default evidence path is how one run's meta gets read by the
 # next run's collect (dogfood 2026-09-20 probed a 2-day-old agent). Callers that
@@ -276,7 +279,20 @@ detect_cmds() {
   elif [ -f "$repo/go.mod" ]; then DETECT_INSTALL="go build ./..."
   elif [ -f "$repo/pyproject.toml" ]; then DETECT_INSTALL="pip install -e .[dev] 2>/dev/null || pip install -e ."
   elif [ -f "$repo/Cargo.toml" ]; then DETECT_INSTALL="cargo build --workspace"
-  elif [ -f "$repo/Makefile" ]; then DETECT_INSTALL="make build"
+  # QA-H3-14 (2026-09-21): a Makefile-only repo (no package manifest) gets a
+  # make-based default only when make actually exists on the agent — JIT agents
+  # ship WITHOUT make (measured: h3 battery 24dcbb04, all make-dependent cells
+  # rc=127 'make: command not found'), and h3's Makefile itself has no build
+  # target (verify-* only). `make verify` is the repo's one entry point that is
+  # both real and dep-free (POSIX sh + coreutils + git; tick-chain degrades to
+  # UNVERIFIED without jq/DuckBrain, qa-target self-validates on a re-inited
+  # sync tree). Targets exist ⇒ call them; no targets and no make ⇒ the
+  # toolchain-bootstrap leg below bootstraps GNU make into ~/tools first and the
+  # verify cells still run; repo with make targets but agent lacking make AND
+  # bootstrap failed ⇒ graded ENV-BLOCKED, never a repo defect.
+  elif [ -f "$repo/Makefile" ]; then
+    if grep -qE '^build:' "$repo/Makefile"; then DETECT_INSTALL="make build"
+    else DETECT_INSTALL="make verify"; fi
   else DETECT_INSTALL="echo no-standard-install-path"
   fi
   fi
@@ -298,7 +314,12 @@ detect_cmds() {
   elif [ -f "$repo/go.mod" ]; then native_cmd="go test ./... -count=1"
   elif [ -f "$repo/pyproject.toml" ]; then native_cmd="pytest -x -q"
   elif [ -f "$repo/Cargo.toml" ]; then native_cmd="cargo test --workspace"
-  elif [ -f "$repo/Makefile" ]; then native_cmd="make test"
+  elif [ -f "$repo/Makefile" ]; then
+    # QA-H3-14: native leg mirrors the install-leg target probe — a Makefile
+    # with no `test:` target (h3: verify-* only) gets `make verify` instead of
+    # a guaranteed-fail `make test` on agents where make was bootstrapped.
+    if grep -qE '^test:' "$repo/Makefile"; then native_cmd="make test"
+    else native_cmd="make verify"; fi
   else native_cmd="echo no-test-path"
   fi
   fi
@@ -549,6 +570,71 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
   grep -qE -- '--- FAIL|^FAIL' "\$gf" 2>/dev/null || return 1
   true
 }
+# corr_grade — pure chaos-corruption decision. The caller owns truncation,
+# restart, and restoration; this function only grades the observed evidence.
+corr_grade() { # <rc> <logfile> <state_file> <ref_note> <tracked_yes_no>
+  local rc="\$1" logfile="\$2" state_file="\$3" ref_note="\$4" tracked_yes_no="\$5" crash refusal
+  if [ "\$tracked_yes_no" != yes ] && printf '%s' "\$ref_note" | grep -qF 'not referenced by any source file'; then
+    printf '%s\t%s\n' INFO "candidate \$state_file is untracked and referenced by no source file — not identifiable as a state store; state-restart behavior UNVERIFIED"
+  elif grep -qiE 'panic|traceback \\(most recent|segmentation fault|core dumped|fatal error' "\$logfile"; then
+    printf '%s\t%s\n' FAIL "crash on the next start after truncating \$state_file (\$ref_note): \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped|fatal error' "\$logfile")"
+  elif [ "\$rc" -eq 124 ]; then
+    printf '%s\t%s\n' FAIL "next start HANGS (>20s) after truncating \$state_file (\$ref_note): \$(head -2 "\$logfile" | tr '\\n' ' ')"
+  elif [ "\$rc" -eq 0 ]; then
+    printf '%s\t%s\n' OK "next start unaffected by a truncated \$state_file (rc=0, \$ref_note) — state restored"
+  elif grep -qiE 'corrupt|truncat|checksum|malformed|not a valid|unexpected (EOF|end of)' "\$logfile"; then
+    printf '%s\t%s\n' OK "clean error on the next start after truncating \$state_file (rc=\$rc, \$ref_note): \$(head -2 "\$logfile" | tr '\\n' ' ')"
+  else
+    printf '%s\t%s\n' INFO "truncated \$state_file (\$ref_note): next start exited rc=\$rc but the log never mentions corruption — restart behavior UNVERIFIED, likely an unrelated failure: \$(head -2 "\$logfile" | tr '\\n' ' ')"
+  fi
+}
+# ep_grade — pure chaos-errorpath decision. probe_started=yes is required for
+# a non-zero exit to be a product result; build/toolchain refusals stay INFO.
+ep_grade() { # <rc> <logfile> <probe_started_yes_no>
+  local rc="\$1" logfile="\$2" probe_started_yes_no="\$3" refusal
+  if [ "\$probe_started_yes_no" = na ]; then
+    printf '%s\t%s\n' N/A 'no start command was detected'
+  elif grep -qiE '^.*panic|traceback \\(most recent|segmentation fault|core dumped' "\$logfile"; then
+    printf '%s\t%s\n' FAIL "crash on the missing-config probe: \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped' "\$logfile")"
+  elif refusal=\$(grep -m1 -iE 'go\\.mod file not found|cannot find main module|no Go files|not a valid module|build constraints exclude|cannot find package|build failed|fatal error' "\$logfile"); [ -n "\$refusal" ]; then
+    printf '%s\t%s\n' INFO "start probe did not run the application (refusal: \$refusal) — missing-config behavior UNVERIFIED"
+  elif [ "\$rc" -eq 124 ]; then
+    printf '%s\t%s\n' INFO "missing-config start probe timed out (rc=124) — error-path behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
+  elif [ "\$probe_started_yes_no" != yes ]; then
+    printf '%s\t%s\n' INFO "start probe did not run the application (probe_started=\$probe_started_yes_no) — missing-config behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
+  elif [ "\$rc" -gt 0 ]; then
+    printf '%s\t%s\n' OK "clean error on missing config (rc=\$rc)"
+  else
+    printf '%s\t%s\n' INFO "unexpected: application started but exited cleanly on missing config (rc=\$rc)"
+  fi
+}
+# ep_probe — run the errorpath probe and report whether the application itself ran.
+ep_probe() { # <bin> <ep_dir> <logdir> -> <started>\t<rc>
+  local bin="\$1" ep_dir="\$2" logdir="\$3" ep_rc ep_started=no ep_pkg
+  mkdir -p "\$ep_dir"
+  case "\$bin" in
+    "go run "*)
+      # The package path is module-relative, so build while cwd is still the repo.
+      ep_pkg="\${bin#go run }"
+      ( go build -o "\$ep_dir/app" "\$ep_pkg" ) >"\$logdir/ep-build.log" 2>&1; ep_rc=\$?
+      if [ \$ep_rc -eq 0 ] && [ -x "\$ep_dir/app" ]; then
+        ( cd "\$ep_dir" && timeout 15 "\$ep_dir/app" ) >"\$logdir/ep.log" 2>&1
+        ep_rc=\$?
+        ep_started=yes
+      else
+        cp "\$logdir/ep-build.log" "\$logdir/ep.log" 2>/dev/null || :
+      fi
+      ;;
+    *)
+      ( cd "\$ep_dir" && timeout 15 \$bin ) >"\$logdir/ep.log" 2>&1
+      ep_rc=\$?
+      if [ \$ep_rc -ne 127 ] && ! grep -qiE 'go\\.mod file not found|cannot find main module|no Go files|not a valid module|build constraints exclude|cannot find package|build failed|fatal error|cannot find module|module not found|no such file or directory' "\$logdir/ep.log"; then
+        ep_started=yes
+      fi
+      ;;
+  esac
+  printf '%s\\t%s\\n' "\$ep_started" "\$ep_rc"
+}
 cd ~/qa-$proj || { echo "no repo dir"; exit 1; }
 
 # 0 · toolchain bootstrap (2026-08-31): temp agents are BARE — no go/node,
@@ -581,15 +667,11 @@ fi
 [ -x ~/tools/node/bin/node ] && export PATH="\$HOME/tools/node/bin:\$PATH"
 [ -x ~/tools/venv/bin/python ] && export PATH="\$HOME/tools/venv/bin:\$PATH"
 [ -x ~/tools/cargo/bin/cargo ] && export CARGO_HOME="\$HOME/tools/cargo" RUSTUP_HOME="\$HOME/tools/rustup" && export PATH="\$HOME/tools/cargo/bin:\$PATH"
-# C toolchain (QA-WARPFS-9, 2026-09-19): rust links EVERY crate build script
-# through the \`cc\` linker, so a repo with Cargo.toml cannot build AT ALL on a bare
-# agent — rustup --profile minimal brings rustc/cargo but no C compiler, and there
-# is no sudo to apt-get build-essential (the repo's README already documents
-# build-essential, so the repo needs no change). zig ships a self-contained
-# clang + linker and unpacks into ~/tools with no root, so the rust cells below get
-# a real C toolchain; if the install cannot be done the rust build cells grade
-# ENV-BLOCKED via build_env_failure() instead of blaming the repo.
-if [ -f Cargo.toml ] && ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+# C toolchain (QA-WARPFS-9, 2026-09-19; UNCONDITIONAL since QA-H3-14 v2): a user-space C toolchain serves
+# BOTH consumers — rust crate build scripts AND the GNU make bootstrap below — so it now runs for every repo,
+# not just Cargo.toml ones. Zig ships a self-contained clang + linker and unpacks into ~/tools with no root;
+# if the install cannot be done, cells that need a C compiler grade ENV-BLOCKED via build_env_failure()
+# instead of blaming the repo.
   if [ ! -x ~/tools/zig/zig ]; then
     ( cd ~/tools && curl -sL -o zig.tar.xz https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz && tar -xJf zig.tar.xz && rm -f zig.tar.xz && { [ -e zig ] || mv zig-x86_64-linux-0.15.2 zig; } ) >\$LOGD/zig.log 2>&1
   fi
@@ -626,12 +708,32 @@ if [ -f Cargo.toml ] && ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/de
     done
     export PATH="\$HOME/tools/bin:\$PATH"
     export CC=cc CXX=c++
-    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ar/ranlib wrappers → ~/tools/zig/zig) — rust build scripts can link"
+    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ar/ranlib wrappers -> ~/tools/zig/zig) — C toolchain for make bootstrap + rust build scripts"
   else
     export RUST_NO_CC=1
-    cell toolchain-bootstrap INFO "no C toolchain on agent (no sudo) and zig install failed — rust build cells graded ENV-BLOCKED (\$(tail -2 \$LOGD/zig.log))"
+    cell toolchain-bootstrap INFO "no C toolchain on agent (no sudo) and zig install failed - C-toolchain-dependent cells (make bootstrap, rust build scripts) grade ENV-BLOCKED (\$(tail -2 \$LOGD/zig.log))"
+  fi
+# QA-H3-14 v2 (2026-09-21, tick h3-2026-09-21-11-07-15): battery 8ff078b2 re-run FALSIFIED v1 — the make
+# bootstrap ran BEFORE the zig C-toolchain leg and defaulted CC=${CC:-cc}; on an agent with NEITHER make NOR cc
+# configure died instantly and make.log stayed EMPTY (silent). v2: the zig leg moves ABOVE the make bootstrap
+# and becomes UNCONDITIONAL (a user-space C toolchain serves make configure AND rust build scripts; re-verified
+# locally with cc masked: zig 0.15.2 bootstraps, make 4.4.1 builds a toy target). The make subshell drops its
+# CC=${CC:-cc} default — CC arrives from the zig export or the cell grades ENV-BLOCKED with the real cause.
+MAKE_BIN=""
+if ! command -v make >/dev/null 2>&1; then
+  if [ ! -x ~/tools/make/bin/make ]; then
+    mkdir -p ~/tools/make/build
+    ( cd ~/tools/make/build && curl -sL -o make.tar.gz '$MAKE_URL' && tar -xzf make.tar.gz && cd make-4.4.1 && bash ./configure --disable-nls >/dev/null 2>&1 && bash ./build.sh >/dev/null 2>&1 && mkdir -p ~/tools/make/bin && cp make ~/tools/make/bin/make ) >\$LOGD/make.log 2>&1
+  fi
+  if [ -x ~/tools/make/bin/make ]; then
+    export PATH="\$HOME/tools/make/bin:\$PATH"
+    MAKE_BIN=~/tools/make/bin/make
   fi
 fi
+if command -v make >/dev/null 2>&1; then
+  cell toolchain-bootstrap OK "make available (\${MAKE_BIN:+bootstrapped GNU make into \$MAKE_BIN}\${MAKE_BIN:-preinstalled}) — \$(make --version 2>/dev/null | head -1)"
+elif [ -f Makefile ]; then
+  cell toolchain-bootstrap INFO "no make on agent and user-space bootstrap failed — make-based cells will grade ENV-BLOCKED (\$(tail -2 \$LOGD/make.log 2>/dev/null | tr '\n' ' '))"
 # FIX 1 · system-dep probe (QA-WARPFS-9 rework 3, 2026-09-19): the zig leg above
 # supplies a C toolchain, but a rust repo ALSO links against system libraries
 # whose DEVELOPMENT files ship in separate packages — and nothing in user space
@@ -772,7 +874,7 @@ fi
 # agent logs a WARNING and continues, it must not hard-fail the bootstrap.
 mkdir -p ~/.docker/cli-plugins
 if ! [ -x ~/.docker/cli-plugins/docker-compose ]; then
-  if curl -sSL -o ~/.docker/cli-plugins/docker-compose https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 >\$LOGD/compose.log 2>&1 && chmod +x ~/.docker/cli-plugins/docker-compose >> \$LOGD/compose.log 2>&1; then
+  if curl -fsSL -o ~/.docker/cli-plugins/docker-compose https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 >\$LOGD/compose.log 2>&1 && head -c 4 ~/.docker/cli-plugins/docker-compose | grep -q ELF && chmod +x ~/.docker/cli-plugins/docker-compose >> \$LOGD/compose.log 2>&1; then
     cell toolchain-bootstrap OK "compose plugin installed (~/.docker/cli-plugins/docker-compose)"
   else
     echo "WARN: compose plugin install failed (offline agent?) — docker compose cells will fail rc=125 on this environment gap: \$(tail -1 \$LOGD/compose.log 2>/dev/null)" >&2
@@ -787,7 +889,15 @@ fi
 # agent logs a WARN and continues — the build cells then grade the environment
 # gap, not a repo defect.
 if ! [ -x ~/.docker/cli-plugins/docker-buildx ]; then
-  if curl -sSL -o ~/.docker/cli-plugins/docker-buildx https://github.com/docker/buildx/releases/latest/download/docker-buildx-linux-x86_64 >\$LOGD/buildx.log 2>&1 && chmod +x ~/.docker/cli-plugins/docker-buildx >> \$LOGD/buildx.log 2>&1; then
+  # Asset name is VERSION-PREFIXED (buildx-vX.Y.Z.linux-amd64) — unlike compose,
+  # buildx publishes NO versionless latest/download artifact: that URL 404s with
+  # the body "Not Found", and a bare curl -sSL silently saved that body as the
+  # plugin (graded OK, compose build then died rc=1 "exec format error" —
+  # QA-CHIMERA-V2-32 relaunch, 2026-09-21). Resolve the tag via the GitHub API,
+  # curl -f so an HTTP error never lands in the file, and verify the ELF magic
+  # before grading the cell OK.
+  BX_TAG=\$(curl -fsSL --max-time 20 https://api.github.com/repos/docker/buildx/releases/latest | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)
+  if [ -n "\$BX_TAG" ] && curl -fsSL -o ~/.docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/\$BX_TAG/buildx-\$BX_TAG.linux-amd64" >\$LOGD/buildx.log 2>&1 && head -c 4 ~/.docker/cli-plugins/docker-buildx | grep -q ELF && chmod +x ~/.docker/cli-plugins/docker-buildx >> \$LOGD/buildx.log 2>&1; then
     cell toolchain-bootstrap OK "buildx plugin installed (\$(~/.docker/cli-plugins/docker-buildx version 2>/dev/null | head -1 || echo 'version n/a'))"
   else
     echo "WARN: buildx plugin install failed (offline agent?) — compose build cells will fail rc=1 'requires buildx 0.17.0 or later' on this environment gap: \$(tail -1 \$LOGD/buildx.log 2>/dev/null)" >&2
@@ -822,7 +932,14 @@ else
     NFAIL="\$(grep -v '^[[:space:]]*\$' \$LOGD/native.log 2>/dev/null | grep -E -- '^(--- FAIL|FAIL|ok  )' | tail -8 | tr '\n' '|')"
     [ -n "\$NFAIL" ] || NFAIL="\$(grep -v '^[[:space:]]*\$' \$LOGD/native.log 2>/dev/null | tail -4 | tr '\n' '|')"
     GOCTX=""; go_suite_env_failure \$LOGD/native.log && GOCTX=" (environment: missing build tool on the test host — not a code finding; FAIL lines below name the real failures)"
-    cell ci-pass FAIL "act rc=\$ci_rc (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX"
+    # QA-H3-15 (2026-09-21): act inside the sandbox has NO GITHUB_TOKEN, so
+    # actions/checkout@v4 (and setup-*) die with "Input required and not
+    # supplied: token" BEFORE the suite runs — the act leg then says nothing
+    # about the repo (hosted CI on the same HEAD is green; h3 battery 24dcbb04:
+    # act rc=1 checkout-token + native rc=127 make-missing, both harness env).
+    # Name that context in the FAIL detail so nobody files it as a repo defect.
+    ACTCTX=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTX=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
+    cell ci-pass FAIL "act rc=\$ci_rc (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX"
   fi
 fi
 
@@ -875,11 +992,110 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
 else cell docker-deploy N/A "no compose file"; fi
 
 # 5 · ui-probe
+# FIX · ui-probe Go-served HTML (QA-CRIER-19, 2026-09-21): the gate keyed only on a
+# package.json dev/start script, so a Go repo serving an HTML docs surface (crier:
+# /docs on :8767) was graded N/A "no web UI detected" on every cycle — a false
+# negative: the artifact exists, the gate could not see it. Now: no npm UI detected
+# -> start the repo's own \$BIN (detected above) and probe a port list for 200
+# text/html before N/A is accepted (\${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081
+# 8767 9000}). Measured on crier 2026-09-21: the upstream cmd/ scan resolves BIN to
+# go run ./cmd/crier-mcp (alphabetically first; a stdio server that exits on stdin
+# EOF), NOT ./cmd/server — so when the detected BIN exits before any port answers
+# and further cmd/ main packages exist, the arm retries each of them once before it
+# accepts not-a-server; and it polls /docs before / because crier's / is 404 JSON.
+# Teardown kills the whole process GROUP (setsid): go run compiles and runs a
+# child binary, and killing the wrapper alone orphans the real listener.
+# SHARED-BOX GUARD (measured 2026-09-21): the fleet box already serves HTML on
+# Vite's default :5173 (canopy-vite), so ports occupied BEFORE the start are
+# excluded from attribution AND from fuser teardown — a first-HTML-wins poll
+# credited the foreign server to the repo under test, and a bare fuser -k on
+# an answering port kills unrelated socket-holders (measured: it killed a
+# process that merely HELD A CONNECTION to :5173).
 if [ -f package.json ] && grep -qE '"dev"|"start"' package.json; then
   ( npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & ); sleep 15
   UP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
   pkill -f 'npm run dev' 2>/dev/null || true
   case "\$UP" in 200) cell ui-probe OK "UI serves 200 on :3111" ;; *) cell ui-probe FAIL "UI not serving (http=\$UP): \$(tail -2 \$LOGD/ui.log)" ;; esac
+elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.json; then
+  # FIX · ui-probe frontend/ (QA-HERMES-CANOPY-9, 2026-09-21): a repo whose UI
+  # is a Vite/npm app under frontend/ (NO root package.json) was graded N/A
+  # "no web UI detected" on every cycle — the shipped user surface never probed
+  # (hermes-canopy: 4 consecutive cycles, frontend/package.json + vite present,
+  # canopy-vite serving 200 on :5173 the whole time). Mirrors the root-npm arm
+  # but rooted at frontend/. Teardown is setsid + PROCESS-GROUP kill, measured
+  # on this box 2026-09-21: the root arm's bare pkill -f 'npm run dev' LEAKS
+  # the node listener (probe still 200 after teardown), and a blanket
+  # a pkill -f 'node .*vite' safety net is worse — it killed the UNRELATED
+  # canopy-vite dev server on :5173 (argv merely contains "vite"). Group kill
+  # guard: only kill -PGID when pgid == pid (the setsid leader case); the
+  # fuser sweep on the probe port is the catch-all.
+  if [ ! -d frontend/node_modules ]; then
+    npm ci --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || npm install --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || true
+  fi
+  ( cd frontend && setsid npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & )
+  sleep 15
+  UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
+  UP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
+  if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
+    kill -- -\$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 -- -\$UI_NPM_PID 2>/dev/null || true
+  fi
+  kill \$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 \$UI_NPM_PID 2>/dev/null || true
+  fuser -k 3111/tcp >/dev/null 2>&1 || true
+  case "\$UP" in 200) cell ui-probe OK "UI serves 200 on :3111 (frontend/)" ;; *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP): \$(tail -2 \$LOGD/ui.log)" ;; esac
+elif [ -n "\$BIN" ]; then
+  UI_PORTS=\${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8767 9000}
+  UI_BINS="\$BIN"
+  case "\$BIN" in
+    "go run ./cmd/"*)
+      # start-cmd fallback queue: when the detected cmd/ binary is not the HTTP
+      # server (see comment above), the remaining cmd/ main packages get one
+      # bounded try each before the cell accepts not-a-server.
+      for c in \$(grep -rlsE '^package main' cmd --include='*.go' 2>/dev/null | sort | sed 's|/[^/]*\$||' | sort -u); do
+        [ "go run ./\$c" = "\$BIN" ] || UI_BINS="\$UI_BINS|go run ./\$c"
+      done
+      ;;
+  esac
+  IFS='|' read -r -a UI_LIST <<< "\$UI_BINS"
+  # Baseline: which probed ports answer BEFORE we start anything — those are
+  # somebody else's and are skipped for both attribution and teardown below.
+  UI_OCCUPIED=" "
+  for p in \$UI_PORTS; do
+    UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:\$p/" 2>/dev/null)
+    [ "\$UI_C" = "000" ] && UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:\$p/docs" 2>/dev/null)
+    if [ -n "\$UI_C" ] && [ "\$UI_C" != "000" ]; then UI_OCCUPIED="\$UI_OCCUPIED\$p "; fi
+  done
+  UI_HIT=""; UI_OTHER=""; UI_PROBED=" "
+  for UI_B in "\${UI_LIST[@]}"; do
+    ( setsid timeout 45 \$UI_B ) </dev/null >\$LOGD/ui-probe.log 2>&1 &
+    UIPID=\$!
+    UI_HIT=""; UI_OTHER=""
+    for i in \$(seq 1 20); do
+      kill -0 \$UIPID 2>/dev/null || break
+      for p in \$UI_PORTS; do
+        case "\$UI_OCCUPIED" in *" \$p "*) continue ;; esac
+        UI_R=\$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 2 "http://127.0.0.1:\$p/docs" 2>/dev/null)
+        case "\$UI_R" in "200 text/html"*) UI_HIT=\$p; break 2 ;; 000*|"") : ;; *) case "\$UI_PROBED" in *" \$p "*) : ;; *) UI_PROBED="\$UI_PROBED\$p "; UI_OTHER="\$UI_OTHER \${p}=[\$UI_R]" ;; esac ;; esac
+        UI_R=\$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 2 "http://127.0.0.1:\$p/" 2>/dev/null)
+        case "\$UI_R" in "200 text/html"*) UI_HIT=\$p; break 2 ;; 000*|"") : ;; *) case "\$UI_PROBED" in *" \$p "*) : ;; *) UI_PROBED="\$UI_PROBED\$p "; UI_OTHER="\$UI_OTHER \${p}=[\$UI_R]" ;; esac ;; esac
+      done
+      sleep 1
+    done
+    if [ -n "\$UI_HIT" ] || [ -n "\$UI_OTHER" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
+  done
+  if [ -n "\$UI_HIT" ]; then
+    cell ui-probe OK "HTML surface at http://127.0.0.1:\$UI_HIT (<start cmd: \$UI_B>)"
+  elif [ -n "\$UI_OTHER" ]; then
+    cell ui-probe INFO "serves but no 200 text/html surface found on probed ports [\$UI_PORTS]:\$UI_OTHER"
+  elif ! kill -0 \$UIPID 2>/dev/null; then
+    cell ui-probe INFO "start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)"
+  else
+    cell ui-probe INFO "server ran 20s, no probed port answered [\$UI_PORTS] — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)"
+  fi
+  kill -- -\$UIPID 2>/dev/null; sleep 1; kill -9 -- -\$UIPID 2>/dev/null
+  kill \$UIPID 2>/dev/null; sleep 1; kill -9 \$UIPID 2>/dev/null
+  for p in \$UI_PROBED; do fuser -k \$p/tcp >/dev/null 2>&1; done
+  true
 else cell ui-probe N/A "no web UI detected"; fi
 
 # 6 · chaos-disconnect — network cut via dead proxy: clean fail or HANG?
@@ -931,19 +1147,12 @@ if [ -n "\$SF" ]; then
     if [ -n "\$BIN" ]; then
       ( timeout 20 \$BIN ) >\$LOGD/corr.log 2>&1; corr_rc=\$?
       cp ~/state.bak "\$SF" 2>/dev/null
-      if grep -qiE 'panic|traceback \(most recent|segmentation fault|core dumped|fatal error' \$LOGD/corr.log; then
-        cell chaos-corruption FAIL "crash on the next start after truncating \$SF (\$REF): \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped|fatal error' \$LOGD/corr.log)"
-      elif [ \$corr_rc -eq 124 ]; then cell chaos-corruption FAIL "next start HANGS (>20s) after truncating \$SF (\$REF): \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
-      elif [ \$corr_rc -eq 0 ]; then cell chaos-corruption OK "next start unaffected by a truncated \$SF (rc=0, \$REF) — state restored"
-      elif grep -qiE 'corrupt|truncat|checksum|malformed|not a valid|unexpected (EOF|end of)' \$LOGD/corr.log; then cell chaos-corruption OK "clean error on the next start after truncating \$SF (rc=\$corr_rc, \$REF): \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
-      else
-        # QA-OFF-BY-ONE-15 (2026-09-17): a non-zero exit that never names
-        # corruption is NOT evidence the app handles a truncated state store —
-        # the old rule scored ANY non-124 failure rc as OK "clean error", which
-        # false-greened a build/start refusal ("no Go files"). Grade the outcome
-        # honestly UNVERIFIED and keep the log for the foreman to read.
-        cell chaos-corruption INFO "truncated \$SF (\$REF): next start exited rc=\$corr_rc but the log never mentions corruption — restart behavior UNVERIFIED, likely an unrelated failure: \$(head -2 \$LOGD/corr.log | tr '\n' ' ')"
-      fi
+      corr_tracked=no
+      git ls-files --error-unmatch -- "\$SF" >/dev/null 2>&1 && corr_tracked=yes
+      corr_result=\$(corr_grade "\$corr_rc" "\$LOGD/corr.log" "\$SF" "\$REF" "\$corr_tracked")
+      corr_status=\$(printf '%s' "\$corr_result" | cut -f1)
+      corr_detail=\$(printf '%s' "\$corr_result" | cut -f2-)
+      cell chaos-corruption "\$corr_status" "\$corr_detail"
     else
       cp ~/state.bak "\$SF" 2>/dev/null
       cell chaos-corruption INFO "truncated \$SF (\$REF) and restored it, but no start command was detected (no node/go/python entrypoint) — restart behavior stays UNVERIFIED for this tree"
@@ -972,9 +1181,16 @@ cap_probe='echo CAP_EFFECTIVE=\$(ulimit -v) CAP_REQUESTED=\$CAP_KB'
 # parent shell -> subshell right after ulimit -> the capped child itself.
 echo PARENT_CAP=\$(ulimit -v) >\$LOGD/res.log
 ( ulimit -v \$CAP_KB; echo SUBSHELL_CAP=\$(ulimit -v); bash -c "\$cap_probe; $native_cmd" ) >>\$LOGD/res.log 2>&1; res_rc=\$?
-cap_seen=\$(sed -n 's/^CAP_EFFECTIVE=//p' \$LOGD/res.log | head -1)
-sub_seen=\$(sed -n 's/^SUBSHELL_CAP=//p' \$LOGD/res.log | head -1)
-par_seen=\$(sed -n 's/^PARENT_CAP=//p' \$LOGD/res.log | head -1)
+# QA-H3-16 (2026-09-21): the child's cap_probe echoes CAP_EFFECTIVE and
+# CAP_REQUESTED on ONE line, so the bare 's/^CAP_EFFECTIVE=//p' capture pulled
+# the whole "3145728 3145728" string into cap_seen, which then never equaled
+# CAP_KB and forced the UNVERIFIED "cap NOT applied" branch on every run with a
+# WORKING cap (warpfs 09-19 + off-by-one 09-20 + h3 09-21 misread the same way).
+# Extract only the FIRST field — the value the child actually reported for
+# ulimit -v.
+cap_seen=\$(sed -n 's/^CAP_EFFECTIVE=//p' \$LOGD/res.log | head -1 | cut -d' ' -f1)
+sub_seen=\$(sed -n 's/^SUBSHELL_CAP=//p' \$LOGD/res.log | head -1 | cut -d' ' -f1)
+par_seen=\$(sed -n 's/^PARENT_CAP=//p' \$LOGD/res.log | head -1 | cut -d' ' -f1)
 cap_note="cap=\${CAP_KB}KB child_saw=\${cap_seen:-NONE} subshell_saw=\${sub_seen:-NONE} parent_saw=\${par_seen:-NONE}"
 if [ "\$cap_seen" != "\$CAP_KB" ]; then
   # the child did not see the cap: the wrapper was dropped (PATH/shape problem).
@@ -989,12 +1205,14 @@ else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$
 
 # 10 · chaos-errorpath — missing config: clean usage or panic?
 if [ -n "\$BIN" ]; then
-  mkdir -p ~/qa-noconfig-\$\$ && cd ~/qa-noconfig-\$\$
-  ( timeout 15 \$BIN ) >\$LOGD/ep.log 2>&1; ep_rc=\$?
-  if grep -q panic \$LOGD/ep.log; then cell chaos-errorpath FAIL "PANIC on missing config: \$(grep -m1 panic \$LOGD/ep.log)"
-  elif grep -qiE 'panic|traceback \(most recent|fatal error|no Go files|build constraints exclude|cannot find package|build failed' \$LOGD/ep.log; then cell chaos-errorpath INFO "start probe died before the app ran (toolchain/build failure, not an error-path verdict) — missing-config behavior UNVERIFIED: \$(head -2 \$LOGD/ep.log | tr '\n' ' ')"
-  elif [ \$ep_rc -gt 0 ] && [ \$ep_rc -ne 124 ]; then cell chaos-errorpath OK "clean error on missing config (rc=\$ep_rc)"
-  else cell chaos-errorpath INFO "unexpected: rc=\$ep_rc \$(head -2 \$LOGD/ep.log)"; fi
+  EP_DIR=~/qa-noconfig-\$\$
+  ep_out=\$(ep_probe "\$BIN" "\$EP_DIR" "\$LOGD")
+  EP_STARTED=\$(printf '%s' "\$ep_out" | cut -f1)
+  ep_rc=\$(printf '%s' "\$ep_out" | cut -f2)
+  ep_result=\$(ep_grade "\$ep_rc" "\$LOGD/ep.log" "\$EP_STARTED")
+  ep_status=\$(printf '%s' "\$ep_result" | cut -f1)
+  ep_detail=\$(printf '%s' "\$ep_result" | cut -f2-)
+  cell chaos-errorpath "\$ep_status" "\$ep_detail"
 else cell chaos-errorpath N/A "no single-binary entrypoint"; fi
 
 echo CELLS-DONE
