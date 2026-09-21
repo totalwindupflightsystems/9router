@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""qa_discover.py — QA foreman discovery: pick N projects that need a full CI pass.
+
+Selection (weighted, deterministic-ish):
+  1. NEVER QA'd first (no record in the QA ledger)
+  2. Then by days-since-last-QA, oldest first
+  3. Tiebreak: random among candidates (the "hint of chaos" — the fleet is swept
+     unevenly on purpose so bugs don't only live where we always look)
+  4. Excludes: disabled projects, my-project, coding-hermes-scheduler (meta),
+     projects QA'd in the last 24h, and candidates whose scheduler-resolved
+     workdir is absent or is not accepted by git as a worktree.
+
+Ledger: ~/.hermes/qa/ledger.jsonl  {ts, project, status, cells, server}
+"""
+import json, os, random, sqlite3, subprocess, sys, datetime
+
+SCHED_DB = '/home/kara/.hermes/scheduler.db'
+QA_LEDGER = '/home/kara/.hermes/qa/ledger.jsonl'
+EXCLUDE = {'my-project', 'coding-hermes-scheduler', 'duckbrain'}
+
+
+def is_git_worktree(path):
+    """Return true only for an existing Git repository root."""
+    if not path or not os.path.isdir(path):
+        return False
+    try:
+        inside = subprocess.run(
+            ['git', '-C', path, 'rev-parse', '--is-inside-work-tree'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if inside.stdout.strip() != 'true':
+            return False
+        root = subprocess.run(
+            ['git', '-C', path, 'rev-parse', '--show-toplevel'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # A scheduler workdir must be the project repository itself. This rejects
+    # a non-repo stub nested inside an unrelated parent repository (for
+    # example ~/.hermes/stand-in/* under /home/kara's Git checkout).
+    return root.returncode == 0 and os.path.realpath(root.stdout.strip()) == os.path.realpath(path)
+
+def load_ledger():
+    last = {}
+    if os.path.exists(QA_LEDGER):
+        for line in open(QA_LEDGER):
+            try:
+                r = json.loads(line)
+                last[r['project']] = r['ts']
+            except Exception:
+                pass
+    return last
+
+def main():
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+    random.seed()  # hint of chaos: non-reproducible tiebreak on purpose
+    con = sqlite3.connect(SCHED_DB)
+    enabled = [r[0] for r in con.execute("SELECT name FROM projects WHERE enabled = 1")]
+    # Only REAL foreman projects: exclude role-driver rows (-pm, -sync,
+    # dogfood/meta rows) — QA'ing a scheduler row's workdir is meaningless.
+    enabled = [p for p in enabled
+               if not p.endswith(('-pm', '-sync', '-qa', '-releng'))
+               and 'dogfood' not in p.lower()
+               and 'sync' not in p.lower()]
+    # Real workdir per project (names can differ from paths — Bane 09-01:
+    # ai-plays-poke → /home/kara/ai_plays_poke). Emitted per pick so the
+    # pipeline never guesses repo paths.
+    wd = {}
+    for name, path in con.execute("SELECT name, workdir FROM projects"):
+        wd[name] = path
+    con.close()
+
+    last = load_ledger()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cands = []
+    for p in enabled:
+        if p in EXCLUDE:
+            continue
+        ts = last.get(p)
+        if ts:
+            try:
+                age_days = (now - datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))).total_seconds() / 86400
+            except Exception:
+                age_days = 999
+            if age_days < 1:
+                continue
+        else:
+            age_days = 9999  # never QA'd
+        repo = wd.get(p) or '/home/kara/' + p
+        cands.append((p, age_days, repo))
+
+    # A scheduler row can survive with a stub or missing workdir even when its
+    # name does not match a role suffix. Exclude those candidates by resolved
+    # workdir, not by name, and retain the reason in additive output fields.
+    excluded = []
+    valid = []
+    for p, d, repo in cands:
+        if not is_git_worktree(repo):
+            excluded.append({'project': p, 'repo': repo, 'reason': 'workdir-not-git'})
+            continue
+        valid.append((p, d, repo))
+
+    # sort: never-QA'd first, then oldest; random tiebreak among equal ages
+    valid.sort(key=lambda x: (-1 if x[1] == 9999 else x[1], random.random()))
+    picks = []
+    for p, d, repo in valid[:n]:
+        picks.append({
+            'project': p,
+            'repo': repo,
+            'days_since_qa': round(d, 1) if d != 9999 else None,
+            'reason': 'never-qa' if d == 9999 else 'oldest-qa',
+        })
+
+    out = {'count': n, 'as_of': now.isoformat(timespec='seconds'), 'picks': picks,
+           'excluded': len(excluded), 'skipped': excluded,
+           'note': 'QA foreman discovery — fresh-system CI pass candidates'}
+    print(json.dumps(out, indent=1))
+
+if __name__ == '__main__':
+    main()
