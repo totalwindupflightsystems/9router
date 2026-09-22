@@ -38,8 +38,10 @@ set -uo pipefail
 
 # Default server: bunker-las-03 was REMOVED from ~/.bunker/config.yaml
 # (stale default produced 4 consecutive days of P1 "spawn failed" findings,
-# 27+ re-files — QA-DAGGER-GUARD 2026-09-10). bunker-las-02 is the verified
-# live default. Override with BUNKER_QA_SERVER.
+# 27+ re-files — QA-DAGGER-GUARD 2026-09-10), then re-registered 2026-09-10
+# and live-probe-verified 2026-09-22 (spawn/exec/destroy green, tick 547
+# QA-HERMES-CANOPY-19). bunker-las-02 remains the verified default.
+# Override with BUNKER_QA_SERVER.
 SERVER="${BUNKER_QA_SERVER:-bunker-las-02}"
 TTL="${BUNKER_QA_TTL:-4h}"
 ACT_URL="https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz"
@@ -476,6 +478,15 @@ sync_repo() {
     rm -f "$sync_list"
     return 1
   fi
+  # Index entries whose worktree copy was deleted (git status 'D' — e.g. rotated
+  # gitreins guard logs) break `du --files0-from` and `tar -T`; keep only paths
+  # that actually exist on disk. (2026-09-22, off-by-one SYNC-SIZE-ERROR.)
+  local sync_list2
+  sync_list2=$(mktemp) || { SYNC_ERR='SYNC-LIST-ERROR: could not create filtered list'; return 1; }
+  while IFS= read -r -d '' f; do
+    [ -e "$repo/$f" ] && printf '%s\0' "$f"
+  done < "$sync_list" > "$sync_list2"
+  mv -f "$sync_list2" "$sync_list"
   case "$sync_max" in
     ''|*[!0-9]*)
       SYNC_ERR="SYNC-LIMIT-ERROR: BUNKER_QA_SYNC_MAX_BYTES is not an integer: $sync_max"
@@ -635,7 +646,7 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
   true
 }
 # suite_deps_missing — is this suite rc a MISSING-TEST-DEPS refusal instead of a
-# product result? (QA-9ROUTER-26, 2026-09-21.) 9router's own `npm test` entry
+# product result? (QA-9ROUTER-26, 2026-09-21.) 9router's own \`npm test\` entry
 # runs a preflight (scripts/check-test-deps.mjs) that exits 1 with
 #   9router: tests/node_modules is missing — vitest cannot be resolved.
 # when the independent tests/ package was never installed (tests/package.json
@@ -785,7 +796,7 @@ fi
           # QA-H3-14 v3 (2026-09-21, battery 23ae94ab): bare agents lack binutils
           # entirely and GNU make's ./configure aborts with "no acceptable ld
           # found in $PATH" — ld is NOT a zig subcommand, so it cannot ride the
-          # plain-forward *) branch. zig serves lld as `zig ld.lld`. Live-proven
+          # plain-forward *) branch. zig serves lld as \`zig ld.lld\`. Live-proven
           # on the kept battery agent: with this wrapper configure passes,
           # build.sh produces GNU Make 4.4.1, and a toy target runs (TOY_OK).
           printf '#!/bin/sh\nexec "%s" ld.lld "\$@"\n' "\$ZIGB" > ~/tools/bin/"\$zt" ;;
@@ -1150,7 +1161,7 @@ if [ -f package.json ] && grep -qE '"dev"|"start"' package.json; then
   # time. Now: follow the redirect chain (-L), accept ANY 2xx (a served page
   # is a served page; the code is recorded), and keep the real negative —
   # 4xx/5xx/000 still FAIL, naming the code AND the landing path.
-  # Teardown fix in the same cell: the old bare `pkill -f 'npm run dev'`
+  # Teardown fix in the same cell: the old bare \`pkill -f 'npm run dev'\`
   # matched by command line (it once killed an UNRELATED process whose argv
   # merely contained the pattern — the frontend/ arm below documents the live
   # incident) and still LEAKED the node listener. Replaced with the arm's own
