@@ -15,6 +15,8 @@ import subprocess
 import re
 import os
 import sys
+import glob
+import hashlib
 import argparse
 from datetime import datetime, timezone, timedelta
 
@@ -44,6 +46,157 @@ SECRET_PATTERNS = [
     (re.compile(r'sk-(?!or-v1-|xt-)[a-z][a-z0-9]{0,7}-[0-9a-f]{32,}\b'), 'hyphenated_provider_key', 'CRITICAL'),
 ]
 
+# ── LIVE-SECRET COPY detection (scan #105, 2026-09-21) ──────────────────────
+# THIRD recurrence of the same blind spot, so it gets a permanent dimension:
+#   scan #81  — pre-edit skill snapshots (skills.bak-*) held LIVE key copies for 8
+#               consecutive fires while sitting outside every PLAINTEXT_DIR.
+#   scan #97  — 2 live xKiro keys committed in a DuckBrain namespace store ABOVE the
+#               depth-3 repo walk.
+#   scan #105 — this fire: a CLEAN scan while 39 plaintext files OUTSIDE the walk held
+#               values that hash-match credentials LIVE in ~/.hermes/.env right now:
+#               top-level `.env.bak-*` rollback copies (full .env clones incl. the live
+#               Telegram bot token, GitHub PAT, xAI key), `auth.json`, `~/.hermes/backups/**`
+#               (incl. n100-configs/.env, whose Telegram token + OpenRouter key both
+#               answer HTTP 200 on the issuer's key endpoint), ~24 `cache/terminal/hermes-snap-*.sh`
+#               env snapshots (11 live values each), `cache/exec` stdout, `cache/delegation`
+#               transcripts, `keys/*.key`, `coding-hermes/backups/**`.
+# Why shape rules cannot see this class: a copy of a live token inside a *.sh / *.json /
+# transcript blob is invisible to known-prefix rules (the n100 bot token uses a different
+# id than the live one) AND is swallowed by the FP prose heuristics. So this dimension
+# compares VALUES, not shapes: a value is a finding when sha256(value) equals the sha256 of
+# a value currently present in a live secret store. Shape-agnostic, FP-heuristic-immune.
+# Severity MEDIUM on purpose: these are local disk copies on a private host (parent dirs
+# are 0700/0750), not published material — high enough to appear in every report, low
+# enough not to fire exit(1) and turn the cron wrapper into "Script Error" noise.
+LIVE_SECRET_STORES = [
+    os.path.expanduser(p) for p in (
+        '~/.hermes/.env',
+        '~/.hermes/foreman/.env',
+        '~/.hermes/config.yaml',
+        '~/.hermes/foreman/config.yaml',
+    )
+]
+# Single-file / glob hotspots that are NOT covered by a directory walk.
+LIVE_COPY_GLOBS = [os.path.expanduser(p) for p in (
+    '~/.hermes/.env.bak*', '~/.hermes/.env.*.bak*', '~/.hermes/*.env.bak*',
+    '~/.hermes/config.yaml.bak*', '~/.hermes/config.yaml.corrupt*',
+    '~/.hermes/auth.json*', '~/.hermes/keys/*',
+)]
+LIVE_COPY_ROOTS = [os.path.expanduser(p) for p in (
+    '~/.hermes/cache/terminal', '~/.hermes/cache/exec', '~/.hermes/cache/delegation',
+    '~/.hermes/backups', '~/.hermes/coding-hermes/backups', '~/.hermes/profiles',
+)]
+LIVE_COPY_EXT = ('.md', '.sh', '.py', '.js', '.ts', '.txt', '.json', '.jsonl', '.yaml',
+                 '.yml', '.toml', '.env', '.bak', '.key', '.log', '.conf', '.cfg', '.ini')
+LIVE_COPY_MAX_BYTES = 2_000_000
+LIVE_COPY_REPORT_LIMIT = 12   # per-file findings printed; the rest roll into one summary line
+# Value shapes extracted for hashing. Deliberately WIDER than SECRET_PATTERNS: telegram ids
+# are matched without the ':AA' requirement, and every sk-/key family is covered, because a
+# miss here is a silent blindness (see the n100 bot-token case above).
+LIVE_VALUE_PATTERNS = [
+    re.compile(r'\b\d{5,12}:[A-Za-z0-9_\-]{30,45}\b'),
+    re.compile(r'\bsk-[A-Za-z0-9_\-]{16,}\b'),
+    re.compile(r'\bsk-or-v1-[A-Za-z0-9\-]{20,}\b'),
+    re.compile(r'\bgh[pousr]_[A-Za-z0-9]{20,}\b'),
+    re.compile(r'\bAKIA[0-9A-Z]{16}\b'),
+    re.compile(r'\bAIza[0-9A-Za-z_\-]{35}\b'),
+    re.compile(r'\bxox[baprs]-[A-Za-z0-9-]{10,}\b'),
+    re.compile(r'\bxai-[A-Za-z0-9]{20,}\b'),
+    re.compile(r'\btskey-api-[A-Za-z0-9_\-]{20,}\b'),
+    re.compile(r'\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b'),
+]
+LIVE_KEY_LINE = re.compile(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_\-]*)\s*[=:]\s*(.+?)\s*$')
+
+
+def load_live_values(verbose=False):
+    """sha256(value) -> var name, for every credential currently live in a secret store."""
+    live = {}
+    for store in LIVE_SECRET_STORES:
+        if not os.path.isfile(store):
+            continue
+        try:
+            with open(store, 'r', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            m = LIVE_KEY_LINE.match(line)
+            if not m:
+                continue
+            name, raw = m.group(1), m.group(2).strip().strip('"').strip("'")
+            for rx in LIVE_VALUE_PATTERNS:
+                for vm in rx.finditer(raw):
+                    live[hashlib.sha256(vm.group(0).encode()).hexdigest()] = name
+    if verbose:
+        print(f"  Live secret values indexed: {len(live)}", file=sys.stderr)
+    return live
+
+
+def _live_copy_targets():
+    """All plaintext candidate files for the live-copy dimension (bounded, deduped)."""
+    targets = []
+    for pattern in LIVE_COPY_GLOBS:
+        targets.extend(sorted(glob.glob(pattern)))
+    for root in LIVE_COPY_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if not any(p.search(os.path.join(dirpath, d)) for p in SKIP_PATTERNS)]
+            for fname in files:
+                if fname.endswith(LIVE_COPY_EXT):
+                    targets.append(os.path.join(dirpath, fname))
+    seen, out = set(), []
+    for t in targets:
+        if t in seen or t in LIVE_SECRET_STORES:
+            continue
+        seen.add(t)
+        try:
+            if os.path.islink(t) or os.path.getsize(t) > LIVE_COPY_MAX_BYTES or os.path.getsize(t) == 0:
+                continue
+        except OSError:
+            continue
+        out.append(t)
+    return out
+
+
+def find_live_secret_copies(live_values, verbose=False):
+    """Report files whose contents include a credential that is live RIGHT NOW.
+
+    One finding per file (not per value): the file list is the actionable unit — scrub,
+    delete, or exclude the file. Values are never printed; only the live-store variable
+    name and the masked prefix of the copy.
+    """
+    findings = []
+    scanned = 0
+    for path in _live_copy_targets():
+        try:
+            with open(path, 'r', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            continue
+        scanned += 1
+        hits = {}      # var name -> (line no, masked prefix)
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for rx in LIVE_VALUE_PATTERNS:
+                for vm in rx.finditer(line):
+                    value = vm.group(0)
+                    name = live_values.get(hashlib.sha256(value.encode()).hexdigest())
+                    if name and name not in hits:
+                        hits[name] = (lineno, value[:6] + '…')
+        if hits:
+            findings.append({
+                'path': path,
+                'count': len(hits),
+                'names': sorted(hits),
+                'first_line': min(v[0] for v in hits.values()),
+                'sample': sorted(hits.items())[0][1][1],
+            })
+    findings.sort(key=lambda f: (-f['count'], f['path']))
+    if verbose:
+        print(f"  Live-copy dimension: {scanned} files scanned, {len(findings)} hold live values", file=sys.stderr)
+    return findings, scanned
+
+
 # ── False positive indicators ───────────────────────────────────────────────
 # If ANY of these match the matched line OR file path, it's a false positive.
 # Per-repo `git log -p` timeout. The big DuckBrain namespace stores
@@ -72,6 +225,13 @@ REPO_TIMEOUT_OVERRIDES = {
     '/home/kara/duckbrain/namespaces/fleet-quality': 240,
     '/home/kara/duckbrain/namespaces/coding-hermes': 180,
     '/home/kara/duckbrain/namespaces/chat-archive': 180,
+    # Added scan #103 (2026-09-20): /home/kara/hermes-observatory commits large data
+    # JSON snapshots daily and its 6.6 GB .git has ZERO packs (5,216 loose objects),
+    # so the 24h diff is ~177 MB and `git log -p` needs ~48 s — it timed out on EVERY
+    # fire and was never actually scanned (an INFO line, but a real coverage gap on a
+    # repo whose daily content is scraped/derived data). 120 s covers the measured
+    # 47.7 s with headroom; `git gc` on the store is the durable fix.
+    '/home/kara/hermes-observatory': 120,
 }
 
 
@@ -367,6 +527,31 @@ def is_false_positive(line, file_path):
     return False
 
 
+# Descriptive placeholder VALUES (scan #103, 2026-09-20). A committed test harness
+# may legitimately carry a literal token that names itself: `scripts/e2e-battery.sh`
+# in ~/crier sets BAT_TOKEN="e2e-battery-token" and exports the SAME literal as
+# CR_AUTH_TOKEN to the env-isolated server the script starts itself on a scratch
+# port — it authenticates nothing that outlives the run. The generic
+# `token\s*=\s*"..."` credential rule flagged it CRITICAL on every fire, which also
+# made the scanner exit 1 and the cron wrapper report "Script Error".
+#
+# Suppressed by VALUE, not by line: FP_PATTERNS kill a whole excerpt, so a benign
+# placeholder sharing one added line with live material would hide it (exactly the
+# scan #97 failure mode that forced the bounded fp_window). This check looks only at
+# the pattern's captured group, so every other secret shape on the same line still
+# fires. Applies only to rules that capture a value (the `credential` rule); key-shape
+# rules (sk-, gh[pousr]_, AKIA, telegram) have no group and are never suppressed here.
+PLACEHOLDER_VALUES = re.compile(
+    r'(?i)^(?:e2e|battery|test|dummy|local|scratch|fake)[-_][a-z0-9_-]*(?:token|key|secret)$'
+)
+
+
+def is_placeholder_value(match):
+    """True when the match's captured VALUE is a self-describing placeholder, not key material."""
+    value = match.group(1) if (match.lastindex and match.group(1) is not None) else None
+    return bool(value) and bool(PLACEHOLDER_VALUES.match(value))
+
+
 def fp_window(line, match, span=120):
     """Return a bounded excerpt around a match, for FP-checking and reporting.
 
@@ -418,8 +603,11 @@ def scan_repo(repo_dir, since_iso):
         )
         stdout_text = result.stdout.decode('utf-8', errors='replace')
     except (subprocess.TimeoutExpired, OSError):
+        # Print the EFFECTIVE budget (scan #104, 2026-09-21): the old line printed the
+        # repo path where the budget belongs, so a future fire could not tell a real
+        # coverage gap from a covered-but-slow store with a per-repo override.
         return [{'repo': repo_dir, 'type': 'timeout', 'severity': 'INFO',
-                 'file': '', 'line': f'Repo timed out (>{repo_dir})'}]
+                 'file': '', 'line': f'Repo timed out (>{repo_timeout(repo_dir)}s budget)'}]
 
     current_file = ''
     for line in stdout_text.split('\n'):
@@ -437,7 +625,7 @@ def scan_repo(repo_dir, since_iso):
             if not m:
                 continue
             excerpt = fp_window(line, m)
-            if is_false_positive(excerpt, current_file):
+            if is_false_positive(excerpt, current_file) or is_placeholder_value(m):
                 continue
             findings.append({
                 'repo': repo_dir,
@@ -475,7 +663,7 @@ def scan_plaintext_dir(base_dir, live_env_files):
                             if not m:
                                 continue
                             excerpt = fp_window(line, m)
-                            if is_false_positive(excerpt, fpath):
+                            if is_false_positive(excerpt, fpath) or is_placeholder_value(m):
                                 continue
                             findings.append({
                                 'repo': f'plaintext:{base_dir}',
@@ -549,6 +737,49 @@ def main():
             print(f"  Plaintext: {pdir}", file=sys.stderr)
         all_findings.extend(scan_plaintext_dir(pdir, live_env_files))
 
+    # Step 3.6: LIVE-SECRET COPY dimension (scan #105) — files outside every PLAINTEXT_DIR
+    # whose contents hash-match a credential that is live in a secret store right now.
+    live_values = load_live_values(args.verbose)
+    live_copies, live_copy_scanned = find_live_secret_copies(live_values, args.verbose)
+    # One representative PER DIRECTORY first (scan #105: 24 byte-identical
+    # cache/terminal snapshots otherwise filled every report slot and hid the distinct
+    # classes — top-level .env.bak-*, auth.json, config backups, n100-configs). Remaining
+    # slots then fill with the next-highest files; everything else rolls into one summary.
+    display, seen_dirs = [], set()
+    for fc in live_copies:
+        d = os.path.dirname(fc['path'])
+        if d in seen_dirs:
+            continue
+        seen_dirs.add(d)
+        display.append(fc)
+        if len(display) >= LIVE_COPY_REPORT_LIMIT:
+            break
+    for fc in live_copies:
+        if len(display) >= LIVE_COPY_REPORT_LIMIT:
+            break
+        if fc not in display:
+            display.append(fc)
+    for fc in display:
+        names = ', '.join(fc['names'][:6]) + ('…' if len(fc['names']) > 6 else '')
+        all_findings.append({
+            'repo': 'plaintext-copy',
+            'type': 'live_secret_copy',
+            'severity': 'MEDIUM',
+            'file': fc['path'],
+            'line': redact_line(f"L{fc['first_line']}: {fc['count']} value(s) identical to live "
+                                f"{names} (e.g. {fc['sample']})"),
+        })
+    if len(live_copies) > len(display):
+        rest = [fc for fc in live_copies if fc not in display]
+        all_findings.append({
+            'repo': 'plaintext-copy',
+            'type': 'live_secret_copy (summary)',
+            'severity': 'MEDIUM',
+            'file': f"{len(rest)} further files",
+            'line': redact_line(f"{len(live_copies)} files hold live-valued credentials; also: "
+                                + '; '.join(f"{f['path']} ({f['count']})" for f in rest[:12])),
+        })
+
     # Step 4: Output
     if not all_findings:
         print(f"SCAN_VERSION: 3")
@@ -556,6 +787,7 @@ def main():
         print(f"REPOS_TOTAL: {len(repos)}")
         print(f"REPOS_ACTIVE: {len(active_repos)}")
         print(f"PLAINTEXT_DIRS: {len(plaintext_dirs)}")
+        print(f"LIVE_COPY_SURFACE: {live_copy_scanned} files | 0 hold live-valued credentials")
         print(f"SCAN_WINDOW: {args.hours}h")
         print("")
         print("✅ **No secrets found in recent commits or plaintext hotspots.**")
@@ -570,6 +802,7 @@ def main():
     print(f"REPOS_TOTAL: {len(repos)}")
     print(f"REPOS_ACTIVE: {len(active_repos)}")
     print(f"PLAINTEXT_DIRS: {len(plaintext_dirs)}")
+    print(f"LIVE_COPY_SURFACE: {live_copy_scanned} files | {len(live_copies)} hold live-valued credentials")
     print(f"SCAN_WINDOW: {args.hours}h")
     print(f"FINDINGS: {len(all_findings)}")
     print("")
