@@ -361,7 +361,13 @@ detect_cmds() {
   # fallback grade.
   if ls "$repo"/.github/workflows/*.yml >/dev/null 2>&1; then
     if [ -f "$repo/.github/workflows/ci.yml" ]; then
-      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull -W $repo/.github/workflows/ci.yml"
+      # FIX (QA-9ROUTER-28 follow-up, 2026-09-22): the -W path must be the AGENT's
+      # checkout (~/qa-$proj), not the host repo path — $repo does not exist on the
+      # agent, so act died rc=1 "stat /home/kara/<repo>/.github/workflows/ci.yml:
+      # permission denied" (the same harness artifact recorded in the 09-20/09-21
+      # dagger QA ledgers). The remote script cd's to ~/qa-$proj before the ci-pass
+      # cell, so a RELATIVE workflow path resolves inside the agent's checkout.
+      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull -W .github/workflows/ci.yml"
     else
       ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull"
     fi
