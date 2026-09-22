@@ -663,7 +663,12 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
 # same class build_incomplete/go_suite_env_failure already handle: an infra
 # refusal upstream of the chaos condition is never a product verdict.
 suite_deps_missing_cause() { # <logfile> — print the line proving deps were missing
-  grep -m1 -E 'tests?/node_modules is missing|vitest cannot be resolved|check-test-deps\.mjs' "\$1" 2>/dev/null | cut -c1-220
+  # FIX (QA-9ROUTER-28 follow-up, 2026-09-22): the old pattern also matched npm's
+# own COMMAND-ECHO line ("> node scripts/check-test-deps.mjs && cd tests && ...")
+# that npm prints before ANY failure - so EVERY rc=1 npm-suite run graded
+# UNVERIFIED "missing test dependencies" and the real failure text never
+# reached the verdict. Require a genuine refusal line and exclude the echo.
+grep -m1 -E '(tests?/node_modules is missing|vitest cannot be resolved|Cannot find module|npm error)' "\$1" 2>/dev/null | grep -v '^> ' | cut -c1-220
 }
 suite_deps_missing() { # <logfile> — 0 when the log carries the missing-test-deps signature
   [ -n "\$(suite_deps_missing_cause "\$1")" ]
