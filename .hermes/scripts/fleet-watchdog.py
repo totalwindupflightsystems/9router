@@ -11,13 +11,24 @@ the fix was deployed, so the message was true and useless):
   * SPEAK ONLY WITH A CONCLUSION. Every alert names the specific thing to do, and reports
     its own evidence (counts, lanes, ages) so the reader never has to go look.
   * SILENCE IS THE NORMAL STATE. Zero output means healthy; the cron delivers nothing.
+  * MEASURE GROUND TRUTH, NEVER A DERIVED COLUMN (2026-09-20). The production check used to
+    read ticks.code_commits, which is written only BELOW the adaptive-cooldown opt-in gate
+    (adaptive_cooldown.go: the `adaptive == 0 → return false` early exit sits above the
+    tasks-mode persist branch) — and fleet.toml pins that flag with absent-key=off
+    (loader.go: "the fleet.toml entry is authoritative for the flag (absent key = off)").
+    So the column reads 0 fleet-wide whenever the adaptive flag is disarmed, and the
+    watchdog reported "293 ticks, 0 commits" for a fleet that landed 250+ commits that day.
+    Count commits in the repos themselves. Never alert on a column you have not proven live.
+  * A DARK METRIC IS ITSELF AN ALERT — ONCE. When ground truth shows work but the
+    scheduler's own column says zero, that blindness is reported (throttled to one
+    emission per DARK_THROTTLE_S) instead of being silently absorbed here.
 
 Usage:
   python3 fleet-watchdog.py            # cron mode: prints only if something is wrong
   python3 fleet-watchdog.py --report   # on-demand: print every section regardless
 """
-import json, os, sqlite3, subprocess, sys, urllib.request
-from datetime import datetime, timezone
+import json, os, sqlite3, subprocess, sys, time, urllib.request
+from datetime import datetime, timedelta, timezone
 
 DB = '/home/kara/.hermes/coding-hermes/scheduler.db'
 API = 'http://127.0.0.1:9090'
@@ -26,6 +37,10 @@ LOG = '/home/kara/.hermes/coding-hermes/scheduler.log'
 SRC_GATE = '/home/kara/coding-hermes-scheduler/coding-herms-scheduler/internal/scheduler/gateway_health_gate.go'
 LOAD_GATE = 12.0
 REPORT = '--report' in sys.argv
+DARK_THROTTLE_S = 6 * 3600
+DARK_STATE = '/home/kara/.hermes/state/watchdog-dark-metric.ts'
+GIT_WINDOW_H = 3
+GIT_WORKDIR_CAP = 80
 
 
 def api_key():
@@ -76,6 +91,59 @@ def daemon_start():
         return None, s
     except Exception:
         return None, ''
+
+
+def git_commits(workdirs):
+    """Ground-truth commit anatomy over the window, measured in the repos themselves.
+
+    Returns (code, board, measured_workdirs). A commit is 'board' when every path it
+    touches lives under .coding-hermes/ (bookkeeping); anything else is real code work.
+    """
+    since = (datetime.now().astimezone() - timedelta(hours=GIT_WINDOW_H)).isoformat()
+    code = board = measured = 0
+    seen = set()
+    for wd in workdirs:
+        if not wd or wd in seen or measured >= GIT_WORKDIR_CAP:
+            continue
+        seen.add(wd)
+        if not os.path.isdir(os.path.join(wd, '.git')):
+            continue
+        try:
+            p = subprocess.run(['git', '-C', wd, 'log', '--since=' + since,
+                                '--pretty=format:@@%H', '--name-only'],
+                               capture_output=True, text=True, timeout=25)
+        except Exception:
+            continue
+        if p.returncode != 0:
+            continue
+        measured += 1
+        for blk in p.stdout.split('@@'):
+            if not blk.strip():
+                continue
+            paths = [x.strip() for x in blk.split('\n')[1:] if x.strip()]
+            if not paths:
+                continue
+            if all(x.startswith('.coding-hermes/') for x in paths):
+                board += 1
+            else:
+                code += 1
+    return code, board, measured
+
+
+def dark_due():
+    """True at most once per DARK_THROTTLE_S — the dark-metric alert is stable, not news."""
+    try:
+        last = float(open(DARK_STATE).read().strip())
+        if time.time() - last < DARK_THROTTLE_S:
+            return False
+    except Exception:
+        pass
+    try:
+        os.makedirs(os.path.dirname(DARK_STATE), exist_ok=True)
+        open(DARK_STATE, 'w').write(str(time.time()))
+    except Exception:
+        pass
+    return True
 
 
 def main():
@@ -144,15 +212,33 @@ def main():
         if not any('NOT ARMED' in a for a in alerts):
             alerts.append("GATEWAY GATE NOT ARMED — the log's last boot said so explicitly.")
 
-    # 6. PRODUCTION — is the fleet actually landing work? A fleet that ticks and commits
-    #    nothing is the failure mode the tick counts hide.
-    code3h = q("SELECT COALESCE(SUM(code_commits),0) FROM ticks WHERE spawned_at >= datetime('now','localtime','-3 hours')")[0][0]
-    done3h = q("SELECT COUNT(*) FROM ticks WHERE spawned_at >= datetime('now','localtime','-3 hours') AND status='completed'")[0][0]
-    if done3h >= 5 and code3h == 0:
-        alerts.append(f"NO OUTPUT — {done3h} ticks completed in the last 3h and produced 0 code commits "
-                      f"fleet-wide. Check the top lanes' yield (fleet-board /data/lanes.csv).")
+    # 6. PRODUCTION — GROUND TRUTH. A fleet that ticks and commits nothing is the failure
+    #    mode the tick counts hide — but ticks.code_commits is an opt-in-gated column
+    #    (adaptive_cooldown=0 → the writer never runs, see header), so it cannot raise this
+    #    alert. Count commits in the workdirs of the lanes that actually ran.
+    win = "replace(substr(spawned_at,1,19),'T',' ') >= datetime('now','localtime','-3 hours')"
+    done3h = q(f"SELECT COUNT(*) FROM ticks WHERE {win} AND status='completed'")[0][0]
+    col3h = q(f"SELECT COALESCE(SUM(code_commits),0) FROM ticks WHERE {win}")[0][0]
+    lane_wds = [wd for wd, in q(f"""SELECT p.workdir FROM ticks t JOIN projects p ON p.name=t.project_name
+                                    WHERE {win} AND t.status='completed' AND COALESCE(p.workdir,'') <> ''
+                                    GROUP BY p.workdir""")]
+    code3h, board3h, measured = git_commits(lane_wds)
+    if done3h >= 5 and measured and code3h == 0:
+        alerts.append(f"NO OUTPUT — {done3h} ticks completed in the last 3h across {len(lane_wds)} lane "
+                      f"workdir(s) and the repos gained 0 code commits ({board3h} board-only commits in the "
+                      f"{measured} workdir(s) measured). The lanes are ticking without landing work.")
     else:
-        notes.append(f"production: {code3h} code commits from {done3h} completed ticks in 3h")
+        notes.append(f"production: {code3h} code commits (+{board3h} board-only) measured in {measured} "
+                     f"workdir(s) from {done3h} completed ticks in 3h")
+    # A metric that reads 0 while the repos disagree is blindness in the scheduler's own
+    # yield surface (it also feeds adaptive pacing). Report it — throttled, it is stable.
+    if code3h and col3h == 0 and dark_due():
+        alerts.append(f"MEASUREMENT DARK — ticks.code_commits is 0 across the last 3h while the repos gained "
+                      f"{code3h} code commits: the commit-anatomy writer sits BELOW the adaptive-cooldown "
+                      f"opt-in gate (adaptive_cooldown.go: `if adaptive == 0 {{ return false }}` precedes the "
+                      f"tasks-mode persist branch) and fleet.toml pins that flag off (absent key = off, "
+                      f"loader.go) — so tick-level yield is unmeasurable fleet-wide. Fix: hoist "
+                      f"persistGitCommitSignals above the gate.")
 
     # 7. parked targets with live satellites (the pause/restore cascade gap, SCHED-GAP-180)
     orphans = q("""SELECT p.name FROM projects p WHERE p.enabled=0 AND EXISTS (
