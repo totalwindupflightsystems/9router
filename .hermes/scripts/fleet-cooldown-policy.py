@@ -40,6 +40,12 @@ import sys
 import urllib.request
 
 API = 'http://127.0.0.1:9090'
+
+# HTTP timeout for every API call. The scheduler's /api/v1/projects response is
+# 18-30s on a loaded box (one row per lane, computed fields included); the
+# original 10s made --apply die mid-run with a bare TimeoutError and leave the
+# fleet un-pinned (SCHED-PERF-002). Override with FLEET_POLICY_HTTP_TIMEOUT.
+HTTP_TIMEOUT = int(os.environ.get('FLEET_POLICY_HTTP_TIMEOUT', '120'))
 TARGET_ACTIVE = 3600       # FAST — Bane-designated fast projects (1h; was 15m/900)
 TARGET_IDLE = 21600        # DEFAULT — fleet baseline (6h; was 2h/7200 — Bane 08-15: "default 4 or 6 hours")
 TARGET_COMPLETED = 43200  # COMPLETED — no work, verified done (12h)
@@ -57,10 +63,6 @@ TARGET_CI = 1800          # CI failing + CI tasks on board
 # clobbered by ~08:00 same day). Hard-skip, same semantics as the 900 tier.
 ELEVATED_PINS = {
     'h3': 43200,      # Bane 2026-08-27: h3 family ticks too fast (5 rows × 6h = 11 ticks/24h) — 12h anti-flood pin
-    'h3-sdk-go-foreman': 43200,
-    'h3-sdk-python-foreman': 43200,
-    'h3-sdk-typescript-foreman': 43200,
-    'h3-shim-foreman': 43200,
     'warpfs': 21600,  # Bane 2026-08-19: ALL projects to 6h window for now
     'hermes-canopy-releng': 86400,  # Bane 2026-09-19: releng is 24h, not 6h
     'hermes-dagger': 900,  # Bane 2026-09-15: 15min dagger speed ruling (was living in DB only, drifted fleet.toml back to 7200)
@@ -192,7 +194,7 @@ def board_pending(workdir):
     return None
 
 def api_get(path):
-    with urllib.request.urlopen(API + path, timeout=10) as r:
+    with urllib.request.urlopen(API + path, timeout=HTTP_TIMEOUT) as r:
         return json.loads(r.read())
 
 def api_put(path, body):
@@ -209,7 +211,7 @@ def api_put(path, body):
     req = urllib.request.Request(
         API + path, data=json.dumps(body).encode(),
         headers={'Content-Type': 'application/json'}, method='PUT')
-    with urllib.request.urlopen(req, timeout=10) as r:
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
         return json.loads(r.read())
 
 def verify_pins():
