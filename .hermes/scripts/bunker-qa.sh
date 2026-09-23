@@ -429,11 +429,12 @@ detect_cmds() {
 # along with the previous release's package coordinates so the cell can install
 # that release and re-install HEAD over it on the agent.
 # Sets global: DETECT_TAG_COUNT / DETECT_PREV_TAG / DETECT_PREV_VERSION /
-# DETECT_PKG_NAME / DETECT_PKG_ECOSYSTEM ("" when unknown — never guessed).
+# DETECT_PKG_NAME / DETECT_PKG_ECOSYSTEM / DETECT_GO_URL
+# ("" when unknown — never guessed).
 detect_upgrade_inputs() {
   local repo="$1"
   DETECT_TAG_COUNT=0; DETECT_PREV_TAG=""; DETECT_PREV_VERSION=""
-  DETECT_PKG_NAME=""; DETECT_PKG_ECOSYSTEM=""
+  DETECT_PKG_NAME=""; DETECT_PKG_ECOSYSTEM=""; DETECT_GO_URL=""
   [ -d "$repo/.git" ] || return 0
   DETECT_TAG_COUNT=$(git -C "$repo" tag 2>/dev/null | grep -c . || true)
   [ "${DETECT_TAG_COUNT:-0}" = "0" ] && return 0
@@ -449,11 +450,40 @@ detect_upgrade_inputs() {
   elif [ -f "$repo/package.json" ]; then
     DETECT_PKG_ECOSYSTEM="npm"
     DETECT_PKG_NAME=$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/package.json" | head -1)
+  elif [ -f "$repo/go.mod" ]; then
+    # QA-OFF-BY-ONE-22 (2026-09-22): Go-binary repos have no index package.
+    # The upgrade cell upgrades the checked-out TREE from the previous
+    # release tag instead; ship_prev_tag_tree streams that tree to the agent
+    # (git archive over the sync channel) and DETECT_GO_URL is the agent-side
+    # clone fallback for public URLs.
+    DETECT_PKG_ECOSYSTEM="go"
+    DETECT_GO_URL=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
   fi
   # The value is interpolated into the generated script inside single quotes.
   DETECT_PKG_NAME=${DETECT_PKG_NAME//\'/}
   DETECT_PREV_TAG=${DETECT_PREV_TAG//\'/}
   return 0
+}
+
+# ─── ship_prev_tag_tree <repo> <proj> — stream the previous tag's tree ───
+# QA-OFF-BY-ONE-22 (2026-09-22): the upgrade cell for Go-binary repos needs
+# the PREVIOUS release's tree, but the synced tree carries no history
+# (sync_repo excludes .git). Stream the previous tag's full tree to
+# ~/qa-up-prev via git archive over the SAME channel sync_repo uses — no
+# clone, no auth on the agent (bunker agents carry no GitHub keys). No-op
+# when the repo has no go-ecosystem previous tag. On failure, mark
+# ~/qa-up-prev.absent so the cell FAILs with the real reason instead of
+# silently skipping the upgrade leg.
+ship_prev_tag_tree() {
+  local repo="$1" proj="$2"
+  [ "$DETECT_PKG_ECOSYSTEM" = "go" ] && [ -n "$DETECT_PREV_TAG" ] || return 0
+  if git -C "$repo" archive --format=tar "$DETECT_PREV_TAG" 2>/dev/null \
+      | agent_ssh "mkdir -p ~/qa-up-prev && tar -C ~/qa-up-prev -xf -" >/dev/null 2>&1 \
+      && agent_ssh "test -f ~/qa-up-prev/go.mod" >/dev/null 2>&1; then
+    log "CELL upgrade-prep: previous release tree $DETECT_PREV_TAG -> ~/qa-up-prev"
+  else
+    agent_ssh "rm -rf ~/qa-up-prev; touch ~/qa-up-prev.absent" >/dev/null 2>&1 || true
+  fi
 }
 
 # ─── sync_repo <repo> <proj> — tar the tracked tree to ~/qa-<proj> ───
@@ -1108,10 +1138,36 @@ QA_PREV_TAG='$DETECT_PREV_TAG'
 QA_PREV_VERSION='$DETECT_PREV_VERSION'
 QA_PKG_NAME='$DETECT_PKG_NAME'
 QA_ECOSYSTEM='$DETECT_PKG_ECOSYSTEM'
+QA_GO_URL='$DETECT_GO_URL'
 TREE_TAG=\$(git tag 2>/dev/null | sort -V | tail -2 | head -1)
+# QA-OFF-BY-ONE-22: materialize the previous release's tree for Go-binary
+# repos — the HOST streams it (ship_prev_tag_tree -> ~/qa-up-prev); if that
+# is missing, try a clone of the baked origin URL (works only for public
+# URLs — bunker agents carry no clone auth).
+UP_PREV=""
+if [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "go" ] && [ -n "\$QA_PREV_TAG" ]; then
+  if [ -f ~/qa-up-prev/go.mod ]; then UP_PREV=~/qa-up-prev
+  elif [ -n "\$QA_GO_URL" ] && git clone -q --no-checkout "\$QA_GO_URL" ~/qa-up-prev-clone 2>/dev/null && git -C ~/qa-up-prev-clone checkout -q --detach "\$QA_PREV_TAG" 2>/dev/null; then
+    mv ~/qa-up-prev-clone ~/qa-up-prev && UP_PREV=~/qa-up-prev
+  else
+    rm -rf ~/qa-up-prev-clone 2>/dev/null
+  fi
+fi
 if [ -n "\$TREE_TAG" ]; then
   git checkout -q --detach "\$TREE_TAG" 2>/dev/null && ( $install_cmd ) >\$LOGD/up1.log 2>&1 && git checkout -q --detach HEAD 2>/dev/null && ( $install_cmd ) >\$LOGD/up2.log 2>&1 && cell upgrade OK "tag \$TREE_TAG → HEAD reinstall clean (in-tree history)" || cell upgrade FAIL "\$(tail -2 \$LOGD/up1.log \$LOGD/up2.log | head -3)"
 elif [ "\$QA_TAG_COUNT" = "0" ]; then cell upgrade N/A "no release tags in repo"
+elif [ -n "\$UP_PREV" ]; then
+  # Go-binary upgrade: install the previous release's tree, then reinstall
+  # HEAD over it — a real previous->HEAD upgrade of the working tree.
+  cp -a "\$UP_PREV" ~/qa-up-prev.bak 2>/dev/null || true
+  ( cd "\$UP_PREV" && $install_cmd ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
+  ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
+  rm -rf ~/qa-up-prev ~/qa-up-prev.bak ~/qa-up-prev-clone 2>/dev/null
+  if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "previous release \$QA_PREV_TAG (tree via git archive) → HEAD reinstall clean"
+  elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PREV_TAG would not build (streamed tree): \$(fail_detail \$up1_rc \$LOGD/up1.log $install_cmd)"
+  else cell upgrade FAIL "upgrade from \$QA_PREV_TAG (streamed tree) to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd)"; fi
+elif [ "\$QA_ECOSYSTEM" = "go" ]; then
+  cell upgrade FAIL "upgrade path UNVERIFIED: repo has \$QA_TAG_COUNT release tag(s), previous \$QA_PREV_TAG, but the host's streamed previous-release tree is missing (~/qa-up-prev) and \$QA_GO_URL is not cloneable from the agent (bunker agents carry no clone auth) — re-run the battery so ship_prev_tag_tree can stream it"
 elif [ "\$QA_ECOSYSTEM" = "pip" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_VERSION" ]; then
   ( pip install "\$QA_PKG_NAME==\$QA_PREV_VERSION" ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
   ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
@@ -1480,7 +1536,7 @@ run() {
   # file, and (b) "Permission denied" on /tmp/inst.log etc. because the
   # fresh agent uid can't overwrite the old agent's files. Clear them
   # before shipping anything.
-  agent_ssh "rm -f ~/qa-run.sh ~/qa-evidence.jsonl /tmp/inst.log /tmp/ci.log /tmp/native.log /tmp/disc.log /tmp/ep.log /tmp/sd.log /tmp/res.log" >/dev/null 2>&1 || true
+  agent_ssh "rm -f ~/qa-run.sh ~/qa-up-prev ~/qa-up-prev.absent ~/qa-evidence.jsonl /tmp/inst.log /tmp/ci.log /tmp/native.log /tmp/disc.log /tmp/ep.log /tmp/sd.log /tmp/res.log" >/dev/null 2>&1 || true
 
   # detect tooling LOCALLY (one place, no quoting layers) — SHARED with launch()
   # (BUNKER_QA_INSTALL_CMD / BUNKER_QA_NATIVE_CMD escape hatches live in detect_cmds)
@@ -1494,6 +1550,9 @@ run() {
     echo "ERROR: repo sync failed — $SYNC_ERR"
     exit 1
   fi
+
+  # QA-OFF-BY-ONE-22: stream the previous release's tree for the upgrade cell
+  ship_prev_tag_tree "$repo" "$PROJ"
 
   # ship the remote script base64 (the ONLY quoting-safe path through ssh)
   local b64
@@ -1586,7 +1645,7 @@ launch() {
   # previous project's script/evidence/marker/logs survive into this run.
   # Clearing the finish marker matters here: a stale one would make collect()
   # read "finished" while this run's battery is barely started.
-  agent_ssh "rm -f ~/qa-run.sh ~/qa-run.finished ~/qa-run.log ~/qa-evidence.jsonl /tmp/inst.log /tmp/ci.log /tmp/native.log /tmp/disc.log /tmp/ep.log /tmp/sd.log /tmp/res.log" >/dev/null 2>&1 || true
+  agent_ssh "rm -f ~/qa-run.sh ~/qa-run.finished ~/qa-run.log ~/qa-up-prev ~/qa-up-prev.absent ~/qa-evidence.jsonl /tmp/inst.log /tmp/ci.log /tmp/native.log /tmp/disc.log /tmp/ep.log /tmp/sd.log /tmp/res.log" >/dev/null 2>&1 || true
 
   detect_cmds "$repo" "$agent"
 
@@ -1597,6 +1656,9 @@ launch() {
       "$SERVER" "$agent" "$(printf '%s' "$SYNC_ERR" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
     exit 1
   fi
+
+  # QA-OFF-BY-ONE-22: stream the previous release's tree for the upgrade cell
+  ship_prev_tag_tree "$repo" "$PROJ"
 
   # Ship the remote script base64 (the ONLY quoting-safe path through ssh) and
   # START it detached. Deviations from the naive one-liner, both deliberate:
@@ -1811,7 +1873,7 @@ case "${1:-}" in
   # re-detects the start command on the agent (the agent-side ladder is the
   # authoritative runtime detection); the hook's default keeps the variable
   # contract complete for tests.
-  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
+  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" DETECT_GO_URL="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
   # QA-CRIER-20 test hook: detect_cmds is a pure function of the repo dir
   # (reads files, sets DETECT_* globals), so this is safe to run against any
   # directory. "$3" defaults to the same placeholder agent __gen-remote uses.
