@@ -1201,3 +1201,36 @@ tasks:
   status: complete
   created_at: '2026-09-20T19:38:19.441889+00:00'
   completed_at: '2026-09-20T20:11:57.309666+00:00'
+- id: QA-9ROUTER-21
+  title: QA battery detection classes produce false verdicts (install/entrypoint/ui-probe/deps-missing)
+  criteria:
+  - The QA battery harness (~/.hermes/scripts/bunker-qa.sh) install detection honors
+    a repo-documented independent tests-package install so the native/chaos cells
+    execute the suite instead of grading a missing-deps rc; the start-command (BIN)
+    detection prefers a real entrypoint (custom-server.js, server.js, start.sh, package.json
+    scripts.start) and only falls back to node src/index.js when that file exists,
+    leaving BIN empty otherwise with the chaos cells grading INFO/UNVERIFIED instead
+    of OK/PASS; ui-probe follows the HTTP redirect chain (-L) and accepts the final
+    2xx landing status while still FAILing on 4xx/5xx/000; a deps-missing signature
+    in a chaos log grades UNVERIFIED not OK; and a committed regression test in tests/federation
+    proves each direction with a reproducible RED (pre-fix copy) and GREEN (post-fix)
+    side plus negative controls
+  status: complete
+  created_at: '2026-09-21T13:22:22.508885+00:00'
+  completed_at: '2026-09-23T03:13:19.409971+00:00'
+- id: QA-9ROUTER-27
+  title: qa-harness-cell-detection test self-recursion - bound the rendered-script
+    execution
+  criteria:
+  - The test executes a rendered bunker-qa.sh remote script with spawnSync cwd fixed
+    to the fixture directory (never the vitest cwd), so the synthesized npm test can
+    never re-enter the 9router suite
+  - A recursion guard in the test (or harness invocation) refuses to execute a rendered
+    script when an ancestor process already carries __gen-remote, failing loudly instead
+    of recursing
+  - Every spawnSync/execFileSync in the test that can execute a rendered script or
+    a fixture package script carries an explicit timeout, and the whole file passes
+    green via cd tests && npx vitest run federation/qa-harness-cell-detection.test.js
+  status: complete
+  created_at: '2026-09-22T17:00:51.770424+00:00'
+  completed_at: '2026-09-23T03:05:12.476787+00:00'
