@@ -45,6 +45,13 @@
  * dynamically free one, and every assertion is relative to the port actually
  * used — so the claim under test (the env/flag port is honoured, never the
  * hardcoded default) is asserted identically on a busy host and on a clean CI box.
+ *
+ * Orphan guard (REVIEW-9ROUTER-002c / item 53): the launcher spawns the stub
+ * DETACHED, so a test/runner death orphans it — nine stray `9router-cli-df28-*`
+ * servers piled up on this host that way. Two layers now: the stub self-exits
+ * when its heartbeat marker goes stale (runner dead), and the suite's afterEach
+ * reaps by recorded pid as belt-and-braces. The guard is proven by the
+ * "orphan guard" test with forced-low thresholds.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
@@ -68,6 +75,34 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
 const READY_LINE = "Router is now running in system tray";
 const SPAWN_TIMEOUT = 60000;
+
+// Spawn-E2E shared state: fixture roots and the heartbeat interval that keeps
+// live stubs' orphan guards fed. Module-level because spawnCli() (also module
+// scope) registers roots and starts the refresher.
+let cliRoots = [];
+let heartbeatTimer = null;
+
+// While a spawn-style test runs, keep every live stub's heartbeat marker fresh
+// so only a DEAD test run leaves an orphan for the guard to reap.
+function startHeartbeats() {
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(() => {
+    for (const root of cliRoots) {
+      try {
+        const now = new Date();
+        fs.utimesSync(path.join(root, "child-heartbeat.marker"), now, now);
+      } catch {}
+    }
+  }, 5000);
+  if (heartbeatTimer.unref) heartbeatTimer.unref();
+}
+
+function stopHeartbeats() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -157,6 +192,24 @@ const STUB_SERVER_JS = [
   'server.listen(port, "0.0.0.0", () => {',
   '  if (process.env.STUB_BOUND_MARKER) fs.writeFileSync(process.env.STUB_BOUND_MARKER, String(port));',
   "});",
+  'if (process.env.STUB_PID_MARKER) fs.writeFileSync(process.env.STUB_PID_MARKER, String(process.pid));',
+  '// Orphan guard: a fixture server must never outlive its test run. The test',
+  '// touches STUB_HEARTBEAT_MARKER every 10s; when the touches stop (runner died,',
+  '// killed, or between runs) the stub exits by itself instead of serving forever',
+  '// as a detached stray. Max age / check interval are overridable so the suite',
+  '// can prove the self-exit in seconds instead of minutes.',
+  'const HB = process.env.STUB_HEARTBEAT_MARKER;',
+  'if (HB) {',
+  '  const HB_MAX_MS = parseInt(process.env.STUB_HEARTBEAT_MAX_MS, 10) || 30000;',
+  '  const HB_CHECK_MS = parseInt(process.env.STUB_HEARTBEAT_CHECK_MS, 10) || 10000;',
+  '  let lastTouch = 0;',
+  '  const timer = setInterval(() => {',
+  '    let mtime = 0;',
+  '    try { mtime = fs.statSync(HB).mtimeMs; } catch {}',
+  '    if (mtime > lastTouch) { lastTouch = mtime; return; }',
+  '    if (!mtime || Date.now() - mtime > HB_MAX_MS) { clearInterval(timer); process.exit(0); }',
+  '  }, HB_CHECK_MS).unref();',
+  '}',
   "",
 ].join("\n");
 
@@ -168,6 +221,9 @@ function makeCliRoot() {
   const appDir = path.join(root, "app");
   fs.mkdirSync(appDir, { recursive: true });
   fs.writeFileSync(path.join(appDir, "server.js"), STUB_SERVER_JS);
+  // Seed the heartbeat marker the stub watches; startHeartbeats() refreshes its
+  // mtime while the test is alive.
+  fs.writeFileSync(path.join(root, "child-heartbeat.marker"), "");
 
   // PATH stubs: keep the run hermetic (see the header note).
   const binDir = path.join(root, "bin");
@@ -194,7 +250,7 @@ function makeCliRoot() {
 
 // `port` is the ambient PORT the launcher must resolve from: pass a string to set
 // it, `null` to leave it unset (the "no env override" cases).
-function spawnCli(cli, args, { childMode = "serve", port = null } = {}) {
+function spawnCli(cli, args, { childMode = "serve", port = null, stubEnv = {} } = {}) {
   const env = { ...process.env };
   delete env.DISPLAY; // headless: no system tray init
   delete env.PORT;
@@ -204,6 +260,12 @@ function spawnCli(cli, args, { childMode = "serve", port = null } = {}) {
   env.STUB_CHILD_MODE = childMode;
   env.STUB_CHILD_MARKER = cli.startedMarker;
   env.STUB_BOUND_MARKER = cli.boundMarker;
+  // Orphan guard (see STUB_SERVER_JS): the stub watches this file's mtime and
+  // self-exits when the test stops touching it, so a fixture server can never
+  // outlive its run as a detached stray (REVIEW-9ROUTER-002c / item 53).
+  env.STUB_HEARTBEAT_MARKER = path.join(cli.root, "child-heartbeat.marker");
+  env.STUB_PID_MARKER = path.join(cli.root, "child-pid.marker");
+  Object.assign(env, stubEnv);
   if (port !== null) env.PORT = port;
 
   const proc = spawn(process.execPath, [path.join(cli.root, "cli.js"), ...args], {
@@ -211,6 +273,7 @@ function spawnCli(cli, args, { childMode = "serve", port = null } = {}) {
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  startHeartbeats();
   const captured = { stdout: "", stderr: "" };
   proc.stdout.on("data", (chunk) => (captured.stdout += chunk.toString()));
   proc.stderr.on("data", (chunk) => (captured.stderr += chunk.toString()));
@@ -380,17 +443,20 @@ describe("DF-9ROUTER-28 describeOccupiedPort — the refusal names both remedies
 // ─── spawn E2E: the real launcher ───────────────────────────────────────────
 
 describe("DF-9ROUTER-28 CLI launcher — the resolved port drives everything", () => {
-  let cliRoots = [];
   let liveProcs = [];
   let occupied = [];
 
   beforeEach(() => {
-    cliRoots = [];
     liveProcs = [];
     occupied = [];
+    cliRoots = [];
+    stopHeartbeats();
   });
 
   afterEach(async () => {
+    // Stop the heartbeat first: the stubs' orphan guard keys off its mtime, and
+    // it must not keep refreshing a server the reaper is about to kill.
+    stopHeartbeats();
     for (const proc of liveProcs.splice(0)) {
       if (proc.exitCode === null && proc.signalCode === null) {
         proc.kill("SIGKILL");
@@ -398,7 +464,25 @@ describe("DF-9ROUTER-28 CLI launcher — the resolved port drives everything", (
       }
     }
     for (const server of occupied.splice(0)) await closeServer(server);
-    for (const root of cliRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+    // Belt-and-braces reaper: killLauncherByPort() may kill a launcher whose
+    // detached stub child is still booting, which is exactly how the five (in
+    // fact nine) orphaned `9router-cli-df28-*` fixture servers piled up on this
+    // host (REVIEW-9ROUTER-002c). Race-safe: a stub that exits between the read
+    // and the kill makes kill() a harmless no-op.
+    const seen = new Set();
+    for (const root of cliRoots.splice(0)) {
+      const pidMarker = path.join(root, "child-pid.marker");
+      try {
+        const pid = parseInt(fs.readFileSync(pidMarker, "utf8"), 10);
+        if (Number.isInteger(pid) && pid > 1 && !seen.has(pid)) {
+          seen.add(pid);
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }
+      } catch {}
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   function newCli() {
@@ -600,6 +684,52 @@ describe("DF-9ROUTER-28 CLI launcher — the resolved port drives everything", (
         new RegExp(`precedence: --port/-p → PORT → ${DEFAULT_PORT}`),
       );
       expect(spawned.captured.stdout).toMatch(/-p, --port <port>/);
+    },
+    SPAWN_TIMEOUT,
+  );
+
+  it(
+    "orphan guard: a stub whose test died stops itself (the abandoned-boats fix)",
+    async () => {
+      const cli = newCli();
+      const envPort = await preferredPort(20129);
+
+      // Forced-low thresholds make the self-exit provable in seconds; production
+      // defaults (30s max age, 10s checks) are what runs leave behind.
+      const spawned = spawnCli(cli, ["-t", "--skip-update"], {
+        port: String(envPort),
+        stubEnv: { STUB_HEARTBEAT_MAX_MS: "2000", STUB_HEARTBEAT_CHECK_MS: "500" },
+      });
+      liveProcs.push(spawned.proc);
+
+      // The stub is really up, really detached-orphaned territory, and serving.
+      expect(await waitForOutput(spawned.captured, READY_LINE, 30000)).toBe(true);
+      const pid = parseInt(fs.readFileSync(path.join(cli.root, "child-pid.marker"), "utf8"), 10);
+      expect(Number.isInteger(pid) && pid > 1).toBe(true);
+      expect(await healthOn(envPort)).toEqual({ status: 200, body: '{"ok":true}' });
+
+      // The test run "dies": heartbeats stop without any signal reaching the
+      // stub — exactly the state a killed runner leaves behind. Age the marker
+      // past the stub's max age (and stop the refresher first so it cannot
+      // resurrect the state).
+      stopHeartbeats();
+      const dead = new Date(Date.now() - 60_000);
+      fs.utimesSync(path.join(cli.root, "child-heartbeat.marker"), dead, dead);
+
+      let gone = false;
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          gone = true;
+          break;
+        }
+        await delay(250);
+      }
+      // The stray is gone BY ITSELF and the port is released — no reaper needed.
+      expect(gone).toBe(true);
+      expect(await isPortFree(envPort)).toBe(true);
     },
     SPAWN_TIMEOUT,
   );
