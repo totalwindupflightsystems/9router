@@ -1395,6 +1395,26 @@ else cell chaos-shutdown N/A "no compose file"; fi
 # Now: candidates exclude tool caches, a candidate whose basename appears in the
 # project's own source wins, the next start IS run under a timeout, the outcome
 # is classified, and ~/state.bak is restored either way.
+# Project-probe hook (SDKTS-QA-H3-SDK-TYPESCRIPT-FOREMAN-7): a repo may own a
+# REAL failure-mode probe at .qa/chaos-probes/corruption.sh (opt-in, generic —
+# the harness never learns any project name; the probe exercises the project's
+# own SDK behavior and self-grades). When present + executable it REPLACES the
+# generic truncate/restart logic for this run: 0=OK (first stdout line in the
+# detail), 1=FAIL (SDK misbehavior), 2=INFO (environment gap, probe skipped),
+# 124=FAIL (probe HANGS), anything else=INFO (rc + output). When absent this
+# block changes nothing — the generic cell logic below runs byte-identically.
+if [ -x .qa/chaos-probes/corruption.sh ]; then
+  pp_out=\$(timeout 120 .qa/chaos-probes/corruption.sh 2>&1); pp_rc=\$?
+  pp_first=\$(printf '%s' "\$pp_out" | head -1 | cut -c1-300)
+  pp_more=\$(printf '%s' "\$pp_out" | tail -n +2 | tr '\n' ' ' | cut -c1-500)
+  case "\$pp_rc" in
+    0)   cell chaos-corruption OK "project probe: \$pp_first \$pp_more" ;;
+    1)   cell chaos-corruption FAIL "project probe reports SDK misbehavior: \$pp_first \$pp_more" ;;
+    2)   cell chaos-corruption INFO "project probe: environment gap, probe skipped (\$pp_first \$pp_more)" ;;
+    124) cell chaos-corruption FAIL "project probe HANGS (>120s): \$pp_first \$pp_more" ;;
+    *)   cell chaos-corruption INFO "project probe rc=\$pp_rc: \$pp_first \$pp_more" ;;
+  esac
+else
 CAND=\$(find . -maxdepth 3 \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) \
   -not -path './.git/*' -not -path './node_modules/*' -not -path './.mypy_cache/*' \
   -not -path './.pytest_cache/*' -not -path './.ruff_cache/*' -not -path './.vfs/*' \
@@ -1429,6 +1449,7 @@ if [ -n "\$SF" ]; then
     fi
   else cell chaos-corruption FAIL "could not truncate \$SF: \$(tail -1 ~/trunc 2>/dev/null || echo cp-error)"; fi
 else cell chaos-corruption N/A "no db/state files in repo"; fi
+fi  # end project-probe hook (corruption)
 
 # 9 · chaos-resource — suite under 3G memory cap
 # QA-TASK-ROUTER-3: a green/red result is VACUOUS unless the log PROVES the cap
@@ -1475,7 +1496,23 @@ elif suite_deps_missing \$LOGD/res.log; then cell chaos-resource UNVERIFIED "mis
 else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$LOGD/res.log)"; fi
 
 # 10 · chaos-errorpath — missing config: clean usage or panic?
-if [ -n "\$BIN" ]; then
+# Project-probe hook (SDKTS-QA-H3-SDK-TYPESCRIPT-FOREMAN-7): same opt-in, fully
+# generic contract as the chaos-corruption cell — a repo-owned
+# .qa/chaos-probes/errorpath.sh REPLACES the generic missing-config BIN probe
+# for this run (0=OK, 1=FAIL SDK misbehavior, 2=INFO environment gap, 124=FAIL
+# HANGS, other=INFO rc). Absent probe → byte-identical generic behavior.
+if [ -x .qa/chaos-probes/errorpath.sh ]; then
+  pp_out=\$(timeout 120 .qa/chaos-probes/errorpath.sh 2>&1); pp_rc=\$?
+  pp_first=\$(printf '%s' "\$pp_out" | head -1 | cut -c1-300)
+  pp_more=\$(printf '%s' "\$pp_out" | tail -n +2 | tr '\n' ' ' | cut -c1-500)
+  case "\$pp_rc" in
+    0)   cell chaos-errorpath OK "project probe: \$pp_first \$pp_more" ;;
+    1)   cell chaos-errorpath FAIL "project probe reports SDK misbehavior: \$pp_first \$pp_more" ;;
+    2)   cell chaos-errorpath INFO "project probe: environment gap, probe skipped (\$pp_first \$pp_more)" ;;
+    124) cell chaos-errorpath FAIL "project probe HANGS (>120s): \$pp_first \$pp_more" ;;
+    *)   cell chaos-errorpath INFO "project probe rc=\$pp_rc: \$pp_first \$pp_more" ;;
+  esac
+elif [ -n "\$BIN" ]; then
   EP_DIR=~/qa-noconfig-\$\$
   ep_out=\$(ep_probe "\$BIN" "\$EP_DIR" "\$LOGD")
   EP_STARTED=\$(printf '%s' "\$ep_out" | cut -f1)
