@@ -486,11 +486,17 @@ ship_prev_tag_tree() {
   fi
 }
 
-# ─── sync_repo <repo> <proj> — tar the tracked tree to ~/qa-<proj> ───
-# The payload comes from git's index plus untracked files that are not ignored;
-# this honours the source repo's .gitignore instead of walking the whole workdir.
-# Verdict comes from the REMOTE's SYNC-OK echo, not the local tar's exit code.
-# GNU tar exits non-zero on "file changed as we read it" even with
+# sync_repo <repo> <proj> — sync the repo to ~/qa-<proj> over SSH
+# TWO payload paths (2026-09-23, QA-TERMINAL-JAIL-9):
+#   DEFAULT — a FROZEN `git archive HEAD` stream: the audited tree is exactly
+#     the pushed HEAD commit, immune to workdir-mid-edit drift (staged worker
+#     files, generated caches, untracked dagger.db-style artifacts never ship).
+#   LEGACY (BUNKER_QA_SYNC_EXCLUDES set) — the old tracked+untracked file list
+#     tar, kept for projects that must exclude tracked-heavy DATA dirs from the
+#     payload (git archive cannot exclude tracked paths). This path tars the
+#     LIVE workdir non-atomically and carries the documented drift risk.
+# Verdict comes from the REMOTE's SYNC-OK echo, not the local stream's exit
+# code. GNU tar exits non-zero on "file changed as we read it" even with
 # --warning=no-file-changed, and with `set -o pipefail` that would abort the
 # whole battery although the remote extraction succeeded. Live repos (actively
 # written during tar) trip this constantly.
@@ -498,7 +504,7 @@ ship_prev_tag_tree() {
 # tracked-but-heavy DATA dirs (generated images, fixtures) would stall the SSH
 # pipe past the 1800s agent_ssh timeout (proven wojons-mythos 2026-08-31:
 # 6.4G repo / 845M projects/ + 482M packages/backend/projects at ~600KB/s).
-# BUNKER_QA_SYNC_MAX_BYTES: source-file byte guard, default 300 MB.
+# BUNKER_QA_SYNC_MAX_BYTES: payload byte guard, default 300 MB.
 # Returns 1 on failure with the remote's last 2 lines in SYNC_ERR.
 sync_repo() {
   local repo="$1" proj="$2"
@@ -507,6 +513,33 @@ sync_repo() {
   local sync_list sync_bytes sync_out sync_ok sync_oversize
   local -a sync_excl=()
   if [ -n "$sync_excludes" ]; then read -ra sync_excl <<< "$sync_excludes"; fi
+
+  if [ -z "$sync_excludes" ]; then
+    # FROZEN path: payload = exactly HEAD. Measure the real stream for the
+    # byte guard, then re-stream it through the SSH pipe.
+    if ! sync_bytes=$(git -C "$repo" archive HEAD | wc -c); then
+      SYNC_ERR="SYNC-ARCHIVE-ERROR: git archive HEAD failed for $repo (empty repo?)"
+      return 1
+    fi
+    if [ "${sync_bytes:-0}" -le 0 ]; then
+      SYNC_ERR="SYNC-ARCHIVE-ERROR: git archive HEAD produced no bytes for $repo"
+      return 1
+    fi
+    if [ "$sync_bytes" -gt "$sync_max" ]; then
+      sync_oversize="SYNC-OVERSIZE: $sync_bytes > $sync_max (set BUNKER_QA_SYNC_MAX_BYTES to override)"
+      printf '%s\n' "$sync_oversize" >&2
+      SYNC_ERR="$sync_oversize"
+      return 1
+    fi
+    sync_out=$(git -C "$repo" archive HEAD |
+      agent_ssh "mkdir -p ~/qa-$proj && tar -C ~/qa-$proj -xf - && cd ~/qa-$proj && git init -q && git -c user.name='qa-bot' -c user.email='qa@bunker' add -A && git -c user.name='qa-bot' -c user.email='qa@bunker' commit -q -m 'qa-sync' && echo SYNC-OK" 2>&1)
+    sync_ok=$(printf '%s' "$sync_out" | grep -c 'SYNC-OK')
+    if [ "$sync_ok" -eq 0 ]; then
+      SYNC_ERR=$(printf '%s' "$sync_out" | tail -2)
+      return 1
+    fi
+    return 0
+  fi
 
   sync_list=$(mktemp) || { SYNC_ERR='SYNC-LIST-ERROR: could not create file list'; return 1; }
   if ! git -C "$repo" ls-files -z --cached --others --exclude-standard > "$sync_list"; then
