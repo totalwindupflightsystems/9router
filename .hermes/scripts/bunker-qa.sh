@@ -1436,7 +1436,10 @@ fi
 if [ "\$ci_rc" = "0" ]; then
   cell ci-pass OK "act: \$(grep -cE 'Job succeeded|✅ Success' \$LOGD/ci.log || true) jobs green — rc=0 (\$ACT_WF_COUNT triggerable workflow(s))"
 else
+  suite_start=\$(date +%s)
   ( $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
+  suite_end=\$(date +%s)
+  suite_dur=\$(( suite_end - suite_start ))
   if [ \$nat_rc -eq 0 ]; then
     ACTCTXOK=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTXOK=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
     if [ "\$ci_rc" = "skip" ]; then
@@ -1688,15 +1691,15 @@ elif [ -f go.mod ] && grep -qE 'http\.ListenAndServe|http\.Server|chi\.NewRouter
 else cell ui-probe N/A "no web UI detected"; fi
 
 # 6 · chaos-disconnect — network cut via dead proxy: clean fail or HANG?
-# Window is sized from this cell's own observed duration: 2x + 30s, with
+# Window is sized from the NATIVE SUITE's observed duration (suite_dur, timed
+# around the ci-pass native run above): 2x + 30s, with
 # BUNKER_QA_DISCONNECT_TIMEOUT as the minimum floor. A fixed 240s window misread
-# a 100s suite as a hang on a slower agent (QA-HERMES-CANOPY-21).
-native_start=\$(date +%s)
-( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 timeout \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
-native_end=\$(date +%s)
-native_dur=\$(( native_end - native_start ))
-disc_window=\$(( native_dur * 2 + 30 ))
+# a 100s suite as a hang on a slower agent (QA-HERMES-CANOPY-21). The computed
+# window is APPLIED to the timeout invocation below — not merely named.
+disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 [ "\$disc_window" -lt \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} ] && disc_window=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+native_dur=\$suite_dur
 if [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
 elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network is cut (timeout \${disc_window}s, sized from the \${native_dur}s suite: 2x+30s; override floor BUNKER_QA_DISCONNECT_TIMEOUT=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}s) — \$(head -3 \$LOGD/disc.log)"
 elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
