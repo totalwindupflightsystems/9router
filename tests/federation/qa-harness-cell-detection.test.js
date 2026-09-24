@@ -31,13 +31,40 @@
 //                  recurse; (3) every spawnSync in this file carries an explicit
 //                  timeout.
 //
+// QA-9ROUTER-19 / QA-9ROUTER-20 — added 2026-09-23. Two more harness defects
+// produced FALSE board rows on 9router:
+//
+//   QA-9ROUTER-20  the upgrade cell installed the ROOT package name. The root
+//                  package here is `"name": "9router-app", "private": true`
+//                  (never published — upstream identical) while `cli/` is the
+//                  PUBLISHED `"name": "9router"`, so the cell graded
+//                  `upgrade FAIL "previous release 9router-app@0.5.69 would not
+//                  install … E404 Not Found"` — a false product verdict, and the
+//                  upgrade path stayed UNVERIFIED. Detection must prefer a
+//                  publishable (non-private) package, root name as the fallback.
+//   QA-9ROUTER-19  the ci-pass act leg ran EVERY workflow, including ones that
+//                  cannot trigger on a branch push at all (docker-publish.yml:
+//                  push TAGS v* + workflow_dispatch; gitbook-pages.yml: push
+//                  branches [main, master] + paths gitbook/**) and graded their
+//                  act artifacts as product FAIL, while hosted CI on the same
+//                  HEAD was green. The host now selects only triggerable
+//                  workflows, the cell stages them into an EXTERNAL directory
+//                  (act does NOT merge repeated -W <file> targets — measured on
+//                  this host: the LAST one wins; a single DIRECTORY target
+//                  recursively merges), and a step failure caused by the
+//                  workflow's own registry/docker coordinates is CLASSIFIED
+//                  instead of graded red. The negative control below pins that a
+//                  genuinely failing triggerable path still grades FAIL.
+//
 // REALNESS IS THE POINT — no mocks of the code under test. Every assertion drives the
 // harness through its own test hooks (`__detect-cmds`, `__gen-remote`), and the ui-probe
 // assertions run the EXTRACTED decision chain against a REAL node fixture serving a real
 // redirect chain, exactly as the harness does on an agent. The RED side is produced three
 // ways so it is reproducible on any machine: an inline replica of the pre-fix decision,
 // the real pre-fix copy from this repo's git history when it is obtainable, and the
-// post-fix chain that must pass the same fixture.
+// post-fix chain that must pass the same fixture. The QA-19/20 assertions drive the
+// ci-pass decision chain extracted from a REAL render the same way, with the harness's own
+// helper functions sliced out of that same render.
 //
 // GRACEFUL SKIP IS REQUIRED: the harness is a fleet file, not a repo file. A checkout
 // without it (CI, a fresh clone) must SKIP, never fail.
@@ -96,6 +123,19 @@ const FIXTURES = {
   customServer: path.join(TMP, "custom-server"),
   srcIndex: path.join(TMP, "src-index"),
   noEntry: path.join(TMP, "no-entry"),
+  // QA-9ROUTER-20: private ROOT package + published nested CLI package (9router's
+  // exact shape: root "9router-app"/private, cli/ "9router").
+  privateRootWithCli: path.join(TMP, "private-root-with-cli"),
+  // QA-9ROUTER-20 control: root publishable name only — legacy selection must hold.
+  rootPublishable: path.join(TMP, "root-publishable"),
+  // QA-9ROUTER-20 negative control: NOTHING publishable, root name is the honest answer.
+  allPrivate: path.join(TMP, "all-private"),
+  // QA-9ROUTER-19: workflows that cannot trigger on a branch push + one that can.
+  workflowsMixed: path.join(TMP, "workflows-mixed"),
+  // QA-9ROUTER-19 control edge: a lone workflow that DOES trigger.
+  workflowsTriggerable: path.join(TMP, "workflows-triggerable"),
+  // QA-9ROUTER-19: only non-triggerable workflows ⇒ act must be skipped, not graded.
+  workflowsNoneTriggerable: path.join(TMP, "workflows-none-triggerable"),
 };
 
 // The harness's render path runs small bootstrap probes and can leave a straggler holding
@@ -120,8 +160,14 @@ function runHarness(args, { env } = {}) {
   return fs.existsSync(outFile) ? fs.readFileSync(outFile, "utf8") : "";
 }
 
-function detect(dir) {
-  const out = runHarness(["__detect-cmds", dir, "test-agent-0000"]);
+function detect(dir, { branch } = {}) {
+  // `branch` pins the branch the CI cell simulates (BUNKER_QA_BRANCH), so a test
+  // can ask "what does detection do for a push to THIS branch" without depending
+  // on the checked-out branch of the fixture repo.
+  const out = runHarness(
+    ["__detect-cmds", dir, "test-agent-0000"],
+    branch ? { env: { BUNKER_QA_BRANCH: branch } } : {}
+  );
   const map = {};
   for (const line of out.split("\n")) {
     const i = line.indexOf("=");
@@ -135,6 +181,95 @@ function render(dir, opts = {}) {
   // unpinned execution path; runHarness re-exports the sentinel for every render
   // regardless (QA-9ROUTER-27 layer 2).
   return runHarness(["__gen-remote", dir], opts);
+}
+
+// QA-9ROUTER-19/20: the SAME render, but with the harness's REAL detection for
+// `dir` baked in (BUNKER_QA_BRANCH can pin the branch the cell simulates).
+// `__gen-remote` alone renders fixed placeholder values, so it cannot show what a
+// battery run would actually ship.
+function renderDetected(dir, opts = {}) {
+  const env = opts.branch ? { BUNKER_QA_BRANCH: opts.branch } : {};
+  return runHarness(["__gen-remote-detected", dir], { env });
+}
+
+// ── QA-9ROUTER-19 helpers: drive the ci-pass decision CHAIN ──────────────────
+// The chain and every helper it calls are sliced out of a REAL render — no
+// re-implementation of the code under test. The only substitutions are `cell`
+// (the harness's evidence writer becomes a collector) and the native-suite
+// command, which build_remote_script bakes as literal text at render time.
+function extractCiPassChain(rendered) {
+  const lines = rendered.split("\n");
+  const start = lines.findIndex((l) => l.startsWith("#QA-CELL:ci-pass:start"));
+  const end = lines.findIndex((l) => l.startsWith("#QA-CELL:ci-pass:end"));
+  if (start === -1 || end === -1 || end < start) return null;
+  return lines.slice(start + 1, end).join("\n");
+}
+
+function sliceFunction(rendered, name) {
+  const lines = rendered.split("\n");
+  const start = lines.findIndex((l) => l.startsWith(`${name}() {`));
+  if (start === -1) return null;
+  const end = lines.indexOf("}", start);
+  if (end === -1) return null;
+  return lines.slice(start, end + 1).join("\n");
+}
+
+function renderCiHelpers(rendered) {
+  const lines = rendered.split("\n");
+  const reLine = lines.find((l) => l.startsWith("CI_ARTIFACT_RE="));
+  const fns = ["act_failure_context", "build_env_failure", "go_suite_env_failure"].map((n) =>
+    sliceFunction(rendered, n)
+  );
+  const pred = sliceFunction(rendered, "ci_only_failure");
+  return [reLine, ...fns, pred].filter(Boolean).join("\n");
+}
+
+// Run the extracted ci-pass chain over a synthetic (ci.log, native rc) pair and
+// return the ONE cell line it produces. Bounded: everything runs through a
+// timed spawn from a file, with the file-wide sentinel + fixture cwd invariants.
+function runCiPassChain(rendered, { ciLog = "", ciRc = 0, nativeProbe = "true", note = "" } = {}) {
+  const chain = extractCiPassChain(rendered);
+  if (!chain) return null;
+  // build_remote_script expands $native_cmd at RENDER time, so the chain carries
+  // the literal suite command; rewrite that ONE site to a probe we control.
+  const patched = chain.replace(
+    /^  \( .* \) >\$LOGD\/native\.log 2>&1; nat_rc=\$\?$/m,
+    "  ( $NATIVE_PROBE ) >$LOGD/native.log 2>&1; nat_rc=$?"
+  );
+  const dir = fs.mkdtempSync(path.join(TMP, "ci-pass-"));
+  const logs = path.join(dir, "logs");
+  fs.mkdirSync(logs, { recursive: true });
+  fs.writeFileSync(path.join(logs, "ci.log"), ciLog);
+  fs.writeFileSync(path.join(logs, "native.log"), "");
+  const cellsFile = path.join(dir, "cells.txt");
+  fs.writeFileSync(cellsFile, "");
+  const script = [
+    "set -u",
+    `LOGD=${JSON.stringify(logs)}`,
+    `ci_rc=${ciRc}`,
+    `ACT_WF_COUNT=${ciRc === "skip" ? 0 : 1}`,
+    `QA_ACT_NOTE=${JSON.stringify(note)}`,
+    `NATIVE_PROBE='${nativeProbe}'`,
+    renderCiHelpers(rendered),
+    `cell() { echo "cell $1 $2 $3" >> ${JSON.stringify(cellsFile)}; }`,
+    patched,
+  ].join("\n");
+  const res = spawnSync("bash", ["-c", script], {
+    encoding: "utf8",
+    timeout: 30_000,
+    cwd: dir,
+    env: GUARD_ENV,
+  });
+  const cells = fs.readFileSync(cellsFile, "utf8").trim();
+  return { cells, stderr: res.stderr || "" };
+}
+
+function ciPassVerdict(cells) {
+  for (const line of (cells || "").split("\n")) {
+    const m = line.match(/^cell ci-pass (\S+) (.*)$/);
+    if (m) return { status: m[1], detail: m[2] };
+  }
+  return null;
 }
 
 // Slice the whole ui-probe decision (root-npm arm .. frontend arm .. BIN arm .. final N/A)
@@ -337,6 +472,51 @@ function writePackageJson(dir, extra = {}) {
   );
 }
 
+// QA-9ROUTER-20 fixture: a private root package plus a nested publishable one —
+// 9router's exact shape (root `9router-app`/private, `cli/` = the published
+// `9router`). `git init` so detect_upgrade_inputs reaches the package-detection
+// arm (it returns early without a .git dir; tags are irrelevant to that arm).
+function writePrivateRootWithCli(dir, { rootName = "9router-app", cliName = "9router" } = {}) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: rootName, version: "0.5.81", private: true }, null, 2)
+  );
+  fs.mkdirSync(path.join(dir, "cli"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "cli", "package.json"),
+    JSON.stringify(
+      { name: cliName, version: "0.5.81", bin: { [cliName]: "./cli.js" }, files: ["cli.js"] },
+      null,
+      2
+    )
+  );
+}
+
+function gitInit(dir, tags = ["v1.0.0", "v1.0.1"]) {
+  // detect_upgrade_inputs() returns early for a repo with NO tags (`git tag` is
+  // the cell's own applicability gate), so the package-coordinate arm is only
+  // reached by a tagged repo — the fixtures need tags to exercise it at all.
+  const tagCmds = tags.map((t) => `git tag ${t}`).join(" && ");
+  spawnSync(
+    "bash",
+    [
+      "-c",
+      `cd ${JSON.stringify(dir)} && git init -q . && git -c user.name=qa -c user.email=qa@qa add -A && git -c user.name=qa -c user.email=qa@qa commit -qm fixture && ${tagCmds}`,
+    ],
+    { stdio: "ignore", timeout: 30_000, cwd: dir, env: GUARD_ENV }
+  );
+}
+
+// QA-9ROUTER-19 fixtures: .github/workflows with realistic `on:` blocks. Written
+// as raw text (not JSON) because the harness parses the YAML by hand, so the
+// fixture has to look like a real workflow file, not a JSON dump.
+function writeWorkflow(dir, name, body) {
+  const wfDir = path.join(dir, ".github", "workflows");
+  fs.mkdirSync(wfDir, { recursive: true });
+  fs.writeFileSync(path.join(wfDir, name), body);
+}
+
 beforeAll(() => {
   writeRedirectFixture(FIXTURES.redirect);
   writeServerErrorFixture(FIXTURES.serverError);
@@ -367,6 +547,119 @@ beforeAll(() => {
   fs.mkdirSync(path.join(FIXTURES.srcIndex, "src"), { recursive: true });
   fs.writeFileSync(path.join(FIXTURES.srcIndex, "src", "index.js"), "// entrypoint\n");
   writePackageJson(FIXTURES.noEntry); // package.json with NO startable entrypoint
+
+  // ── QA-9ROUTER-20 fixtures ────────────────────────────────────────────────
+  // (a) 9router's shape: private root + published nested cli/
+  writePrivateRootWithCli(FIXTURES.privateRootWithCli);
+  gitInit(FIXTURES.privateRootWithCli);
+  // (b) control: a publishable ROOT — the legacy selection must still win
+  fs.mkdirSync(FIXTURES.rootPublishable, { recursive: true });
+  fs.writeFileSync(
+    path.join(FIXTURES.rootPublishable, "package.json"),
+    JSON.stringify({ name: "qa-published-root", version: "1.0.0" }, null, 2)
+  );
+  gitInit(FIXTURES.rootPublishable);
+  // (c) negative control: nothing publishable anywhere — the root name is the
+  // honest answer (a real registry error must still be reported, never skipped)
+  fs.mkdirSync(path.join(FIXTURES.allPrivate, "cli"), { recursive: true });
+  fs.writeFileSync(
+    path.join(FIXTURES.allPrivate, "package.json"),
+    JSON.stringify({ name: "qa-private-root", private: true }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(FIXTURES.allPrivate, "cli", "package.json"),
+    JSON.stringify({ name: "qa-private-cli", private: true }, null, 2)
+  );
+  gitInit(FIXTURES.allPrivate);
+
+  // ── QA-9ROUTER-19 fixtures ────────────────────────────────────────────────
+  // 9router's actual set plus a branch-triggerable one, so one repo shows both
+  // the artifact (tag-only / other-branch) and the real signal.
+  fs.mkdirSync(path.join(FIXTURES.workflowsMixed, "gitbook"), { recursive: true });
+  writePackageJson(FIXTURES.workflowsMixed);
+  writeWorkflow(
+    FIXTURES.workflowsMixed,
+    "docker-publish.yml",
+    [
+      "name: Build and Push Docker Image",
+      "",
+      "on:",
+      "  push:",
+      "    tags:",
+      '      - "v*"',
+      "  workflow_dispatch:",
+      "",
+      "jobs:",
+      "  build-and-push:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: docker login ghcr.io -u x -p y",
+      "",
+    ].join("\n")
+  );
+  writeWorkflow(
+    FIXTURES.workflowsMixed,
+    "gitbook-pages.yml",
+    [
+      "name: Deploy GitBook",
+      "",
+      "on:",
+      "  push:",
+      "    branches: [main, master]",
+      "    paths:",
+      '      - "gitbook/**"',
+      "  workflow_dispatch:",
+      "",
+      "jobs:",
+      "  build-deploy:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        working-directory: gitbook",
+      "    steps:",
+      "      - run: npm install",
+      "",
+    ].join("\n")
+  );
+  writeWorkflow(
+    FIXTURES.workflowsMixed,
+    "tests.yml",
+    [
+      "name: Test Suite",
+      "",
+      "on:",
+      "  push:",
+      "    branches: [federation, master]",
+      "  pull_request:",
+      "    branches: [federation, master]",
+      "",
+      "jobs:",
+      "  test:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: echo suite",
+      "",
+    ].join("\n")
+  );
+
+  // a lone workflow that DOES trigger on the branch under test. NOT named ci.yml
+  // on purpose: a repo whose CI file IS `ci.yml` takes the pre-existing
+  // `-W .github/workflows/ci.yml` arm (QA-CRIER-20) and never reaches the
+  // selection path this test covers.
+  writePackageJson(FIXTURES.workflowsTriggerable);
+  writeWorkflow(
+    FIXTURES.workflowsTriggerable,
+    "trig.yml",
+    ["name: CI", "", "on:", "  push:", "    branches: [federation]", "", "jobs:", "  t:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo hi", ""].join("\n")
+  );
+
+  // only non-triggerable workflows ⇒ act has nothing to say about this branch
+  writePackageJson(FIXTURES.workflowsNoneTriggerable);
+  writeWorkflow(
+    FIXTURES.workflowsNoneTriggerable,
+    "docker-publish.yml",
+    ["name: Publish", "", "on:", "  push:", "    tags:", '      - "v*"', "  workflow_dispatch:", "", "jobs:", "  j:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo publish", ""].join("\n")
+  );
 });
 
 afterAll(() => {
@@ -446,6 +739,182 @@ suite("QA-battery cell detection (QA-9ROUTER-21/22/26)", () => {
         expect(rendered).toContain("CELLS-DONE");
       });
     }
+  });
+
+  // ── QA-9ROUTER-20: publishable package beats a private root ───────────────
+  describe("upgrade-coordinate detection prefers a PUBLISHABLE package (QA-9ROUTER-20)", () => {
+    it("GREEN: a private root + published nested cli/ selects the nested name", () => {
+      // 9router's shape. Pre-fix this returned the private root name and the cell
+      // graded `upgrade FAIL "previous release 9router-app@0.5.69 … E404"`.
+      const d = detect(FIXTURES.privateRootWithCli);
+      expect(d.DETECT_PKG_ECOSYSTEM).toBe("npm");
+      expect(d.DETECT_PKG_NAME).toBe("9router");
+      expect(d.DETECT_PKG_NAME).not.toBe("9router-app");
+    });
+
+    it("GREEN: the rendered script bakes the publishable name into the npm upgrade cell", () => {
+      const rendered = renderDetected(FIXTURES.privateRootWithCli);
+      expect(rendered).toContain("QA_PKG_NAME='9router'");
+      expect(rendered).not.toContain("QA_PKG_NAME='9router-app'");
+      // the cell that actually runs the install must target it
+      expect(rendered).toMatch(/npm install -g "\$QA_PKG_NAME@\$QA_PREV_VERSION"/);
+    });
+
+    it("a publishable ROOT keeps the legacy selection (root still wins)", () => {
+      const d = detect(FIXTURES.rootPublishable);
+      expect(d.DETECT_PKG_NAME).toBe("qa-published-root");
+    });
+
+    it("NEGATIVE: when NOTHING is publishable the root name is still reported", () => {
+      // Not an "always finds a name" rubber stamp: with no publishable candidate
+      // the honest root name comes back, so the real registry error grades the cell.
+      const d = detect(FIXTURES.allPrivate);
+      expect(d.DETECT_PKG_NAME).toBe("qa-private-root");
+      expect(d.DETECT_PKG_ECOSYSTEM).toBe("npm");
+    });
+
+    it("a root-only repo stays on the legacy path (no nested candidate is invented)", () => {
+      // npmPlain is private, has no nested package and no .git: detect_upgrade_inputs
+      // returns early (its tag gate), so NOTHING is detected — exactly as before the
+      // fix. The point is that no publishable candidate is fabricated for it.
+      expect(detect(FIXTURES.npmPlain).DETECT_PKG_NAME).toBe("");
+    });
+  });
+
+  // ── QA-9ROUTER-19: only workflows that CAN trigger on this push ───────────
+  describe("ci-pass runs only workflows that can fire on a branch push (QA-9ROUTER-19)", () => {
+    it("GREEN: tag-only and other-branch workflows are dropped, the branch one is kept", () => {
+      const d = detect(FIXTURES.workflowsMixed, { branch: "federation" });
+      expect(d.DETECT_CI_SELECT).toContain("tests.yml");
+      expect(d.DETECT_CI_SELECT).not.toContain("docker-publish.yml"); // push tags v* only
+      expect(d.DETECT_CI_SELECT).not.toContain("gitbook-pages.yml"); // push main|master only
+    });
+
+    it("the same repo on `master` keeps gitbook-pages (it DOES trigger there)", () => {
+      const d = detect(FIXTURES.workflowsMixed, { branch: "master" });
+      expect(d.DETECT_CI_SELECT).toContain("gitbook-pages.yml");
+      expect(d.DETECT_CI_SELECT).toContain("tests.yml");
+      // still tag-only: a branch push can never fire it on ANY branch
+      expect(d.DETECT_CI_SELECT).not.toContain("docker-publish.yml");
+    });
+
+    it("GREEN: the rendered script carries the selection and stages it OUTSIDE the tree", () => {
+      const rendered = renderDetected(FIXTURES.workflowsMixed, { branch: "federation" });
+      expect(rendered).toContain("QA_CI_SELECT=' .github/workflows/tests.yml'");
+      // act gets ONE directory target (repeated -W <file> does not merge — the
+      // last wins, measured on this host), and it is external to the synced tree.
+      expect(rendered).toContain('ACT_WF_DIR=~/qa-act-wf');
+      expect(rendered).toMatch(/QA_CI_CMD="\$QA_CI_CMD -W \$ACT_WF_DIR"/);
+      // the ci-pass cell stage happens after the cd into the checkout, so the
+      // relative source paths resolve and nothing is written into the tree.
+      expect(rendered).toContain('ln -sf "$PWD/$wf" "$ACT_WF_DIR/$(basename "$wf")"');
+    });
+
+    it("GREEN: a genuinely triggerable workflow is STILL run (not filtered away)", () => {
+      const d = detect(FIXTURES.workflowsTriggerable, { branch: "federation" });
+      expect(d.DETECT_CI_SELECT).toContain("trig.yml");
+      expect(d.DETECT_CI).toContain("act -q --pull"); // act is used, not skipped
+    });
+
+    it("GREEN: no triggerable workflow ⇒ act is skipped for the native suite, with the reason", () => {
+      const d = detect(FIXTURES.workflowsNoneTriggerable, { branch: "federation" });
+      expect(d.DETECT_CI_SELECT).toBe("");
+      expect(d.DETECT_ACT_NOTE).toContain("no workflow in .github/workflows can fire");
+      // the grade falls back to the documented authoritative suite
+      expect(d.DETECT_CI).toBe(d.DETECT_NATIVE);
+    });
+
+    // ── the cell's own decision, driven from a REAL render ──────────────────
+    it("GREEN: a triggerable CI that passes grades OK", () => {
+      const rendered = renderDetected(FIXTURES.workflowsMixed, { branch: "federation" });
+      const { cells } = runCiPassChain(rendered, {
+        ciLog: "[Test Suite/test] 🏁  Job succeeded\n",
+        ciRc: 0,
+      });
+      const verdict = ciPassVerdict(cells);
+      expect(verdict, cells).toBeTruthy();
+      expect(verdict.status).toBe("OK");
+    });
+
+    it("GREEN: no triggerable workflow + a passing suite grades OK (never a FAIL artifact)", () => {
+      const rendered = renderDetected(FIXTURES.workflowsNoneTriggerable, { branch: "federation" });
+      const { cells } = runCiPassChain(rendered, {
+        ciRc: "skip",
+        nativeProbe: "true",
+        note: " (no workflow in .github/workflows can fire on a push to 'federation')",
+      });
+      const verdict = ciPassVerdict(cells);
+      expect(verdict.status).toBe("OK");
+      expect(verdict.detail).toContain("no triggerable workflow");
+      expect(verdict.detail).toContain("native suite PASS");
+    });
+
+    it("NEGATIVE CONTROL: a triggerable CI path that genuinely fails still grades FAIL", () => {
+      // The whole point of the fix: this must NOT become an always-green stamp.
+      const rendered = renderDetected(FIXTURES.workflowsTriggerable, { branch: "federation" });
+      const { cells } = runCiPassChain(rendered, {
+        ciLog: [
+          "[CI/t] ⭐ Run Main Real failing step",
+          "[CI/t]   ❌  Failure - Main Real failing step [148ms]",
+          "[CI/t] exitcode '7': failure",
+          "Error: Job 't' failed",
+          "",
+        ].join("\n"),
+        ciRc: 1,
+        nativeProbe: "false",
+      });
+      const verdict = ciPassVerdict(cells);
+      expect(verdict.status).toBe("FAIL");
+      expect(verdict.detail).toContain("act rc=1");
+    });
+
+    it("NEGATIVE CONTROL: a passing native suite does not hide a real act failure", () => {
+      const rendered = renderDetected(FIXTURES.workflowsTriggerable, { branch: "federation" });
+      const { cells } = runCiPassChain(rendered, {
+        ciLog: "[CI/t]   ❌  Failure - Main Real failing step\nexitcode '3': failure\n",
+        ciRc: 1,
+        nativeProbe: "true",
+      });
+      const verdict = ciPassVerdict(cells);
+      expect(verdict.status).toBe("OK");
+      // ...but it NAMES the act failure rather than reporting a clean pass
+      expect(verdict.detail).toContain("act failed (rc=1");
+    });
+
+    it("a workflow's OWN registry/docker artifact is classified INFO, not a product FAIL", () => {
+      const rendered = renderDetected(FIXTURES.workflowsTriggerable, { branch: "federation" });
+      const { cells } = runCiPassChain(rendered, {
+        ciLog: [
+          "[P/j] ⭐ Run Main Log in to GHCR",
+          "[P/j]   ❗  ::error::Unable to locate executable file: docker.",
+          "[P/j]   ❌  Failure - Main Log in to GHCR [638ms]",
+          "[P/j] exitcode '1': failure",
+          "Error: Job 'j' failed",
+          "",
+        ].join("\n"),
+        ciRc: 1,
+        nativeProbe: "false",
+      });
+      const verdict = ciPassVerdict(cells);
+      expect(verdict.status).toBe("INFO");
+      expect(verdict.detail).toContain("registry/package coordinates");
+    });
+
+    it("the classification does NOT cover a failure that merely mentions docker elsewhere", () => {
+      const rendered = renderDetected(FIXTURES.workflowsTriggerable, { branch: "federation" });
+      const { cells } = runCiPassChain(rendered, {
+        ciLog: [
+          "[CI/t] Main docker login works fine",
+          "[CI/t] Main other step ok",
+          "[CI/t]   ❌  Failure - Main Real failing step [12ms]",
+          "[CI/t] exitcode '4': failure",
+          "",
+        ].join("\n"),
+        ciRc: 1,
+        nativeProbe: "false",
+      });
+      expect(ciPassVerdict(cells).status).toBe("FAIL");
+    });
   });
 
   // ── deps-missing must never be a product verdict (QA-9ROUTER-26 tail) ────
