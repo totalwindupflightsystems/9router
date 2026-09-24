@@ -34,6 +34,13 @@ SERVICE_ROWS = {"qa-audit", "release-engineer", "dogfooding", "stand-in"}
 # whose namespace_id is one of these, so enabled review/perf lanes stop spawning fake gaps.
 LANE_NAMESPACES = {"review", "perf"}
 
+# Docs/readme LANE families (deployed 2026-09-23): <base>-docs and <base>-readme rows live in
+# the docs namespace, run from stand-in docs|readme/<base> workdirs, and file DOC-*/README-*
+# rows on the BASE planet's board. They are lanes of <base>, never planets — excluding them
+# keeps the planet census at the true base rows (100 such lanes once misread as planets,
+# reporting ~450 fake moon gaps).
+DOCS_LANE_SUFFIXES = ("-docs", "-readme")
+
 # moon -> (skill it must load, workdir template, weight, priority, cooldown_s)
 MOONS = {
     "qa":      ("qa-foreman-ops",                "/home/kara/.hermes/stand-in/pm/{p}",          4, 4, 21600),
@@ -90,6 +97,11 @@ def classify(all_rows):
         else:
             # a -review / -perf row is itself a satellite lane of its planet — not a planet
             if (r.get("namespace_id") or "") in LANE_NAMESPACES:
+                debris[n] = r
+                continue
+            # a -docs / -readme row is the docs/readme LANE of its base planet
+            # (docs namespace, stand-in workdir, files findings on the base's board)
+            if n.endswith(DOCS_LANE_SUFFIXES):
                 debris[n] = r
                 continue
             planets[n] = r
