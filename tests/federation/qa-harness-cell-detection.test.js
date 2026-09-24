@@ -865,7 +865,8 @@ suite("QA-battery cell detection (QA-9ROUTER-21/22/26)", () => {
       });
       const verdict = ciPassVerdict(cells);
       expect(verdict.status).toBe("FAIL");
-      expect(verdict.detail).toContain("act rc=1");
+      // harness 2026-09-24 format: the act rc lives in the trailing "(act leg rc=N: …)" clause
+      expect(verdict.detail).toContain("act leg rc=1");
     });
 
     it("NEGATIVE CONTROL: a passing native suite does not hide a real act failure", () => {

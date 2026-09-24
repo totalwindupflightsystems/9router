@@ -86,9 +86,9 @@ gh release create v0.6.0-federation.1 \
 Naming: `v0.6.0-federation.N` (our minor, ours increments). Keep upstream's
 `v0.5.x` namespace untouched so `git describe` against upstream stays legible.
 
-## The tag-without-release gap (decision requested)
+## The tag-without-release gap — DECIDED: Option A, taken 2026-09-24
 
-Measured 2026-09-22:
+Measured 2026-09-22 (at decision time 2026-09-24: 88 tags, still zero releases):
 
 ```
 $ git tag | wc -l
@@ -115,5 +115,8 @@ This is a decision, not an accident to quietly "fix":
   upstream tag. Rejected by default: it publishes objects for code we did not
   ship and confuses "what does OUR layer contain".
 
-Whoever decides (Bane), the outcome should be recorded by ticking the board row
-that references this section (REVIEW-9ROUTER-004).
+DECIDED 2026-09-24 (REL-9ROUTER-001): **Option A is taken.** `v0.6.0-federation.1`
+is cut from `federation` and published as the fork's first real GitHub release;
+the 87 (now 88) mirror tags stay tag-only. Outcome recorded on board rows
+REL-9ROUTER-001 + REVIEW-9ROUTER-001 (REVIEW-9ROUTER-004 never existed — drift
+fixed this pass).

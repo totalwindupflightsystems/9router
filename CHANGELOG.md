@@ -1,5 +1,10 @@
 # Unreleased
 
+# v0.6.0-federation.1 (2026-09-24)
+
+First federation-branch release. Cut from `federation` per docs/RELEASE-UPSTREAM-FLOW.md
+(Option A: release line starts above the upstream-mirror `v0.5.x` tag namespace).
+
 ## Features
 - **Providers**: refresh xAI + DeepSeek registries to the live catalogs —
   xAI gains grok-4.20, grok-4.20-multi-agent, grok-4.6, grok-4.5, grok-4.3
