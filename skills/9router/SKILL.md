@@ -97,3 +97,8 @@ Gotchas (measured 2026-09-24, DF-9ROUTER-38..41):
   local token *estimate* that under-counts reasoning models ~30x vs the SDK-reported number.
 - Restart persistence: models/keys/connections/usage all survive a kill+restart; no
   re-wiring needed.
+- **Federation snapshot: UI-configured state replicates verbatim.** Boot the instance as
+  `FEDERATION_MODE=central` + a second as `FEDERATION_MODE=edge` (shared `FEDERATION_TOKEN`,
+  `FEDERATION_CENTRAL_URL`): the edge's replica carries the node, connection (credentials
+  included), client key and full model import (96 ids, revisionLag 0) and serves chat +
+  embeddings from the replica alone (`EDGE-SNAPSHOT-OK`).

@@ -451,6 +451,11 @@ this is its first recorded real use, and it passes.
 # 5. chain ergonomics: point a fresh instance at a 9router upstream; request the NATURAL id;
 #    a model-scoped error must arrive in <5s (DF-40)
 # 6. restart: kill + restart; models/keys/connections/usage must survive
+# 7. federation: reboot the scratch as FEDERATION_MODE=central (same DATA_DIR), boot an edge
+#    (FEDERATION_MODE=edge + FEDERATION_CENTRAL_URL + shared FEDERATION_TOKEN); the edge's
+#    local-status must show linked/revisionLag:0, its replica DB must carry the UI-configured
+#    node/connection/key/models, and /v1/chat + /v1/embeddings must serve FROM THE EDGE.
+#    (Port note: the leftover federation-e2e container owns host :20129 — use :20131.)
 ```
 
 Numbers from this run are in `2026-09-24-integration.md`; the board rows are

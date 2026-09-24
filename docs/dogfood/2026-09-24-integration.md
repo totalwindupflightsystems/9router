@@ -155,6 +155,33 @@ double-PATCH race), all new classes — none of the 09-20 P0s reproduce.
 `bunker-las-03`, agent `6b0e3ee4`, 2h TTL, **destroyed** after the run (`Agent 6b0e3ee4
 destroyed`). Clone 3s / install 39s / dev boot 436ms / two-hop chat+embeddings chain OK.
 
+## Federation snapshot leg — the UI-configured state replicates to an edge and serves
+
+After the UI bootstrap (and with the same scratch DB), the instance was rebooted as
+`FEDERATION_MODE=central` (same `DATA_DIR`, nothing re-wired) and a second instance was
+booted as `FEDERATION_MODE=edge` (`FEDERATION_CENTRAL_URL` → the central, shared
+`FEDERATION_TOKEN`). Results, all measured:
+
+| check | result |
+|---|---|
+| edge `local-status` | `role:edge, last_state:linked, lastAppliedRevision:111, revisionLag:0` |
+| edge replica DB rows | `providerNodes` 1 = central's UI-created node (`dogfood-lmstudio`, same UUID), `providerConnections` 1 (`dlm-main`, credentials replicated), `apiKeys` 1 (client key replicated) |
+| edge `/v1/models` | **96 ids** — the UI-imported catalog, replicated verbatim |
+| edge-served completion through the replicated provider | `{"content":"EDGE-SNAPSHOT-OK"}` (upstream usage prompt_tokens 2062) |
+| edge-served embeddings | **768 dims** |
+
+The snapshot path carries the entire dashboard-configured state — node, connection
+(including its upstream credential), client key and the 96-model import — and the edge
+serves real chat + embeddings traffic from the replica alone. This closes criterion (3) of
+the dogfood task: restart persistence PASS + federation snapshot PASS.
+
+Operations note (finding, not a defect of the product): port `:20129` on the control host is
+held by a leftover federation-e2e container (`9router-edge-a` mapping host 20129); the
+dogfood edge was run on `:20131` instead. `docker pause` does NOT free a container's bound
+sockets (listener survives the pause — the edge boot failed twice with EADDRINUSE before the
+port change). The leftover container was paused for ~20s, unpaused immediately, verified
+healthy (health 200), and left untouched.
+
 ## If I had one hour of the maintainer's time
 
 1. **DF-9ROUTER-38** — env-pinned settings must be disclosed in the UI (disabled switch +
