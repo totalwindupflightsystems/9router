@@ -22,6 +22,7 @@
 import { REPLICATE_TABLES, REPLICATE_TABLES_PHYSICAL } from "./constants.js";
 import { latestVersion } from "../db/migrations/index.js";
 import { parseJson, stringifyJson } from "../db/helpers/jsonCol.js";
+import { isEdge, getRedactFields } from "./config.js";
 
 // Logical table name → physical table. modelAliases/pricing live in kv.
 const LOGICAL_TO_PHYSICAL = {
@@ -209,6 +210,88 @@ function rowKey(table, row) {
   return String(row.row.id ?? row.row.key ?? "");
 }
 
+// ─── Edge-side redaction (FEDERATION_REDACT_FIELDS) ─────────────────────
+//
+// FED-GAP-15: getRedactFields() was documented (.env.example / docker-compose
+// / docs/FEDERATION.md) but never wired — a proxy-only edge that set the var
+// still replicated full provider credentials/API keys into its local replica.
+//
+// Redaction is applied to the ROW VALUE only, at the edge-side apply funnel
+// (upsertLogicalRow) — the single path both the snapshot and delta applies
+// flow through. Because the replica itself is what every edge-side reader
+// sees (DB queries AND the edge's own read serving), redacting at the write
+// covers both surfaces without touching the read path. The delta/snapshot
+// ENVELOPE (federation_version, updated_at, deleted, tombstones, watermarks)
+// is never transformed — the wire row keeps its metadata verbatim.
+//
+// Marker: the target value becomes null (or a non-reversible placeholder for
+// the apiKeys.key column, whose UNIQUE NOT NULL constraint cannot hold null).
+// null is chosen over a sentinel string so a redacted field can never compare
+// equal to the original value, and a null in the payload cannot round-trip
+// the credential back to the edge.
+//
+// Scope: EDGE role only. Central keeps serving full rows (it is the source
+// of truth); standalone never enters the federation paths at all. The var
+// unset (getRedactFields() === []) is a structural no-op — the redaction
+// helper short-circuits before touching any row.
+const API_KEY_PLACEHOLDER = "[redacted]";
+
+// JSON dot-path set on a plain object (e.g. "a.b.c"). Returns true when a
+// leaf was found and replaced; false when any hop is missing/non-object
+// (unknown paths are silently ignored — an edge must not fail a sync over a
+// path the central's row simply does not carry).
+function setJsonPath(obj, path, value) {
+  const hops = String(path).split(".").filter(Boolean);
+  if (hops.length === 0 || !obj || typeof obj !== "object") return false;
+  let cur = obj;
+  for (let i = 0; i < hops.length - 1; i++) {
+    const next = cur[hops[i]];
+    if (!next || typeof next !== "object") return false;
+    cur = next;
+  }
+  const leaf = hops[hops.length - 1];
+  if (!(leaf in cur) || typeof cur[leaf] === "object") return false;
+  cur[leaf] = value;
+  return true;
+}
+
+// Wire rows are exportDb-shaped: the physical data column is spread on the
+// TOP LEVEL, so a path rooted at "data.<field>" (the documented spelling)
+// aliases to the top-level field. Everything else resolves literally.
+function resolveRedactPath(row, path) {
+  if (path.startsWith("data.")) return path.slice(5);
+  return path;
+}
+
+// Redact one wire row IN PLACE (the entry object is batch-local — mutating it
+// does not mutate the central's snapshot/delta payload). Returns the entry
+// unchanged when redaction is off (edge role + var set are both required).
+function redactRowForEdge(table, row, paths) {
+  if (paths.length === 0) return row;
+  if (table !== "providerConnections" && table !== "apiKeys") return row;
+  for (const rawPath of paths) {
+    const path = resolveRedactPath(row, rawPath);
+    if (table === "apiKeys" && path === "key") {
+      // apiKeys.key is TEXT UNIQUE NOT NULL — the null marker cannot be
+      // stored, and a single shared placeholder would violate UNIQUE across
+      // redacted rows. The marker is therefore per-row (id is not secret):
+      // constant, non-reversible, and collision-free. No prefix of the real
+      // key survives in the replica.
+      row.key = `${API_KEY_PLACEHOLDER}:${row.id ?? ""}`;
+      continue;
+    }
+    setJsonPath(row, path, null);
+  }
+  return row;
+}
+
+// Edge-gated lookup. FEDERATION_MODE is parsed once at config import, so
+// this is a plain boolean gate — no env re-read per row.
+function edgeRedactPaths() {
+  if (!isEdge()) return [];
+  return getRedactFields();
+}
+
 // ─── Edge-side apply ─────────────────────────────────────────────────────
 
 // Apply one revision batch (a snapshot or delta payload) transactionally.
@@ -370,10 +453,20 @@ function clearLogicalTable(db, table) {
 // federation_version/updated_at/deleted so the replica's watermark matches
 // the central's exactly. `table` is the LOGICAL table name (modelAliases/
 // pricing map to kv rows).
+//
+// FED-GAP-15: on an edge with FEDERATION_REDACT_FIELDS set, the row VALUE is
+// redacted (JSON dot paths, edge-scope only) before the write — the replica
+// never receives the redacted fields' original values, so every reader of
+// the replica (DB queries AND the edge's own read serving) sees redacted
+// values. The version metadata (entry envelope) is never transformed, so
+// watermark/fencing/idempotency semantics are untouched.
 function upsertLogicalRow(db, table, entry) {
   const physical = LOGICAL_TO_PHYSICAL[table];
   if (!physical) throw new Error(`[federation] apply: unknown replicated table '${table}'`);
   const row = entry?.row ?? entry;
+  // Redaction mutates the batch-local row object only — never the payload
+  // envelope (federation_version/updated_at/deleted stay on `entry`).
+  redactRowForEdge(table, row, edgeRedactPaths());
   const fv = Number(entry?.federation_version ?? 0);
   const updatedAt = entry?.updated_at ?? null;
   const deleted = Number(entry?.deleted ?? 0);
