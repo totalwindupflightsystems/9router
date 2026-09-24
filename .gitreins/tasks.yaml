@@ -1234,3 +1234,40 @@ tasks:
   status: complete
   created_at: '2026-09-22T17:00:51.770424+00:00'
   completed_at: '2026-09-23T03:05:12.476787+00:00'
+- id: DEPS-004
+  title: 'Dependency refresh: minor/patch npm bumps + re-check the eslint 10 blocker'
+  criteria:
+  - package.json and package-lock.json bump the out-of-date minor/patch packages (next,
+    eslint-config-next, @next/third-parties, marked, material-symbols, undici); npm
+    run lint:gate exits 0; the full suite shows no new failures via tests/__baseline__/verify-no-regression.mjs;
+    node scripts/check-eslint10-parser.mjs is re-run after the next bump and eslint
+    ^10 is taken ONLY if the probe exits 0
+  status: complete
+  created_at: '2026-09-23T21:30:36.479609+00:00'
+  completed_at: '2026-09-24T10:43:38.709066+00:00'
+- id: QA-9ROUTER-20
+  title: 'QA harness: detect the PUBLISHABLE package (nested cli/) not the private
+    root name; never grade a non-triggered workflow in the act leg'
+  criteria:
+  - bunker-qa.sh package detection prefers a publishable non-private package.json
+    (nested cli/ = 9router) over the root private 9router-app so the upgrade cell
+    installs a package that exists on npm; the ci-pass act leg does not report a workflow
+    that cannot trigger on a branch push (docker-publish tag/dispatch only, gitbook-pages
+    push to main|master) as a product FAIL; tests/federation/qa-harness-cell-detection.test.js
+    pins both against the real harness via its test hooks, passes green locally and
+    still skips gracefully when the harness is absent
+  status: complete
+  created_at: '2026-09-23T21:30:36.926425+00:00'
+  completed_at: '2026-09-24T10:23:29.024686+00:00'
+- id: FED-GAP-15
+  title: Wire FEDERATION_REDACT_FIELDS into the edge replication write path
+  criteria:
+  - Edge-side snapshot/delta apply path redacts providerConnections/apiKeys fields
+    listed in FEDERATION_REDACT_FIELDS via getRedactFields(); edge with the var set
+    shows the field redacted in replica DB and /api/federation/snapshot after a snapshot
+    sync; edge without the var unchanged; standalone/central behavior untouched (default
+    no-op); vitest coverage in tests/federation/ pins redacted + unchanged + no-op
+    cases green
+  status: complete
+  created_at: '2026-09-24T10:21:50.710391+00:00'
+  completed_at: '2026-09-24T10:55:17.964664+00:00'
