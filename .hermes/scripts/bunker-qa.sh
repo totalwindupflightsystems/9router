@@ -422,7 +422,19 @@ detect_cmds() {
       # permission denied" (the same harness artifact recorded in the 09-20/09-21
       # dagger QA ledgers). The remote script cd's to ~/qa-$proj before the ci-pass
       # cell, so a RELATIVE workflow path resolves inside the agent's checkout.
-      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull -W .github/workflows/ci.yml"
+      # FIX (QA foreman 2026-09-24, live-proven on pulse): the ci.yml fast-path
+      # previously baked the -W path INTO ci_cmd and left DETECT_CI_FILES empty —
+      # but the generated remote script stages workflows ONLY from QA_CI_SELECT
+      # (ACT_WF_COUNT gate), so act was NEVER RUN for ci.yml repos: the cell took
+      # the skip branch and reported "no triggerable workflow" (or failed over to
+      # native as the grade) while a triggerable ci.yml sat in the synced tree.
+      # Measured twice on pulse 2026-09-24 (agents 882dc470 / 2a8a8dbd): cell said
+      # "no triggerable workflow" while `act -W .github/workflows/ci.yml` run by
+      # hand on the same agent, same tree, completed the job. The -W now comes
+      # from the shared staging block like every other workflow: select ci.yml,
+      # keep ci_cmd bare, let ACT_WF_DIR staging supply the single -W target.
+      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull"
+      DETECT_CI_FILES=" .github/workflows/ci.yml"
     else
       # Select the workflows whose `on:` can fire for a push to the branch the
       # agent will have checked out. Parsing happens HOST-side (the agent needs
