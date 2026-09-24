@@ -1465,7 +1465,7 @@ else
       # named, so the row is informational instead of a false product FAIL.
       cell ci-pass INFO "act's failures are the workflow's own registry/package coordinates, not a branch-push regression (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX"
     else
-      cell ci-pass FAIL "act rc=\$ci_rc (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX"
+      cell ci-pass FAIL "native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX (act leg rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log))"
     fi
   fi
 fi
@@ -1632,10 +1632,10 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
     2??) cell ui-probe OK "UI serves \$UP on :3111 (frontend/, landed: \${LAND:-/})" ;;
     *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
   esac
-elif [ -n "\$BIN" ]; then
-  UI_PORTS=\${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8766 8767 9000}
-  UI_BINS="\$BIN"
-  case "\$BIN" in
+elif [ -f go.mod ] && grep -qE 'http\.ListenAndServe|http\.Server|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|gorilla/mux' *.go 2>/dev/null; then
+  UI_PORTS=${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8766 8767 9000}
+  UI_BINS="${BIN:-go run .}"
+  case "${BIN:-}" in
     "go run ./cmd/"*)
       # start-cmd fallback queue: when the detected cmd/ binary is not the HTTP
       # server (see comment above), the remaining cmd/ main packages get one
@@ -1673,13 +1673,13 @@ elif [ -n "\$BIN" ]; then
     if [ -n "\$UI_HIT" ] || [ -n "\$UI_OTHER" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
   done
   if [ -n "\$UI_HIT" ]; then
-    cell ui-probe OK "HTML surface at http://127.0.0.1:\$UI_HIT (<start cmd: \$UI_B>)"
+    cell ui-probe OK "go-native http server responded (pattern: \$UI_B, port \$UI_HIT)"
   elif [ -n "\$UI_OTHER" ]; then
-    cell ui-probe INFO "serves but no 200 text/html surface found on probed ports [\$UI_PORTS]:\$UI_OTHER"
+    cell ui-probe INFO "go-native server serves but no 200 text/html surface found on probed ports [\$UI_PORTS]:\$UI_OTHER"
   elif ! kill -0 \$UIPID 2>/dev/null; then
-    cell ui-probe INFO "start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)"
+    cell ui-probe INFO "go-native start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)"
   else
-    cell ui-probe INFO "server ran 20s, no probed port answered [\$UI_PORTS] — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)"
+    cell ui-probe INFO "go-native server ran 20s, no probed port answered [\$UI_PORTS] — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)"
   fi
   kill -- -\$UIPID 2>/dev/null; sleep 1; kill -9 -- -\$UIPID 2>/dev/null
   kill \$UIPID 2>/dev/null; sleep 1; kill -9 \$UIPID 2>/dev/null
@@ -1688,9 +1688,17 @@ elif [ -n "\$BIN" ]; then
 else cell ui-probe N/A "no web UI detected"; fi
 
 # 6 · chaos-disconnect — network cut via dead proxy: clean fail or HANG?
-( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 timeout \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} bash -c "$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+# Window is sized from this cell's own observed duration: 2x + 30s, with
+# BUNKER_QA_DISCONNECT_TIMEOUT as the minimum floor. A fixed 240s window misread
+# a 100s suite as a hang on a slower agent (QA-HERMES-CANOPY-21).
+native_start=\$(date +%s)
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 timeout \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+native_end=\$(date +%s)
+native_dur=\$(( native_end - native_start ))
+disc_window=\$(( native_dur * 2 + 30 ))
+[ "\$disc_window" -lt \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} ] && disc_window=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}
 if [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
-elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network is cut (timeout \${BUNKER_QA_DISCONNECT_TIMEOUT:-240}s — window sized above the ~2.5min natural offline suite duration so a normal long run cannot be misread as a hang) — \$(head -3 \$LOGD/disc.log)"
+elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network is cut (timeout \${disc_window}s, sized from the \${native_dur}s suite: 2x+30s; override floor BUNKER_QA_DISCONNECT_TIMEOUT=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}s) — \$(head -3 \$LOGD/disc.log)"
 elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
 elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
 elif go_suite_env_failure \$LOGD/disc.log; then cell chaos-disconnect INFO "ENV-BLOCKED: the go suite failed because the test host lacks a build tool (\`make\` on JIT agents, measured 2026-09-19) — the disconnect cut was exercised against a broken build, no disconnect finding (rc=\$disc_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/disc.log)"
@@ -1751,10 +1759,10 @@ SF=""; SF_REF=""
 for c in \$CAND; do r=\$(state_ref "\$c"); if [ -n "\$r" ]; then SF="\$c"; SF_REF="\$r"; break; fi; done
 [ -z "\$SF" ] && [ -n "\$CAND" ] && SF=\$(printf '%s\n' "\$CAND" | head -1)
 if [ -n "\$SF" ]; then
-  if cp "\$SF" ~/state.bak 2>/dev/null && head -c 64 "\$SF" > ~/trunc 2>/dev/null && cp ~/trunc "\$SF" 2>/dev/null; then
-    REF="not referenced by any source file"
-    [ -n "\$SF_REF" ] && REF="referenced by \$SF_REF"
-    if [ -n "\$BIN" ]; then
+  REF="not referenced by any source file"
+  [ -n "\$SF_REF" ] && REF="referenced by \$SF_REF"
+  if [ -n "\$BIN" ]; then
+    if cp "\$SF" ~/state.bak 2>/dev/null && head -c 64 "\$SF" > ~/trunc 2>/dev/null && cp ~/trunc "\$SF" 2>/dev/null; then
       ( timeout 20 \$BIN ) >\$LOGD/corr.log 2>&1; corr_rc=\$?
       cp ~/state.bak "\$SF" 2>/dev/null
       corr_tracked=no
@@ -1764,10 +1772,11 @@ if [ -n "\$SF" ]; then
       corr_detail=\$(printf '%s' "\$corr_result" | cut -f2-)
       cell chaos-corruption "\$corr_status" "\$corr_detail"
     else
-      cp ~/state.bak "\$SF" 2>/dev/null
-      cell chaos-corruption INFO "truncated \$SF (\$REF) and restored it, but no start command was detected (no node/go/python entrypoint) — restart behavior stays UNVERIFIED for this tree"
+      cell chaos-corruption FAIL "could not truncate \$SF: \$(tail -1 ~/trunc 2>/dev/null || echo cp-error)"
     fi
-  else cell chaos-corruption FAIL "could not truncate \$SF: \$(tail -1 ~/trunc 2>/dev/null || echo cp-error)"; fi
+  else
+    cell chaos-corruption UNVERIFIED "no start command detected — state-restart behavior UNVERIFIED (\$REF)"
+  fi
 else cell chaos-corruption N/A "no db/state files in repo"; fi
 fi  # end project-probe hook (corruption)
 
