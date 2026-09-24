@@ -1271,3 +1271,25 @@ tasks:
   status: complete
   created_at: '2026-09-24T10:21:50.710391+00:00'
   completed_at: '2026-09-24T10:55:17.964664+00:00'
+- id: DOGFOOD-0924
+  title: Dogfood 9router via its own dashboard UI + multi-endpoint real-use pass
+  criteria:
+  - 'A scratch 9router instance on PORT=20127 DATA_DIR=/tmp is driven as a real user:
+    (1) bootstrap performed THROUGH the dashboard UI (first-login, node+connection
+    wiring, key minting, completion send, usage/provider views) in a real browser;
+    (2) /v1/embeddings real workflow with vectors verified for cosine sanity; (3)
+    restart persistence + federation snapshot behavior of the UI-configured state;
+    (4) every friction point becomes a board row DF-9ROUTER-38+ and docs/dogfood artifacts
+    are committed'
+  status: complete
+  created_at: '2026-09-24T20:31:14.656972+00:00'
+  completed_at: '2026-09-24T21:00:13.462166+00:00'
+- id: REL-9ROUTER-001
+  title: Cut first federation release v0.6.0-federation.1 from federation branch
+  criteria:
+  - gh release view v0.6.0-federation.1 exits 0 targeting federation; git ls-remote
+    --tags origin lists v0.6.0-federation.1; docs/RELEASE-UPSTREAM-FLOW.md tag-without-release
+    section records decision A; CHANGELOG.md carries the release entry
+  status: complete
+  created_at: '2026-09-24T20:39:25.298964+00:00'
+  completed_at: '2026-09-24T20:58:06.251453+00:00'
