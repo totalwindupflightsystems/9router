@@ -361,3 +361,98 @@ PORT=20127 DATA_DIR=/tmp/dogfood-9router data-dir … npm run start
 Numbers from this run are in `2026-09-20-integration.md`; the board rows are
 DF-9ROUTER-32..37. Nothing in this run required a repo fix — the findings are tasks for the
 foreman, and the diagnostics above are the "why", not a log dump.
+
+## 14. Run 6 (2026-09-24, HEAD eb8fee31): the UI as a first-class bootstrap path, and the endpoint nobody drove
+
+Eleven runs into this log, two surfaces had never been touched: the dashboard UI as the way a
+HUMAN wires the product (agents before this always reached for curl), and `/v1/embeddings`.
+Run 6 drove both. Headline: **the UI path works end-to-end and the 09-20 P0s no longer
+reproduce** — but the pass found three defect classes that only this surface could expose.
+
+### An env pin that outruns the UI: why 'Require API key' can be a silent no-op
+
+The settings read path is `readRaw()` (the `settings` row) → `mergeWithDefaults()` — and at
+`src/lib/db/repos/settingsRepo.js:91` the env override is applied **after** the DB merge:
+
+```js
+const merged = { ...DEFAULT_SETTINGS, ...(raw || {}) };
+const envRequireApiKey = envRequireApiKeyOverride();   // exact 'true'/'false' in REQUIRE_API_KEY
+if (envRequireApiKey !== undefined) merged.requireApiKey = envRequireApiKey;
+```
+
+This is deliberate (QA-9ROUTER-5: a deployment can pin enforcement from the environment) and
+it is fine *as far as it goes*. The gap is the contract between that design and the dashboard:
+the README quickstart is `cp .env.example .env`, `.env.example:32` ships
+`REQUIRE_API_KEY=false`, so **the documented quickstart permanently pins the field**. The UI
+then PATCHes `requireApiKey:true`, the settings row really changes, the switch shows ON — and
+the next read re-pins it from env. Unkeyed `/v1/chat/completions` keeps returning 200. The
+PATCH route answers 200 because the *write* succeeded; only the *effective value* is
+env-shadowed, and nothing in the response or the UI says so. Control experiment that proves
+the endpoint itself is healthy: `PATCH {stickyRoundRobinLimit:5}` → GET returns 5.
+
+The lesson generalises: **an env-over-DB precedence rule needs a UI contract** — the pinned
+field must render disabled with the env var named, and the PATCH must refuse or annotate
+instead of silently storing a value the next read discards. Instrumented `window.fetch` also
+caught a non-deterministic **double-PATCH** (true then false, ~2s apart) on single clicks of
+the same switch — a state race worth its own fix. When a security control can no-op, the
+no-op must be observable.
+
+### One feature, two accountants: estimate vs upstream on the non-stream path
+
+The DF-33 fix made usage rows appear on both stream shapes — but the numbers differ in kind.
+Streaming rows carry the **upstream's** usage chunk (2032 prompt tokens, matching the SDK).
+Non-stream rows carry a **local estimate** (61 for the same request the SDK measured at 2061)
+with no `estimated` marker. On reasoning models — the ones where prompt tokens balloon — the
+estimate is off by ~30x, and the Usage page totals mix both kinds silently. And the
+embeddings endpoint writes **no usage row at all**. The right way: one source of truth (the
+upstream response object, which the non-stream path holds in hand before returning), estimate
+only as labelled fallback, embeddings rows even at zero tokens. Quota tracking that mixes
+measured and guessed numbers is worse on each side than either alone.
+
+### Chaining 9router into 9router: prefix composition and the 95-second silence
+
+Fresh-install leg wired a bunker box's 9router to the control-host scratch 9router (both
+healthy). Two observations worth keeping:
+
+1. **Ids double-prefix**: the fresh node lists `up/dlm/qwen3.8-27b` — the upstream's own node
+   prefix stacks under the new prefix. A completion with the *natural* id (`up/qwen3.8-27b`)
+   is what a user writes, and the router cannot resolve it.
+2. **That mistake costs 95 seconds of silence** and then a *credential*-shaped error:
+   `[400]: No credentials for provider: openai (reset after 1m 35s)`. The connection HAS
+   credentials; the model id simply does not exist upstream. The combo retry window (a good
+   idea for transient upstream failures) is the wrong shape for a request that can never
+   succeed, and the final message names the wrong subsystem. Model-not-found from a
+   compatible upstream should fail in <5s with a model-scoped message.
+
+Also: DF-35's one-model fresh-node listing **does not reproduce at HEAD** (90 models listed
+through the same wiring) — the import path was fixed sometime between 321268d5 and eb8fee31.
+
+### Embeddings, first drive: the router passes vectors through honestly
+
+`/v1/embeddings` with LM Studio's nomic-embed model: 3 vectors, 768 dims, ~1.3s, and a cosine
+sanity check (paraphrases 0.726 vs paraphrase-vs-unrelated 0.349) confirming the router
+neither transposes nor reorders vectors — through one hop AND through a two-hop chain from
+the fresh box. The endpoint has been in the README's capability matrix since the beginning;
+this is its first recorded real use, and it passes.
+
+### Re-verification playbook for this surface (updated)
+
+```bash
+# 0. isolated instance (never the fleet router on :20128)
+# 1. UI bootstrap: login → Providers → Add OpenAI Compatible → Add API Key → Import from /models
+#    (count the imported ids; a fresh node must list ≈ the upstream's /v1/models count)
+# 2. auth posture: with .env copied from .env.example, toggle 'Require API key' ON, then
+#    POST /v1/chat/completions WITHOUT a key — a 200 here is DF-38 (must 401 or the UI must
+#    disclose the pin)
+# 3. embeddings: POST 3 inputs (2 paraphrases + 1 unrelated) — cosine(paraphrases) must
+#    exceed cosine(paraphrase, unrelated); check a usageHistory row lands
+# 4. usage parity: one stream:true and one stream-omitted request against a reasoning model;
+#    the two promptTokens values must agree within ~5% (DF-39)
+# 5. chain ergonomics: point a fresh instance at a 9router upstream; request the NATURAL id;
+#    a model-scoped error must arrive in <5s (DF-40)
+# 6. restart: kill + restart; models/keys/connections/usage must survive
+```
+
+Numbers from this run are in `2026-09-24-integration.md`; the board rows are
+DF-9ROUTER-38..41. Install leg: bunker-las-03 agent 6b0e3ee4 (clone 3s, install 39s,
+two-hop chain OK, agent destroyed). Nothing in this run required a repo fix.
