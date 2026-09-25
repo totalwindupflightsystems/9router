@@ -144,6 +144,8 @@ npm ci   # reproducible install from the tracked package-lock.json (`npm install
 PORT=20128 NEXT_PUBLIC_BASE_URL=http://localhost:20128 npm run dev
 ```
 
+Restart the server after adding a provider connection — running config is loaded at boot.
+
 > ⚠️ In a copied or relocated tree `npm run dev` can fail before the server
 > starts, with Turbopack complaining `Symlink [project]/node_modules/... points
 > out of the filesystem root`. `package.json` already carries the escape hatch:
