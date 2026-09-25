@@ -678,6 +678,16 @@ detect_upgrade_inputs() {
     # QA-9ROUTER-20: publishable name, not the private root name.
     DETECT_PKG_ECOSYSTEM="npm"
     DETECT_PKG_NAME=$(detect_publish_pkg_name "$repo")
+    # QA-HEADING-009 (2026-09-25): a NON-publishable npm repo (private:true root,
+    # no publishable nested candidate) has NO registry artifact — the registry
+    # arm can only ever die ETARGET/E404, a harness premise failure graded as a
+    # product verdict. Mark the repo for the tree-upgrade arm: the host streams
+    # the previous tag's tree (ship_prev_tag_tree) and the cell upgrades the
+    # checked-out tree, same shape as the Go-binary arm (QA-OFF-BY-ONE-22).
+    DETECT_UP_PREV_DIR=""
+    if [ -n "$DETECT_PREV_TAG" ] && ! npm_pkg_publishable "$repo/package.json"; then
+      DETECT_UP_PREV_DIR="~/qa-up-prev-npm"
+    fi
   elif [ -f "$repo/go.mod" ]; then
     # QA-OFF-BY-ONE-22 (2026-09-22): Go-binary repos have no index package.
     # The upgrade cell upgrades the checked-out TREE from the previous
@@ -701,16 +711,29 @@ detect_upgrade_inputs() {
 # clone, no auth on the agent (bunker agents carry no GitHub keys). No-op
 # when the repo has no go-ecosystem previous tag. On failure, mark
 # ~/qa-up-prev.absent so the cell FAILs with the real reason instead of
-# silently skipping the upgrade leg.
+# silently skipping the upgrade leg. QA-HEADING-009 (2026-09-25): also streams
+# for NON-publishable npm repos (DETECT_UP_PREV_DIR set by detect_upgrade_inputs)
+# — same tree-stream, agent dir ~/qa-up-prev-npm, verified by package.json.
 ship_prev_tag_tree() {
-  local repo="$1" proj="$2"
-  [ "$DETECT_PKG_ECOSYSTEM" = "go" ] && [ -n "$DETECT_PREV_TAG" ] || return 0
-  if git -C "$repo" archive --format=tar "$DETECT_PREV_TAG" 2>/dev/null \
-      | agent_ssh "mkdir -p ~/qa-up-prev && tar -C ~/qa-up-prev -xf -" >/dev/null 2>&1 \
-      && agent_ssh "test -f ~/qa-up-prev/go.mod" >/dev/null 2>&1; then
-    log "CELL upgrade-prep: previous release tree $DETECT_PREV_TAG -> ~/qa-up-prev"
+  local repo="$1" proj="$2" agent_dir verify_path
+  if [ "$DETECT_PKG_ECOSYSTEM" = "go" ] && [ -n "$DETECT_PREV_TAG" ]; then
+    agent_dir="~/qa-up-prev"; verify_path="go.mod"
+  elif [ "$DETECT_PKG_ECOSYSTEM" = "npm" ] && [ -n "$DETECT_UP_PREV_DIR" ] && [ -n "$DETECT_PREV_TAG" ]; then
+    # QA-HEADING-009: agents are SHARED across projects — clear any stale tree
+    # (or an absent-marker from a previous failed stream) before shipping, so
+    # the generated script's package.json check cannot false-positive on a
+    # foreign repo's leftovers.
+    agent_ssh "rm -rf ~/qa-up-prev-npm ~/qa-up-prev-npm.absent" >/dev/null 2>&1 || true
+    agent_dir="$DETECT_UP_PREV_DIR"; verify_path="package.json"
   else
-    agent_ssh "rm -rf ~/qa-up-prev; touch ~/qa-up-prev.absent" >/dev/null 2>&1 || true
+    return 0
+  fi
+  if git -C "$repo" archive --format=tar "$DETECT_PREV_TAG" 2>/dev/null \
+      | agent_ssh "mkdir -p $agent_dir && tar -C $agent_dir -xf -" >/dev/null 2>&1 \
+      && agent_ssh "test -f $agent_dir/$verify_path" >/dev/null 2>&1; then
+    log "CELL upgrade-prep: previous release tree $DETECT_PREV_TAG -> $agent_dir"
+  else
+    agent_ssh "rm -rf $agent_dir; touch ${agent_dir}.absent" >/dev/null 2>&1 || true
   fi
 }
 
@@ -1364,6 +1387,21 @@ if ! [ -x ~/.docker/cli-plugins/docker-buildx ]; then
     echo "WARN: buildx plugin install failed (offline agent?) — compose build cells will fail rc=1 'requires buildx 0.17.0 or later' on this environment gap: \$(tail -1 \$LOGD/buildx.log 2>/dev/null)" >&2
   fi
 fi
+# FIX 3 · node+npm toolchain bootstrap (QA-HERMES-CANOPY-32, 2026-09-24):
+# the JIT agent image ships NO node/npm, so the ui-probe frontend/ arm
+# (setsid npm run dev) dies "No such file or directory" on every repo that
+# only serves a frontend/ Vite/npm surface. Install user-space Node LTS
+# v22.15.0 (proven resolving 2026-09-24) into ~/tools/node, same best-effort
+# pattern as FIX 1/FIX 2: offline agents log a WARN and continue.
+if ! command -v node npm >/dev/null 2>&1; then
+  mkdir -p ~/tools
+  if curl -fsSL -o /tmp/node-v22.15.0-linux-x64.tar.xz https://nodejs.org/dist/v22.15.0/node-v22.15.0-linux-x64.tar.xz >\$LOGD/node.log 2>&1 && tar -xJf /tmp/node-v22.15.0-linux-x64.tar.xz -C ~/tools >\$LOGD/node.log 2>&1 && mv ~/tools/node-v22.15.0-linux-x64 ~/tools/node && head -c 4 ~/tools/node/bin/node | grep -q ELF; then
+    export PATH="\$HOME/tools/node/bin:\$PATH"
+    cell toolchain-bootstrap OK "node+npm installed (\$(node --version 2>/dev/null || echo version n/a))"
+  else
+    echo "WARN: node+npm install failed (offline agent?) — ui-probe frontend/ arm will grade ENV-BLOCKED: \$(tail -1 \$LOGD/node.log 2>/dev/null)" >&2
+  fi
+fi
 # Bootstrap-end verification (QA-WARPFS-11): a client-side 'docker compose
 # version' proves CLI + plugin are discovered together. HARNESS-COMPOSE=ok/missing
 # is printed for the run log and recorded as a cell so the evidence shows
@@ -1375,6 +1413,16 @@ if [ "\$HARNESS_COMPOSE" = ok ]; then
   cell toolchain-bootstrap OK "HARNESS-COMPOSE=ok (docker compose version passes)"
 else
   cell toolchain-bootstrap INFO "HARNESS-COMPOSE=missing — docker compose unavailable (CLI or plugin install failed); docker-deploy/chaos-shutdown will fail on this environment gap, not a repo defect"
+fi
+# Node+npm bootstrap verification (QA-HERMES-CANOPY-32): confirms the ui-probe
+# frontend/ arm can execute. HARNESS_NODE=ok/missing is printed for the run log.
+HARNESS_NODE=missing
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then HARNESS_NODE=ok; fi
+echo "HARNESS_NODE=\$HARNESS_NODE"
+if [ "\$HARNESS_NODE" = ok ]; then
+  cell toolchain-bootstrap OK "HARNESS_NODE=ok (node \$(node --version 2>/dev/null || echo 'n/a'), npm \$(npm --version 2>/dev/null || echo 'n/a'))"
+else
+  cell toolchain-bootstrap INFO "HARNESS_NODE=missing — node/npm unavailable (install failed or offline); ui-probe frontend/ arm will grade ENV-BLOCKED on this environment gap, not a repo defect"
 fi
 # Point docker at the agent's own rootless daemon — bare 'docker' defaults to
 # /var/run/docker.sock (rootful, permission-denied for the agent uid) or the
@@ -1487,6 +1535,9 @@ QA_PREV_TAG='$DETECT_PREV_TAG'
 QA_PREV_VERSION='$DETECT_PREV_VERSION'
 QA_PKG_NAME='$DETECT_PKG_NAME'
 QA_ECOSYSTEM='$DETECT_PKG_ECOSYSTEM'
+# QA-HEADING-009: non-empty for non-publishable npm repos -> the upgrade cell
+# uses the streamed previous-tag tree instead of the npm registry arm.
+QA_UP_PREV_DIR='$DETECT_UP_PREV_DIR'
 QA_GO_URL='$DETECT_GO_URL'
 # QA-9ROUTER-19: workflows that CAN fire on a push to the branch this checkout
 # sits on (host-selected by on:-block triggerability, repo-relative, may be
@@ -1508,6 +1559,11 @@ if [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "go" ] && [ -n "\$QA_PREV
   else
     rm -rf ~/qa-up-prev-clone 2>/dev/null
   fi
+elif [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "npm" ] && [ -n "\$QA_UP_PREV_DIR" ] && [ -n "\$QA_PREV_TAG" ]; then
+  # QA-HEADING-009: host-streamed previous-tag tree (~/qa-up-prev-npm) for
+  # non-publishable npm repos — verified by package.json, no clone fallback
+  # (bunker agents carry no forge auth; the host stream is the only source).
+  if [ -f "\$HOME/qa-up-prev-npm/package.json" ]; then UP_PREV="\$HOME/qa-up-prev-npm"; fi
 fi
 if [ -n "\$TREE_TAG" ]; then
   git checkout -q --detach "\$TREE_TAG" 2>/dev/null && ( $install_cmd ) >\$LOGD/up1.log 2>&1 && git checkout -q --detach HEAD 2>/dev/null && ( $install_cmd ) >\$LOGD/up2.log 2>&1 && cell upgrade OK "tag \$TREE_TAG → HEAD reinstall clean (in-tree history)" || cell upgrade FAIL "\$(tail -2 \$LOGD/up1.log \$LOGD/up2.log | head -3)"
@@ -1518,7 +1574,7 @@ elif [ -n "\$UP_PREV" ]; then
   cp -a "\$UP_PREV" ~/qa-up-prev.bak 2>/dev/null || true
   ( cd "\$UP_PREV" && $install_cmd ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
   ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
-  rm -rf ~/qa-up-prev ~/qa-up-prev.bak ~/qa-up-prev-clone 2>/dev/null
+  rm -rf ~/qa-up-prev ~/qa-up-prev.bak ~/qa-up-prev-clone ~/qa-up-prev-npm ~/qa-up-prev-npm.bak 2>/dev/null
   if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "previous release \$QA_PREV_TAG (tree via git archive) → HEAD reinstall clean"
   elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PREV_TAG would not build (streamed tree): \$(fail_detail \$up1_rc \$LOGD/up1.log $install_cmd)"
   else cell upgrade FAIL "upgrade from \$QA_PREV_TAG (streamed tree) to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd)"; fi
@@ -1549,8 +1605,28 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
   DC_CMD="docker compose up -d --build"
   ( \$DC_CMD ) >\$LOGD/dc.log 2>&1; dc_rc=\$?
   if [ \$dc_rc -eq 0 ]; then
-    HP=""; for p in \$(grep -oE '"[0-9]+:[0-9]+"' docker-compose*.yml | head -3 | cut -d'"' -f2 | cut -d: -f1); do HP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:\$p/ 2>/dev/null) && [ -n "\$HP" ] && break; done
-    case "\$HP" in 200|301|302) cell docker-deploy OK "compose up + probe \$HP" ;; [0-9]*) cell docker-deploy INFO "compose up OK, probe \$HP" ;; *) cell docker-deploy OK "compose up clean (no probe port)" ;; esac
+    # QA-HERMES-CANOPY-31 (2026-09-24 evidence: single-shot probe read 000
+    # while the server was booting; deploy was actually GOOD). Poll each mapped
+    # host port for up to \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}s, first
+    # non-000 answer wins.
+    HP=""
+    # QA-HEADING-011 part 2 (2026-09-25, measured on this repo): the deadline
+    # was computed ONCE for all ports, and docker-compose*.yml globs in the
+    # PROD file too (prod's :3000 leads alphabetically) — a dead first port
+    # burned the whole 60s before the live api :4000 was ever probed, and the
+    # healthy deploy still graded 'no HTTP response'. Allocate the FULL window
+    # PER PORT (reset inside the loop); the OK path finds a live port in
+    # seconds, the worst case is bounded at 3x the window.
+    for p in \$( { grep -hoE '"[0-9]+:[0-9]+"' docker-compose*.yml compose*.yml 2>/dev/null; grep -hoE '[[:space:]][0-9]+:[0-9]+' docker-compose*.yml compose*.yml 2>/dev/null; } | grep -oE '[0-9]+:[0-9]+' | awk '!seen[$0]++' | head -3 | cut -d: -f1 ); do
+      DEADLINE=\$((\$(date +%s) + \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}))
+      while [ \$(date +%s) -lt \$DEADLINE ]; do
+        HP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:\$p/ 2>/dev/null)
+        [ "\$HP" != "000" ] && break
+        sleep 3
+      done
+      [ -n "\$HP" ] && [ "\$HP" != "000" ] && break
+    done
+    case "\$HP" in 200|301|302) cell docker-deploy OK "compose up + probe \$HP" ;; [0-9]*) cell docker-deploy INFO "compose up OK, probe \$HP" ;; *) cell docker-deploy INFO "compose up OK, no HTTP response within \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}s (probe deadline exhausted)" ;; esac
     docker compose down >/dev/null 2>&1
   else cell docker-deploy FAIL "\$(fail_detail \$dc_rc \$LOGD/dc.log \$DC_CMD)"; fi
 else cell docker-deploy N/A "no compose file"; fi
@@ -1617,24 +1693,32 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
   # canopy-vite dev server on :5173 (argv merely contains "vite"). Group kill
   # guard: only kill -PGID when pgid == pid (the setsid leader case); the
   # fuser sweep on the probe port is the catch-all.
-  if [ ! -d frontend/node_modules ]; then
-    npm ci --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || npm install --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || true
+  # QA-HERMES-CANOPY-32 (2026-09-24 evidence: JIT agent image ships NO node/npm;
+  # frontend arm died "No such file or directory" while the repo was fine).
+  # Availability gate: when npm is absent the arm grades ENV-BLOCKED and skips
+  # execution — when npm IS present but the UI does not serve, FAIL stays as-is.
+  if ! command -v npm >/dev/null 2>&1; then
+    cell ui-probe INFO "ENV-BLOCKED: node/npm unavailable on agent — frontend arm skipped (install failed or offline)"
+  else
+    if [ ! -d frontend/node_modules ]; then
+      npm ci --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || npm install --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || true
+    fi
+    ( cd frontend && setsid npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & )
+    sleep 15
+    UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
+    UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+    LAND=\$(curl -sL -o /dev/null -w '%{url_effective}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+    UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
+    if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
+      kill -- -\$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 -- -\$UI_NPM_PID 2>/dev/null || true
+    fi
+    kill \$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 \$UI_NPM_PID 2>/dev/null || true
+    fuser -k 3111/tcp >/dev/null 2>&1 || true
+    case "\$UP" in
+      2??) cell ui-probe OK "UI serves \$UP on :3111 (frontend/, landed: \${LAND:-/})" ;;
+      *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
+    esac
   fi
-  ( cd frontend && setsid npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & )
-  sleep 15
-  UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
-  UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
-  LAND=\$(curl -sL -o /dev/null -w '%{url_effective}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
-  UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
-  if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
-    kill -- -\$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 -- -\$UI_NPM_PID 2>/dev/null || true
-  fi
-  kill \$UI_NPM_PID 2>/dev/null || true; sleep 1; kill -9 \$UI_NPM_PID 2>/dev/null || true
-  fuser -k 3111/tcp >/dev/null 2>&1 || true
-  case "\$UP" in
-    2??) cell ui-probe OK "UI serves \$UP on :3111 (frontend/, landed: \${LAND:-/})" ;;
-    *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
-  esac
 elif [ -f go.mod ] && grep -qE 'http\.ListenAndServe|http\.Server|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|gorilla/mux' *.go 2>/dev/null; then
   UI_PORTS=${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8766 8767 9000}
   UI_BINS="${BIN:-go run .}"
@@ -1710,8 +1794,34 @@ else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head 
 
 # 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
 if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
-  ( docker compose up -d >/dev/null 2>&1 && sleep 4 && docker compose stop >/dev/null 2>&1 && echo STOP=\$? && docker compose start >/dev/null 2>&1 && echo RESTART=\$? && docker compose kill >/dev/null 2>&1 && sleep 2 && docker compose start >/dev/null 2>&1 && echo KILLRECOVER=\$? && docker compose down >/dev/null 2>&1 ) >\$LOGD/sd.log 2>&1; sd_rc=\$?
-  if grep -qE 'STOP=0' \$LOGD/sd.log && grep -qE 'KILLRECOVER=0' \$LOGD/sd.log; then cell chaos-shutdown OK "SIGTERM + SIGKILL recovery clean"
+  # QA-HEADING-010 (2026-09-25): the && chain short-circuited BEFORE its echo
+  # markers, so a first-verb failure left sd.log EMPTY and the cell graded
+  # FAIL "rc=1" with no attribution. Run EVERY verb unconditionally, echo each
+  # step's rc, and derive sd_rc as the FIRST failing step — the trace names
+  # the failing verb; grading below still keys on the STOP=/KILLRECOVER= markers.
+  up_rc=0; stop_rc=0; start1_rc=0; kill_rc=0; start2_rc=0; down_rc=0
+  { docker compose up -d >/dev/null 2>&1; up_rc=\$?; echo UP=\$up_rc
+    docker compose stop >/dev/null 2>&1; stop_rc=\$?; echo STOP=\$stop_rc
+    [ \$stop_rc -eq 0 ] && sleep 4
+    docker compose start >/dev/null 2>&1; start1_rc=\$?; echo RESTART=\$start1_rc
+    docker compose kill >/dev/null 2>&1; kill_rc=\$?; echo KILL=\$kill_rc
+    [ \$kill_rc -eq 0 ] && sleep 2
+    docker compose start >/dev/null 2>&1; start2_rc=\$?; echo KILLRECOVER=\$start2_rc
+    docker compose down >/dev/null 2>&1; down_rc=\$?; echo DOWN=\$down_rc
+  } >\$LOGD/sd.log 2>&1
+  sd_rc=\$up_rc
+  [ "\$sd_rc" -eq 0 ] && sd_rc=\$stop_rc
+  [ "\$sd_rc" -eq 0 ] && sd_rc=\$start1_rc
+  [ "\$sd_rc" -eq 0 ] && sd_rc=\$kill_rc
+  [ "\$sd_rc" -eq 0 ] && sd_rc=\$start2_rc
+  [ "\$sd_rc" -eq 0 ] && sd_rc=\$down_rc
+  if [ "\$up_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose up failed before the stop/kill chain — \$(fail_detail \$up_rc \$LOGD/sd.log 'docker compose up -d')"
+  elif [ "\$stop_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose stop failed rc=\$stop_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
+  elif [ "\$start1_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose start (post-stop) failed rc=\$start1_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
+  elif [ "\$kill_rc" -ne 0 ]; then cell chaos-shutdown INFO "graceful ok, kill step failed rc=\$kill_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
+  elif [ "\$start2_rc" -ne 0 ]; then cell chaos-shutdown FAIL "kill-recovery start failed rc=\$start2_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
+  elif [ "\$down_rc" -ne 0 ]; then cell chaos-shutdown OK "SIGTERM + SIGKILL recovery clean (down rc=\$down_rc ignored)"
+  elif grep -qE 'STOP=0' \$LOGD/sd.log && grep -qE 'KILLRECOVER=0' \$LOGD/sd.log; then cell chaos-shutdown OK "SIGTERM + SIGKILL recovery clean"
   elif grep -qE 'STOP=0' \$LOGD/sd.log; then cell chaos-shutdown INFO "graceful ok, kill-recovery issue: \$(cat \$LOGD/sd.log)"
   else cell chaos-shutdown FAIL "\$(fail_detail \$sd_rc \$LOGD/sd.log 'docker compose up -d; stop; start; kill; start; down')"; fi
 else cell chaos-shutdown N/A "no compose file"; fi
