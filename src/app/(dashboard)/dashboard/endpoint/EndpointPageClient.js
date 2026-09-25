@@ -26,6 +26,8 @@ export default function APIPageClient({ machineId }) {
   const [confirmState, setConfirmState] = useState(null);
 
   const [requireApiKey, setRequireApiKey] = useState(false);
+  const [requireApiKeyPinnedBy, setRequireApiKeyPinnedBy] = useState(null);
+  const requireApiKeyInFlight = useRef(false);
   const [requireLogin, setRequireLogin] = useState(true);
   const [hasPassword, setHasPassword] = useState(true);
  const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
@@ -201,6 +203,7 @@ export default function APIPageClient({ machineId }) {
       if (settingsRes.ok) {
         const data = await settingsRes.json();
         setRequireApiKey(data.requireApiKey || false);
+        setRequireApiKeyPinnedBy(data.requireApiKeyPinnedBy || null);
         setRequireLogin(data.requireLogin !== false);
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
@@ -241,6 +244,12 @@ export default function APIPageClient({ machineId }) {
   };
 
   const handleRequireApiKey = async (value) => {
+    // DF-9ROUTER-38: env-pinned values are display-only — never PATCH.
+    if (requireApiKeyPinnedBy) return;
+    // Serialize submissions: one PATCH at a time, so rapid clicks can never
+    // fire overlapping true/false requests that race the stored value.
+    if (requireApiKeyInFlight.current) return;
+    requireApiKeyInFlight.current = true;
     try {
       const res = await fetch("/api/settings", {
         method: "PATCH",
@@ -250,6 +259,8 @@ export default function APIPageClient({ machineId }) {
       if (res.ok) setRequireApiKey(value);
     } catch (error) {
       console.log("Error updating requireApiKey:", error);
+    } finally {
+      requireApiKeyInFlight.current = false;
     }
   };
 
@@ -981,10 +992,16 @@ export default function APIPageClient({ machineId }) {
             <p className="text-sm text-text-muted">
               Requests without a valid key will be rejected
             </p>
+            {requireApiKeyPinnedBy && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                Pinned by {requireApiKeyPinnedBy} in .env — remove it there to control this from the UI
+              </p>
+            )}
           </div>
           <Toggle
             checked={requireApiKey}
             onChange={() => handleRequireApiKey(!requireApiKey)}
+            disabled={!!requireApiKeyPinnedBy}
           />
         </div>
 

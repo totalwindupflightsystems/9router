@@ -83,6 +83,12 @@ function envRequireApiKeyOverride() {
   return undefined;
 }
 
+// DF-9ROUTER-38: disclosure helper — names the env var pinning requireApiKey
+// (see envRequireApiKeyOverride), or null when the UI controls it.
+export function requireApiKeyPinnedBy() {
+  return envRequireApiKeyOverride() !== undefined ? "REQUIRE_API_KEY" : null;
+}
+
 // Merge raw settings with defaults; backward-compat for missing keys
 export function mergeWithDefaults(raw) {
   const merged = { ...DEFAULT_SETTINGS, ...(raw || {}) };

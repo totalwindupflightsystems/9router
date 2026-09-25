@@ -6,6 +6,7 @@ import { stampInsert, stampUpsertConflict } from "../federation/stamp.js";
 // Settings
 export {
   getSettings, updateSettings, isCloudEnabled, getCloudUrl, exportSettings,
+  requireApiKeyPinnedBy,
 } from "./repos/settingsRepo.js";
 
 // Provider connections
