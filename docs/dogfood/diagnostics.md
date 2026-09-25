@@ -461,3 +461,62 @@ this is its first recorded real use, and it passes.
 Numbers from this run are in `2026-09-24-integration.md`; the board rows are
 DF-9ROUTER-38..41. Install leg: bunker-las-03 agent 6b0e3ee4 (clone 3s, install 39s,
 two-hop chain OK, agent destroyed). Nothing in this run required a repo fix.
+
+## 15. The bump that only a fresh machine could feel: undici 8 x patched fetch x Next (2026-09-25)
+
+**How the layers fit together.** 9router routes every upstream call through a patched
+`globalThis.fetch` (`open-sse/utils/proxyFetch.js`): the wrapper is tagged with a
+process-wide symbol so module re-evaluation cannot stack copies (QA-9ROUTER-18),
+unwraps to the real fetch at call time, and only injects an undici `ProxyAgent`
+dispatcher when a proxy is configured. Media handlers (image/TTS/STT/search) then call
+`providerResponse.json()` on the result (`imageGenerationCore.js:183`,
+`ttsProviders/gemini.js:81`) and parse Gemini's JSON. Transparency of gzip decoding is
+therefore a load-bearing property of the whole chain — nobody's code ever asks
+"am I compressed?" because fetch is *supposed* to have handled it.
+
+**What broke and why only fresh installs.** Commit 89c0084f bumped undici
+`^7.19.2 -> ^8.11.0`. On undici 8, somewhere in the wrapper/dispatcher/Next-runtime
+combination, the response body that reaches `.json()` is still raw gzip
+(`\x1f\x8b` bytes), so JSON.parse throws `Unexpected token '\u001f'`. The error
+handler then locks the (single) account for 30s, so retries show a *different*
+wrong error. The three deployed instances never saw it because their node_modules
+were baked before the bump (the :20128 rig is next 16.3.4 / undici 7.x and serves
+the same calls 200) — and the e2e suite can't see it either, because vitest runs
+without the Next runtime and without the proxyFetch install, so `.json()`
+decompresses fine in tests. The proof chain (all on one throwaway bunker agent):
+commit 699edac3 (undici 7) chat 200 → checkout HEAD + npm install chat 503 →
+`npm install --no-save undici@7.19.2` + restart, same HEAD, chat 200.
+
+**The right way to prevent this class.** A dependency bump of the HTTP stack needs
+a fresh-install smoke that fires one real upstream call, not just a unit suite;
+the install leg of dogfood exists exactly for this and caught it within minutes.
+Candidate fix directions (for the foreman, filed as DF-9ROUTER-42): pin undici
+back to ^7, or make the patched fetch guarantee decompression, plus a regression
+test that boots the real server (or at least imports proxyFetch the way Next does)
+and round-trips a gzip upstream response through `providerResponse.json()`.
+
+### The cooldown mask (DF-9ROUTER-45, general lesson)
+
+One bad upstream response → `[AUTH] all 1 accounts locked ... reset after 30s`,
+and the *user-visible* error becomes the lock, not the cause. For a single-connection
+free-tier user the provider is fully down for 30s per mistake, and debugging the
+original error is impossible from the surface. Request-scoped failures (400 bad
+request, unsupported MIME, unknown model) should never trip an availability cooldown;
+the surfaced message should carry the upstream error text.
+
+### Re-verification playbook for the multimodal surface
+
+```bash
+# 0. fresh clone + npm install (the install leg IS the test for DF-42)
+# 1. image: POST /v1/images/generations {model:gemini/gemini-2.5-flash-image,...} -> PNG magic bytes
+# 2. tts:   POST /v1/audio/speech  {model:gemini/gemini-2.5-flash-preview-tts,...} -> RIFF WAVE
+# 3. stt:   POST the WAV back, once WITHOUT and once WITH ';type=audio/wav' (DF-43)
+# 4. search:POST /v1/search {"provider":"gemini","query":...} -> 200 with results
+# 5. fetch: POST /v1/web/fetch {"provider":"gemini",...} -> expect the honest 400
+#           'does not support web fetch' (Gemini has no fetchConfig; needs jina/tavily creds)
+# 6. lock:  after ANY failure above, wait out the 30s lock before the next probe
+```
+
+Numbers from this run are in `2026-09-25-integration.md`; board rows
+DF-9ROUTER-42..46. Install leg: bunker-las-03 agent 0b251c72 (clone 3s,
+npm install 87s, boot <60s, bisect chain complete, agent destroyed).
