@@ -520,3 +520,53 @@ the surfaced message should carry the upstream error text.
 Numbers from this run are in `2026-09-25-integration.md`; board rows
 DF-9ROUTER-42..46. Install leg: bunker-las-03 agent 0b251c72 (clone 3s,
 npm install 87s, boot <60s, bisect chain complete, agent destroyed).
+
+## 16. Run 15 (2026-09-25, HEAD b9f1e162): the compose deployment surface — the federation promise holds with containers as the unit
+
+**Why this run exists.** 14 prior runs exercised bare-process deployments and every
+product surface; none ever drove the docker-compose path (bunker battery compose
+cells always died on the plugin; a 09-13 attempt left `dogfood9routerfed-*` images
+and no doc trace). The compose files are a primary promise for a self-hosted
+gateway, so run 15 used them the way a user does — `up`, seed, traffic, outage,
+recovery, upgrade — with containers as the unit.
+
+**How the pieces fit.** `docker-compose.yml` = standalone with published images
+(`decolua/9router` — upstream code, no federation) + headroom sidecar.
+`docker-compose.local-build.yml` is an OVERRIDE that swaps only the 9router image
+for a locally built `9router:local`. `docker-compose.federation.yml` builds three
+instances from `Dockerfile.federation` (standalone image + full `src/` + the `@/`
+alias symlink that untraced dynamic federation imports need). All shared secrets
+come from the repo `.env` via `env_file` (7f25e31a) — identical values on every
+instance is what makes edges trust central. Port/prefix vars move only the HOST
+side; the intra-network URL stays `http://central:20128`.
+
+**What was proven live** (full detail in `2026-09-25-compose-integration.md`):
+federation lifecycle A/A+/B/C/D all PASS with `docker stop`/`start` as the outage
+unit — replica serving during the outage, 202 + queued-write header, ~20s re-link,
+reconcile to both sides, row-level integrity byte-identical (the FED-020 probe run
+inside the containers). Standalone quickstart, headroom sidecar wiring, upgrade
+in place (249s, data kept), and a fresh-daemon cold install (271s → completion)
+all PASS.
+
+**The lesson this run teaches.** Container names and ports were made overridable
+(981c7f6e) but compose PROJECT identity was not: `FEDERATION_STACK_PREFIX` renames
+containers while the project name (default `9router`) still owns the network and
+volume names, and `docker-compose.yml` even pins volume `name: 9router-data`
+globally. The documented coexistence command therefore resolves onto the LIVE
+stack's volumes silently — `compose config` shows zero warnings (DF-9ROUTER-48).
+The mental model for the fix: prefix vars = container identity; `-p` = state
+identity; a deploy command needs BOTH. Second lesson: DOCKER.md documents the
+open-the-dashboard step but never the login (DF-9ROUTER-49) — a deployment doc
+that ends at "open http://localhost:20128" ends one step before the user's first
+success.
+
+**Numbers** (N100 control host): federation build+boot 247s; standalone up 19s
+warm; swap-to-local 249s; cold fresh-daemon install 271s; /v1/models through the
+router 180-209ms (vs 363ms direct — the model cache wins); steady completions
+610-670ms through the router vs 326ms direct; restart→serving 3s; edge re-link
+~20s. One 17.9s first-completion outlier, upstream-attributed (model load).
+No PERF row — nothing a user would notice.
+
+Board rows: DF-9ROUTER-48..51. No bunker leg this run (all las hosts
+unreachable / bunkerd stuck) — SKIPPED row filed; compensating fresh-daemon
+install proven on-host.
