@@ -1333,3 +1333,29 @@ tasks:
   status: complete
   created_at: '2026-09-25T04:00:45.834386+00:00'
   completed_at: '2026-09-25T04:58:27.736926+00:00'
+- id: DF-9ROUTER-42
+  title: Fix undici-8 gzip breakage of provider upstream calls
+  criteria:
+  - Regression test proves a gzip upstream response round-trips through providerResponse.json()
+    via the proxyFetch-wrapped fetch; proxy-fetch-idempotency test green; verify-no-regression
+    exit 0; lint:gate exit 0
+  status: complete
+  created_at: '2026-09-25T07:22:25.613938+00:00'
+  completed_at: '2026-09-25T09:03:23.157938+00:00'
+- id: DF-9ROUTER-43
+  title: STT transcriptions sniff audio MIME from magic bytes
+  criteria:
+  - WAV/MP3/OGG/FLAC/WebM magic-byte sniffing wired into transcriptions mime path;
+    octet-stream WAV resolves audio/wav; unit test covers all cases; verify-no-regression
+    exit 0; skills/9router-stt updated
+  status: complete
+  created_at: '2026-09-25T07:22:25.973359+00:00'
+  completed_at: '2026-09-25T08:46:52.994073+00:00'
+- id: DF-9ROUTER-44
+  title: Single canonical port 20128 + restart-after-provider docs
+  criteria:
+  - check-port-consistency.mjs wired and exit 0; 20128 canonical across README/.env.example/package.json;
+    restart-after-provider line in README + skills/9router; lint:gate exit 0
+  status: complete
+  created_at: '2026-09-25T07:22:26.267949+00:00'
+  completed_at: '2026-09-25T08:39:35.721889+00:00'
