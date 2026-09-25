@@ -228,7 +228,7 @@ write_fail_if_empty() {
 #   capacity: a FULL pool fails spawn deterministically (QA-OFF-BY-ONE-9 09-15);
 #             BUNKER_QA_SKIP_PREFLIGHT=1 bypasses THIS probe only.
 preflights() {
-  if ! grep -q "^    $SERVER:" "$HOME/.bunker/config.yaml" 2>/dev/null; then
+  if ! grep -qE "^ +$SERVER:" "$HOME/.bunker/config.yaml" 2>/dev/null; then
     printf '{"cell":"run_battery","status":"FAIL","detail":"server %s not present in ~/.bunker/config.yaml — stale BUNKER_QA_SERVER default; run bunker config / pick a live server (no spawn attempted)","ts":"%s"}\n' \
       "$SERVER" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
     echo "ERROR: server '$SERVER' not in ~/.bunker/config.yaml — refusing to spawn (deterministic config error)" >&2
@@ -662,6 +662,11 @@ detect_upgrade_inputs() {
   local repo="$1"
   DETECT_TAG_COUNT=0; DETECT_PREV_TAG=""; DETECT_PREV_VERSION=""
   DETECT_PKG_NAME=""; DETECT_PKG_ECOSYSTEM=""; DETECT_GO_URL=""
+  # QA-WARPFS-QA (2026-09-25): initialized here, not only in the npm branch —
+  # under set -u an unset DETECT_UP_PREV_DIR aborts the build_remote_script
+  # heredoc for non-npm repos (Rust/Go/pip with tags) and ships a 0-byte
+  # qa-run.sh, so the whole battery exits instantly with zero cells.
+  DETECT_UP_PREV_DIR=""
   [ -d "$repo/.git" ] || return 0
   DETECT_TAG_COUNT=$(git -C "$repo" tag 2>/dev/null | grep -c . || true)
   [ "${DETECT_TAG_COUNT:-0}" = "0" ] && return 0
@@ -696,6 +701,15 @@ detect_upgrade_inputs() {
     # clone fallback for public URLs.
     DETECT_PKG_ECOSYSTEM="go"
     DETECT_GO_URL=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
+  elif [ -f "$repo/Cargo.toml" ]; then
+    # QA-WARPFS-QA-2 (2026-09-25): Rust repos were unwired — the host detected
+    # tags but the cell had no ecosystem for cargo, so a tagged Rust repo graded
+    # upgrade FAIL "no installable previous release" while the tree-stream arm
+    # (cargo build of the previous tag's tree) is already ecosystem-agnostic
+    # (QA-OFF-BY-ONE-22 shape). Wire the ecosystem; ship_prev_tag_tree streams
+    # the previous tag's tree; the cell's UP_PREV arm builds it. Cargo has no
+    # index package — PKG_NAME stays "".
+    DETECT_PKG_ECOSYSTEM="rust"
   fi
   # The value is interpolated into the generated script inside single quotes.
   DETECT_PKG_NAME=${DETECT_PKG_NAME//\'/}
@@ -718,6 +732,12 @@ ship_prev_tag_tree() {
   local repo="$1" proj="$2" agent_dir verify_path
   if [ "$DETECT_PKG_ECOSYSTEM" = "go" ] && [ -n "$DETECT_PREV_TAG" ]; then
     agent_dir="~/qa-up-prev"; verify_path="go.mod"
+  elif [ "$DETECT_PKG_ECOSYSTEM" = "rust" ] && [ -n "$DETECT_PREV_TAG" ]; then
+    # QA-WARPFS-QA-2: previous tag's tree for the cargo build arm — verified by
+    # Cargo.toml. Cargo has no installable index package, so the tree-stream is
+    # the only real previous->HEAD upgrade path for Rust repos.
+    agent_ssh "rm -rf ~/qa-up-prev ~/qa-up-prev.absent" >/dev/null 2>&1 || true
+    agent_dir="~/qa-up-prev"; verify_path="Cargo.toml"
   elif [ "$DETECT_PKG_ECOSYSTEM" = "npm" ] && [ -n "$DETECT_UP_PREV_DIR" ] && [ -n "$DETECT_PREV_TAG" ]; then
     # QA-HEADING-009: agents are SHARED across projects — clear any stale tree
     # (or an absent-marker from a previous failed stream) before shipping, so
