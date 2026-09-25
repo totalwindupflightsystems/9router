@@ -1309,3 +1309,27 @@ tasks:
   status: complete
   created_at: '2026-09-25T01:39:24.497893+00:00'
   completed_at: '2026-09-25T02:23:43.108635+00:00'
+- id: flake2-kimchi-deterministic
+  title: Kimchi test deterministic vitest collection + current freeTier classification
+  criteria:
+  - Focused file green x3 in all invocation modes; file converted to vitest; assertion
+    reads registry contract
+  status: complete
+  created_at: '2026-09-25T04:00:45.025324+00:00'
+  completed_at: '2026-09-25T05:09:07.485272+00:00'
+- id: df39-nonstream-usage-truth
+  title: Non-stream usage records upstream truth; estimates flagged
+  criteria:
+  - Non-stream prompt tokens match upstream usage; meta.estimated flag on estimate
+    fallback; streaming untouched; focused tests green
+  status: complete
+  created_at: '2026-09-25T04:00:45.437323+00:00'
+  completed_at: '2026-09-25T04:39:15.559866+00:00'
+- id: df41-dashboard-polish
+  title: Check feedback + create-key guard + save toast + switch placement
+  criteria:
+  - Check shows result state; Create in-flight guard unit-tested; toast on save; switch
+    visible without scroll; DF-38 disclosure tests stay green
+  status: complete
+  created_at: '2026-09-25T04:00:45.834386+00:00'
+  completed_at: '2026-09-25T04:58:27.736926+00:00'
