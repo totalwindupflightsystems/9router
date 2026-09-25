@@ -1293,3 +1293,19 @@ tasks:
   status: complete
   created_at: '2026-09-24T20:39:25.298964+00:00'
   completed_at: '2026-09-24T20:58:06.251453+00:00'
+- id: df38-api-key-pin-disclosure
+  title: Disclose REQUIRE_API_KEY env pin on the dashboard Require API key toggle
+  criteria:
+  - GET/PATCH /api/settings expose requireApiKeyPinnedBy ('REQUIRE_API_KEY') exactly
+    when process.env.REQUIRE_API_KEY is exactly 'true' or 'false', null otherwise;
+    the stored DB value still persists the user's intent
+  - EndpointPageClient renders the Require API key toggle disabled with a disclosure
+    naming REQUIRE_API_KEY when pinned, and the toggle handler can no longer issue
+    overlapping PATCH requests
+  - A new vitest file in tests/unit proves the pin flag and the persist-vs-response
+    split; it passes via npm test and is demonstrated RED against the pre-fix source
+  - Guard green; no edits to providers/registry/index.js or cli/app/custom-server.js;
+    standalone mode unchanged
+  status: complete
+  created_at: '2026-09-25T01:39:24.497893+00:00'
+  completed_at: '2026-09-25T02:23:43.108635+00:00'
