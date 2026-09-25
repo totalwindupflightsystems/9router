@@ -206,13 +206,19 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
   };
 
   // canonicalizeUsage re-shapes into the storage convention and drops the flag;
-  // an estimated record must stay labelled as one in the DB.
-  if (effective.estimated) normalized.estimated = true;
+  // an estimated record must stay labelled as one in the DB (tokens.estimated),
+  // and the row's meta must carry the EXPLICIT verdict either way —
+  // `estimated: false` for upstream-reported counts — so a reader of the
+  // usageHistory row can separate measured from estimated without inferring it
+  // from the numbers (DF-9ROUTER-39: non-stream rows presented a local
+  // estimate as if it were upstream truth).
+  normalized.estimated = Boolean(effective.estimated);
 
   saveRequestUsage({
     provider: provider || "unknown",
     model: model || "unknown",
     tokens: normalized,
+    meta: { estimated: Boolean(effective.estimated) },
     timestamp: new Date().toISOString(),
     connectionId: connectionId || undefined,
     apiKey: apiKey || undefined,
