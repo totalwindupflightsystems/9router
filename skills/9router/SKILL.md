@@ -73,6 +73,8 @@ Two objects are required, in order — connection follows node:
 3. On the node card → **Import from /models** → one id per upstream model, prefixed
    `<Prefix>/<model>` (96 imported in seconds from a 96-model upstream).
 
+Restart the server after adding a provider connection — running config is loaded at boot.
+
 Client key: Dashboard → **Endpoint & Key** → the default key exists already (reveal/copy).
 A completion and an embeddings call through the wired node, via the OpenAI SDK:
 
