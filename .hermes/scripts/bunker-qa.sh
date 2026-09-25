@@ -965,6 +965,21 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
   grep -qE -- '--- FAIL|^FAIL' "\$gf" 2>/dev/null || return 1
   true
 }
+# native_runner_missing_cause - did the suite fail to start because the TEST
+# RUNNER ITSELF is absent? (QA-TERMINAL-JAIL-9, 2026-09-25.) The harness picks
+# native_cmd by repo shape (pytest for pyproject.toml) but cannot guarantee the
+# binary exists on the agent: a pyproject repo whose pytest lives in a PEP-735
+# dependency-group gets rc=127 'pytest: command not found' from EVERY leg.
+# That is the harness's environment gap, not a repo result - the same class as
+# build_env_failure/suite_deps_missing: an infra refusal upstream of the suite
+# is never a product verdict (terminal-jail 09-23 battery: ci-pass graded FAIL
+# on it and chaos cells burned UNVERIFIED rows across 5 ledger cycles).
+native_runner_missing_cause() { # <logfile> - print the line proving the runner was absent
+  grep -m1 -E "^(bash: )?(line [0-9]+: )?(pytest|python3?|npm|pnpm|yarn|node|go|cargo|make): (command )?not found|command not found: (pytest|python3?|npm|pnpm|yarn|node|go|cargo|make)" "\$1" 2>/dev/null | cut -c1-220
+}
+native_runner_missing() { # <logfile> - 0 when the log shows the runner never started
+  [ -n "\$(native_runner_missing_cause "\$1")" ]
+}
 # suite_deps_missing — is this suite rc a MISSING-TEST-DEPS refusal instead of a
 # product result? (QA-9ROUTER-26, 2026-09-21.) 9router's own \`npm test\` entry
 # runs a preflight (scripts/check-test-deps.mjs) that exits 1 with
@@ -1071,9 +1086,23 @@ if [ -f package.json ] && ! command -v node >/dev/null 2>&1 && [ ! -x ~/tools/no
     || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/toolchain.log)"
 fi
 if [ -f pyproject.toml ] && [ ! -x ~/tools/venv/bin/python ]; then
-  ( python3 -m venv ~/tools/venv && ~/tools/venv/bin/pip install --upgrade pip setuptools wheel ) >\$LOGD/venv.log 2>&1 \
-    && cell toolchain-bootstrap OK "python venv ready (~/tools/venv)" \
+  ( python3 -m venv ~/tools/venv && ~/tools/venv/bin/pip install --upgrade pip setuptools wheel && ~/tools/venv/bin/pip install pytest ) >\$LOGD/venv.log 2>&1 \
+    && cell toolchain-bootstrap OK "python venv ready + pytest (~/tools/venv)" \
     || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/venv.log)"
+fi
+# QA-TERMINAL-JAIL-9 (2026-09-25): the harness's own runner detection picks
+# pytest -x -q for every pyproject repo, but a pip install -e . install
+# never provisions it when the repo declares pytest in a PEP-735
+# dependency-groups dev block (pip ignores those) - the native and chaos
+# legs then die rc=127 'pytest: command not found' and carry NO repo signal
+# (terminal-jail 09-19 + 09-23 batteries). Best-effort top-up for venvs
+# created before this fix or on agents where the fresh install could not
+# reach the network: offline agents log a WARN and the native-runner guard
+# in the ci-pass cell grades the affected legs UNVERIFIED.
+if [ -f pyproject.toml ] && [ -x ~/tools/venv/bin/python ] && [ ! -x ~/tools/venv/bin/pytest ]; then
+  ( ~/tools/venv/bin/pip install pytest ) >\$LOGD/venv-pytest.log 2>&1 \
+    && cell toolchain-bootstrap OK "pytest topped up into ~/tools/venv (QA-TERMINAL-JAIL-9)" \
+    || echo "WARN: pytest top-up failed (offline agent?) - native/chaos legs will grade UNVERIFIED 'runner missing': \$(tail -1 \$LOGD/venv-pytest.log 2>/dev/null)" >&2
 fi
 if [ -f Cargo.toml ] && ! command -v cargo >/dev/null 2>&1 && [ ! -x ~/tools/cargo/bin/cargo ]; then
   ( export CARGO_HOME=~/tools/cargo RUSTUP_HOME=~/tools/rustup; curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path ) >\$LOGD/rustup.log 2>&1 \
@@ -1507,7 +1536,13 @@ else
     # act rc=1 checkout-token + native rc=127 make-missing, both harness env).
     # Name that context in the FAIL detail so nobody files it as a repo defect.
     ACTCTX=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTX=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
-    if [ "\$ci_rc" = "skip" ]; then
+    if native_runner_missing \$LOGD/native.log; then
+      # QA-TERMINAL-JAIL-9 (2026-09-25): rc=127 '<runner>: command not found' -
+      # the suite NEVER RAN, so this leg carries no repo signal. The harness
+      # picked the runner by repo shape but could not provision it (PEP-735
+      # dependency-group repos); grade the environment gap, not a repo defect.
+      cell ci-pass UNVERIFIED "native runner missing (rc=\$nat_rc) - the suite NEVER RAN, no repo signal; INFRA-FAIL, not a result: \$(native_runner_missing_cause \$LOGD/native.log)"
+    elif [ "\$ci_rc" = "skip" ]; then
       cell ci-pass FAIL "no triggerable workflow\$QA_ACT_NOTE — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX"
     elif ci_only_failure \$LOGD/ci.log; then
       # QA-9ROUTER-19 class 2: the act leg's ONLY failures are the workflow's own
