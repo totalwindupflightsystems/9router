@@ -202,14 +202,21 @@ entries (OpenAI shape). Live catalogs are resolved per provider when possible.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /v1/audio/*` | Speech-to-text / text-to-speech |
+| `POST /v1/audio/speech` | Text-to-speech |
+| `POST /v1/audio/transcriptions` | Speech-to-text |
+| `GET /v1/audio/voices` | List TTS voices for a provider (`?provider=…`) |
 | `POST /v1/embeddings` | Embeddings |
-| `POST /v1/images` | Image generation |
-| `POST /v1/videos` | Video generation |
-| `POST /v1/search` | Web search |
-| `POST /v1/web` | Web/content tools |
+| `POST /v1/images/generations` | Image generation |
+| `POST /v1/messages/count_tokens` | Count tokens for a Messages request |
+| `GET /v1/models/info` | Detailed model catalog (kind, endpoint, capabilities) |
 | `POST /v1/responses` | OpenAI Responses-format endpoint |
-| `POST /v1/api` | Generic provider passthrough |
+| `POST /v1/responses/compact` | Compact conversation context |
+| `POST /v1/search` | Web search |
+| `POST /v1/videos/generations` | Video generation |
+| `POST /v1/videos/edits` | Async video edit (xAI Grok Imagine) |
+| `POST /v1/videos/extensions` | Async video extension (xAI Grok Imagine) |
+| `GET /v1/videos/{id}` | Poll async video job status |
+| `POST /v1/web/fetch` | Web URL fetch/extract |
 
 All are gated by the rules in [Authentication](#authentication).
 
