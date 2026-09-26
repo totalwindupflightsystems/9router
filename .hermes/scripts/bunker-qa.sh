@@ -354,6 +354,12 @@ detect_cmds() {
   fi
   elif [ -f "$repo/go.mod" ]; then native_cmd="go test ./... -count=1"
   elif [ -f "$repo/pyproject.toml" ]; then native_cmd="pytest -x -q"
+  # QA-FOREMAN-2026-09-26 (auger): pytest.ini/conftest.py-only repos matched NO
+  # shape and got the vacuous `echo no-test-path` — the battery graded
+  # ci-pass OK in 57ms with zero tests run while the repo carries 210 tests.
+  # Mirror the pyproject arm; if pytest itself is absent the suite NEVER RAN
+  # and native_runner_missing grades UNVERIFIED (honest), never OK.
+  elif [ -f "$repo/pytest.ini" ] || [ -f "$repo/conftest.py" ]; then native_cmd="python3 -m pytest -q"
   elif [ -f "$repo/Cargo.toml" ]; then native_cmd="cargo test --workspace"
   elif [ -f "$repo/Makefile" ]; then
     # QA-H3-14: native leg mirrors the install-leg target probe — a Makefile
@@ -995,7 +1001,11 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
 # is never a product verdict (terminal-jail 09-23 battery: ci-pass graded FAIL
 # on it and chaos cells burned UNVERIFIED rows across 5 ledger cycles).
 native_runner_missing_cause() { # <logfile> - print the line proving the runner was absent
-  grep -m1 -E "^(bash: )?(line [0-9]+: )?(pytest|python3?|npm|pnpm|yarn|node|go|cargo|make): (command )?not found|command not found: (pytest|python3?|npm|pnpm|yarn|node|go|cargo|make)" "\$1" 2>/dev/null | cut -c1-220
+  # QA-FOREMAN-2026-09-26: python module-missing form added — a pytest.ini-only
+  # repo on a bare agent dies `/usr/bin/python3: No module named pytest`, which
+  # the command-not-found regex never matched (suite NEVER RAN, must grade
+  # UNVERIFIED, not FAIL).
+  grep -m1 -E "^(bash: )?(line [0-9]+: )?(pytest|python3?|npm|pnpm|yarn|node|go|cargo|make): (command )?not found|command not found: (pytest|python3?|npm|pnpm|yarn|node|go|cargo|make)|No module named (pytest|nose|unittest2)" "\$1" 2>/dev/null | cut -c1-220
 }
 native_runner_missing() { # <logfile> - 0 when the log shows the runner never started
   [ -n "\$(native_runner_missing_cause "\$1")" ]
@@ -1505,6 +1515,16 @@ ci_only_failure() { # <act log>
   done < <(grep -n '❌' "\$cf" 2>/dev/null)
   true
 }
+# QA-FOREMAN-2026-09-26 FIX (use-before-assignment): QA_CI_SELECT/QA_ACT_NOTE
+# MUST be assigned BEFORE the staging block below. The generated script
+# previously assigned them at the END of the config section, so this loop read
+# an UNSET variable, ACT_WF_COUNT was always 0, ci_rc was always "skip", and
+# act NEVER RAN for any ci.yml repo — the ci-pass cell graded
+# "no triggerable workflow — native suite PASS" vacuously (measured on
+# logsey + auger batteries, agents a334d717/c9a0e122, 2026-09-26; corroborated
+# by heading + dexdat-memory runs the same day).
+QA_CI_SELECT='$DETECT_CI_FILES'
+QA_ACT_NOTE='$DETECT_ACT_NOTE'
 # Stage the host-selected triggerable workflows into an EXTERNAL staging dir.
 # The dir must live OUTSIDE the synced tree (the tree is the payload under audit
 # and gains no entries) and hold real FILES, not a dir symlink: \`-W <dir>\` does
@@ -1599,8 +1619,9 @@ QA_GO_URL='$DETECT_GO_URL'
 # empty = "no branch-push CI here"). QA_ACT_NOTE carries the reason when the
 # selection is empty and act is therefore skipped; the ci-pass cell classifies
 # act failures from the LOG alone (no network call, no baked credentials).
-QA_CI_SELECT='$DETECT_CI_FILES'
-QA_ACT_NOTE='$DETECT_ACT_NOTE'
+# (QA_CI_SELECT/QA_ACT_NOTE now assigned ABOVE the staging block — use-before-
+# assignment fix QA-FOREMAN-2026-09-26; the duplicate assignment that used to
+# sit here landed AFTER the loop consumed them.)
 TREE_TAG=\$(git tag 2>/dev/null | sort -V | tail -2 | head -1)
 # QA-OFF-BY-ONE-22: materialize the previous release's tree for Go-binary
 # repos — the HOST streams it (ship_prev_tag_tree -> ~/qa-up-prev); if that
