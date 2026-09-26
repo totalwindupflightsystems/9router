@@ -8,8 +8,14 @@ Run 9Router in a container. Published image: [`decolua/9router`](https://hub.doc
 
 ## Quick start
 
+Before starting, create a local environment file and replace the example values. Set a non-default `INITIAL_PASSWORD` and long random `JWT_SECRET` and `API_KEY_SECRET` values; never use the example `change-me` values in a reachable deployment.
+
 ```bash
+cp .env.example .env
+# Edit .env: set INITIAL_PASSWORD, JWT_SECRET, and API_KEY_SECRET.
+
 docker run -d \
+  --env-file .env \
   -p 20128:20128 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
@@ -17,7 +23,7 @@ docker run -d \
   decolua/9router:latest
 ```
 
-App listens on port `20128`. Open: http://localhost:20128
+Open the dashboard at http://localhost:20128/dashboard and log in with the `INITIAL_PASSWORD` you set in `.env`.
 
 ## Manage container
 
