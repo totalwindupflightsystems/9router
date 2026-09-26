@@ -1874,6 +1874,7 @@ elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not f
 elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
 elif go_suite_env_failure \$LOGD/disc.log; then cell chaos-disconnect INFO "ENV-BLOCKED: the go suite failed because the test host lacks a build tool (\`make\` on JIT agents, measured 2026-09-19) — the disconnect cut was exercised against a broken build, no disconnect finding (rc=\$disc_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/disc.log)"
 elif suite_deps_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "missing test dependencies — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result (rc=\$disc_rc): \$(suite_deps_missing_cause \$LOGD/disc.log)"
+elif native_runner_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "native runner missing (rc=\$disc_rc) - the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(native_runner_missing_cause \$LOGD/disc.log)"
 else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head -2 \$LOGD/disc.log)"; fi
 
 # 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
@@ -2019,6 +2020,7 @@ elif grep -qiE 'killed|out of memory' \$LOGD/res.log; then cell chaos-resource I
 elif build_incomplete \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the build never completed under the 3G cap, so the cap was NEVER exercised (rc=\$res_rc, \$cap_note; environment or code, never memory) — not a memory finding: \$(build_incomplete_cause \$LOGD/res.log)"
 elif go_suite_env_failure \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the suite died because the test host lacks a build tool — cap WAS applied, but the failure is the missing tool, not memory (\$cap_note, rc=\$res_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/res.log)"
 elif suite_deps_missing \$LOGD/res.log; then cell chaos-resource UNVERIFIED "missing test dependencies — the suite NEVER RAN under the cap, so no memory finding either way (rc=\$res_rc, \$cap_note): \$(suite_deps_missing_cause \$LOGD/res.log)"
+elif native_runner_missing \$LOGD/res.log; then cell chaos-resource UNVERIFIED "native runner missing under cap (rc=\$res_rc, \$cap_note) - the suite NEVER RAN, so the cap was never exercised by any test; INFRA-FAIL, not a result: \$(native_runner_missing_cause \$LOGD/res.log)"
 else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$LOGD/res.log)"; fi
 
 # 10 · chaos-errorpath — missing config: clean usage or panic?
