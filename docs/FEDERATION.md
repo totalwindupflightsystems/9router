@@ -357,9 +357,9 @@ curl -i http://localhost:20129/v1/models -H "Authorization: Bearer $KEY"
 | Symptom | Cause / fix |
 |---|---|
 | Edge reports `"last_state": "uninitialized"` (never-started) | Federation loops never started: `FEDERATION_MODE=edge` missing at boot, the custom-server wrapper didn't boot, or the federation modules are absent from the image. Check logs for `[federation] replication + failover loops started`; an edge that is actually running flips to `linked`/`degraded` within seconds. |
-| `npm run dev` / `next dev` with `FEDERATION_MODE=edge` exits FATAL | **Expected (FED-018).** The edge proxy + DEGRADED intercept live only in `custom-server.js`, which the Next.js dev server never loads — a dev-mode edge would silently serve zero federation behavior. Use the production path: `npm run build && npm start` (or `docker compose -f docker-compose.federation.yml up`). Central/standalone dev is unaffected. |
+| `npm run dev` / `next dev` with `FEDERATION_MODE=edge` exits FATAL | **Expected (FED-018).** The edge proxy + DEGRADED intercept live only in `custom-server.js`, which the Next.js dev server never loads — a dev-mode edge would silently serve zero federation behavior. Use the production path: `npm run build && npm start` (or `docker compose -p 9router-federation -f docker-compose.federation.yml up`). Central/standalone dev is unaffected. |
 | Edge stays LINKED but `/v1` 502s | `FEDERATION_CENTRAL_URL` unreachable from the edge (firewall, DNS, TLS). Check `curl https://central/api/federation/verify` with the token. |
-| **`/api/federation/status` (or any federation API call) 401s with your own token** | Two causes, in this order. **(1) You are not talking to the compose central** — something else already serves that host port (an existing 9router install, a stale stack), so its `FEDERATION_TOKEN` is a different secret and every call 401s while the container you meant to hit is fine. Check what is published (`docker compose -f docker-compose.federation.yml ps`) and what is actually listening (`ss -tlnp \| grep <port>`), then either re-run the stack on override ports (§6.1) or stop the other instance. **(2) The container was booted with a different `FEDERATION_TOKEN` than your shell's** — compare `docker compose -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN` with `$FEDERATION_TOKEN`; fix `.env` and `docker compose -f docker-compose.federation.yml up -d` again (a re-`up` recreates the containers with the corrected value). Only after both are ruled out is regenerating the token (§6.5) the fix. |
+| **`/api/federation/status` (or any federation API call) 401s with your own token** | Two causes, in this order. **(1) You are not talking to the compose central** — something else already serves that host port (an existing 9router install, a stale stack), so its `FEDERATION_TOKEN` is a different secret and every call 401s while the container you meant to hit is fine. Check what is published (`docker compose -p 9router-federation -f docker-compose.federation.yml ps`) and what is actually listening (`ss -tlnp \| grep <port>`), then either re-run the stack on override ports (§6.1) or stop the other instance. **(2) The container was booted with a different `FEDERATION_TOKEN` than your shell's** — compare `docker compose -p 9router-federation -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN` with `$FEDERATION_TOKEN`; fix `.env` and `docker compose -p 9router-federation -f docker-compose.federation.yml up -d` again (a re-`up` recreates the containers with the corrected value). Only after both are ruled out is regenerating the token (§6.5) the fix. |
 | `curl: (6) Could not resolve host: edge` | There is no `edge` service. The compose services are `central` / `edge-a` / `edge-b`: from the host use `localhost:<published port>` (defaults 20128 / 20129 / 20130), from inside `federation_net` use `http://edge-a:20128`. |
 | `/v1` 401 `{"error":"API key required for remote API access"}` | The caller is remote (not loopback as the instance sees it) and presented no valid API key. Create one (dashboard → Endpoint → API Keys, or the login + `POST /api/keys` recipe in `docs/api-reference.md`) and send it as `Authorization: Bearer <key>`, `x-api-key`, `x-goog-api-key` or `?key=` — a key from any instance works on all of them (§3 shares `API_KEY_SECRET`). Only `requireApiKey: false` (`REQUIRE_API_KEY=false`) allows the remote call keyless. See §5.2. |
 | Dashboard sessions break across instances | `JWT_SECRET` mismatch. |
@@ -399,23 +399,23 @@ cp .env.example .env
 $EDITOR .env   # replace the placeholder values (never commit .env)
 
 # 2. Build + start central + 2 edges:
-docker compose -f docker-compose.federation.yml up -d --build
+docker compose -p 9router-federation -f docker-compose.federation.yml up -d --build
 
 # Check status (these curls assume the DEFAULT published ports below; if you
 # override them — see "Running alongside an existing 9router" — substitute your
 # values, e.g. 21128 / 21129 / 21130):
-docker compose -f docker-compose.federation.yml ps
+docker compose -p 9router-federation -f docker-compose.federation.yml ps
 curl http://localhost:20128/api/federation/status -H "Authorization: Bearer $FEDERATION_TOKEN"
 curl http://localhost:20129/api/federation/local-status   # edge-a
 curl http://localhost:20130/api/federation/local-status   # edge-b
 
 # Simulate a central outage:
-docker compose -f docker-compose.federation.yml stop central
+docker compose -p 9router-federation -f docker-compose.federation.yml stop central
 # ...edges flip DEGRADED after the threshold; /v1 keeps working on 20129/20130
 # (with an API key — see §5.2)...
 
 # Recover:
-docker compose -f docker-compose.federation.yml start central
+docker compose -p 9router-federation -f docker-compose.federation.yml start central
 # ...edges drain + catch up + return to LINKED...
 ```
 
@@ -443,16 +443,24 @@ FEDERATION_STACK_PREFIX=9r-fed \
 FEDERATION_CENTRAL_PORT=21128 \
 FEDERATION_EDGE_A_PORT=21129 \
 FEDERATION_EDGE_B_PORT=21130 \
-docker compose -f docker-compose.federation.yml up -d --build
+docker compose -p 9router-federation -f docker-compose.federation.yml up -d --build
 ```
 
 Only the **host** side moves. The container-side port is 20128 on all three
 instances and `FEDERATION_CENTRAL_URL` stays `http://central:20128` (a service
 name + container port inside `federation_net`), so replication and proxying are
-unaffected by a host-port override. Add `-p <project>`
-(e.g. `docker compose -p 9r-fed -f docker-compose.federation.yml up -d --build`)
-to keep the second stack's project name and named volumes separate from the
-first one's.
+unaffected by a host-port override. Use `-p 9router-federation` on **every**
+federation Compose command (for example, `docker compose -p 9router-federation
+-f docker-compose.federation.yml up -d --build`). The explicit project isolates
+this stack's Compose network and named volumes from an existing stack; without
+it, the same checkout can resolve the existing project's network and data
+volumes instead.
+
+The federation file's `central-data`, `edge-a-data`, and `edge-b-data` volumes
+are project-scoped. This does **not** isolate the standalone
+`docker-compose.yml` volume: that file explicitly pins `9router-data` globally,
+so a second standalone deployment needs a separately named data volume rather
+than relying on `-p`.
 
 Then run the status checks against the overridden ports:
 
@@ -462,13 +470,13 @@ curl http://localhost:21129/api/federation/local-status   # edge-a
 ```
 
 **If that first curl 401s with your own token, determine which server answered
-before touching the token.** `docker compose -f docker-compose.federation.yml ps`
+before touching the token.** `docker compose -p 9router-federation -f docker-compose.federation.yml ps`
 shows the ports the stack actually published, and `ss -tlnp | grep <port>` shows
 every listener on them; a port owned by an existing 9router (or any other
 process) means your request never reached the compose central — re-run the stack
 on override ports or stop the other instance (§5.5). If the stack does own the
 port, the second cause is a token mismatch: compare
-`docker compose -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN`
+`docker compose -p 9router-federation -f docker-compose.federation.yml exec central printenv FEDERATION_TOKEN`
 with your shell's `$FEDERATION_TOKEN`, fix `.env`, then `up -d` again.
 
 > ⚠️ Do **not** start this example stack with `up` on a host whose 20128 is

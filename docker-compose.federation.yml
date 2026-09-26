@@ -4,7 +4,7 @@
 # It does NOT replace docker-compose.yml (the standalone single-instance
 # deployment) — standalone stays untouched. To use it:
 #
-#   docker compose -f docker-compose.federation.yml up -d --build
+#   docker compose -p 9router-federation -f docker-compose.federation.yml up -d --build
 #
 # Running alongside an existing 9router (e.g. a live install already serving
 # 20128): every container name and published host port is overridable, so a
@@ -14,7 +14,7 @@
 #   FEDERATION_CENTRAL_PORT=21128 \
 #   FEDERATION_EDGE_A_PORT=21129 \
 #   FEDERATION_EDGE_B_PORT=21130 \
-#   docker compose -f docker-compose.federation.yml up -d --build
+#   docker compose -p 9router-federation -f docker-compose.federation.yml up -d --build
 #
 #   FEDERATION_STACK_PREFIX   container-name prefix      (default 9router)
 #   FEDERATION_CENTRAL_PORT   central published port     (default 20128)
@@ -24,8 +24,9 @@
 # Only the HOST side moves: the container-side port stays 20128 on all three
 # instances, and FEDERATION_CENTRAL_URL stays http://central:20128 (an
 # in-network service name + container port — host port overrides never touch
-# intra-network traffic). Add `-p <project>` to keep the second stack's
-# project name / volumes separate from the first. See docs/FEDERATION.md §6.1.
+# intra-network traffic). The explicit `-p 9router-federation` keeps this
+# stack's Compose project, network, and named volumes separate from an existing
+# stack, so it cannot reuse that stack's state. See docs/FEDERATION.md §6.1.
 #
 # Topology:
 #   central  — authoritative writer; serves its own dashboard + /v1 + the

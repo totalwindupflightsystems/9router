@@ -208,7 +208,7 @@ tray, and shutdown behavior.
 > `FEDERATION_MODE=edge`: the edge proxy + DEGRADED intercept live only in
 > `custom-server.js`, which the Next.js dev server never loads, so an edge
 > dev boot exits FATAL with a clear message. Use the production path
-> (`npm run build && npm start`) or `docker compose -f
+> (`npm run build && npm start`) or `docker compose -p 9router-federation -f
 > docker-compose.federation.yml up` to run an edge. Central/standalone dev
 > is unaffected.
 
@@ -254,8 +254,9 @@ docker compose up -d
 >
 > The fallback builds the distinct tag `9router:local` (never overwrites
 > `decolua/9router:latest`); details in [DOCKER.md](DOCKER.md).
-> Federation deployments use `docker compose -f docker-compose.federation.yml up`
-> instead (see [docs/FEDERATION.md](docs/FEDERATION.md)).
+> Federation deployments use `docker compose -p 9router-federation -f
+> docker-compose.federation.yml up` instead (see
+> [docs/FEDERATION.md](docs/FEDERATION.md)).
 
 Default URLs:
 
