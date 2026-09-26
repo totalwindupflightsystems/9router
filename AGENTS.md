@@ -109,12 +109,10 @@ patterns containing a slash are anchored to the config's base path, and without 
   tables via `src/lib/db/repos/usageRepo.js`; `src/lib/usageDb.js` is a compat
   shim re-exporting it). Follows `DATA_DIR` like all other state — no separate
   `usage.json`/`log.txt` files remain.
-- **Existing cloud sync** (optional, external service, code NOT in repo):
-  `src/lib/initCloudSync.js`, `src/shared/services/cloudSyncScheduler.js`,
-  `/api/sync/cloud` (enable/sync/disable), `POST /sync/{machineId}`,
-  `GET /{machineId}/v1/verify`, API-key auth + `node-machine-id`.
-  **The federation design decides whether to extend this or build a dedicated
-  federation sync — see `docs/federation-spec.md` (authoritative).**
+- **Cloud sync status:** the former external cloud-sync scheduler and routes are
+  not shipped. `CLOUD_URL` remains only for dashboard URL matching; federation
+  is the supported multi-instance design and is documented in
+  `docs/federation-spec.md`.
 - **Auth**: JWT cookie (`JWT_SECRET`), `INITIAL_PASSWORD`, `API_KEY_SECRET`,
   `MACHINE_ID_SALT`.
 - **Deployment**: Dockerfile + docker-compose (next standalone),

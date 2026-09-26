@@ -16,7 +16,6 @@ Core capabilities:
 - OAuth + API-key provider connection management
 - Local persistence for providers, keys, aliases, combos, settings, pricing
 - Usage/cost tracking and request logging
-- Optional cloud sync for multi-device/state sync
 
 Primary runtime model:
 
@@ -32,11 +31,9 @@ Primary runtime model:
 - Provider authentication and token refresh
 - Request translation and SSE streaming
 - Local state + usage persistence
-- Optional cloud sync orchestration
 
 ### Out of Scope
 
-- Cloud service implementation behind `NEXT_PUBLIC_CLOUD_URL`
 - Provider SLA/control plane outside local process
 - External CLI binaries themselves (Claude CLI, Codex CLI, etc.)
 
@@ -66,10 +63,6 @@ flowchart LR
         P3[Compatible Nodes\nOpenAI-compatible / Anthropic-compatible]
     end
 
-    subgraph Cloud[Optional Cloud Sync]
-        CLOUD[Cloud Sync Endpoint\nNEXT_PUBLIC_CLOUD_URL]
-    end
-
     C1 --> API
     C2 --> API
     C3 --> API
@@ -85,7 +78,6 @@ flowchart LR
     CORE --> P2
     CORE --> P3
 
-    DASH --> CLOUD
 ```
 
 ## Core Runtime Components
@@ -116,7 +108,6 @@ Management domains:
 - OAuth: `src/app/api/oauth/*`
 - Keys/aliases/combos/pricing: `src/app/api/keys*`, `src/app/api/models/alias`, `src/app/api/combos*`, `src/app/api/pricing`
 - Usage: `src/app/api/usage/*`
-- Sync/cloud: `src/app/api/sync/*`, `src/app/api/cloud/*`
 - CLI tooling helpers: `src/app/api/cli-tools/*`
 
 ## 2) SSE + Translation Core
@@ -152,12 +143,6 @@ Usage DB:
 - API key generation/verification: `src/shared/utils/apiKey.js`
 - Provider secrets persisted in `providerConnections` entries
 - Optional proxy support for upstream calls via env proxy variables (`open-sse/utils/proxyFetch.js`)
-
-## 5) Cloud Sync
-
-- Scheduler init: `src/lib/initCloudSync.js`, `src/shared/services/initializeCloudSync.js`
-- Periodic task: `src/shared/services/cloudSyncScheduler.js`
-- Control route: `src/app/api/sync/cloud/route.js`
 
 ## Request Lifecycle (`/v1/chat/completions`)
 
@@ -270,40 +255,6 @@ sequenceDiagram
 
 Refresh during live traffic is executed inside `open-sse/handlers/chatCore.js` via executor `refreshCredentials()`.
 
-## Cloud Sync Lifecycle (Enable / Sync / Disable)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant UI as Endpoint Page UI
-    participant Sync as /api/sync/cloud
-    participant DB as localDb
-    participant Cloud as External Cloud Sync
-    participant Claude as ~/.claude/settings.json
-
-    UI->>Sync: POST action=enable
-    Sync->>DB: set cloudEnabled=true
-    Sync->>DB: ensure API key exists
-    Sync->>Cloud: POST /sync/{machineId} (providers/aliases/combos/keys)
-    Cloud-->>Sync: sync result
-    Sync->>Cloud: GET /{machineId}/v1/verify
-    Sync-->>UI: enabled + verification status
-
-    UI->>Sync: POST action=sync
-    Sync->>Cloud: POST /sync/{machineId}
-    Cloud-->>Sync: remote data
-    Sync->>DB: update newer local tokens/status
-    Sync-->>UI: synced
-
-    UI->>Sync: POST action=disable
-    Sync->>DB: set cloudEnabled=false
-    Sync->>Cloud: DELETE /sync/{machineId}
-    Sync->>Claude: switch ANTHROPIC_BASE_URL back to local (if needed)
-    Sync-->>UI: disabled
-```
-
-Periodic sync is triggered by `CloudSyncScheduler` when cloud is enabled.
-
 ## Data Model and Storage Map
 
 ```mermaid
@@ -399,7 +350,6 @@ flowchart LR
 
     subgraph External[External Services]
         Providers[AI Providers]
-        SyncCloud[Cloud Sync Service]
     end
 
     CLI --> Next
@@ -409,7 +359,6 @@ flowchart LR
     Core --> MainDB
     Core --> UsageDB
     Core --> Providers
-    Next --> SyncCloud
 ```
 
 ## Module Mapping (Decision-Critical)
@@ -425,7 +374,6 @@ flowchart LR
 - `src/app/api/combos*`: fallback combo management
 - `src/app/api/pricing`: pricing overrides for cost calculation
 - `src/app/api/usage/*`: usage and logs APIs
-- `src/app/api/sync/*` + `src/app/api/cloud/*`: cloud sync and cloud-facing helpers
 - `src/app/api/cli-tools/*`: local CLI config writers/checkers
 
 ### Routing and Execution Core
@@ -499,11 +447,6 @@ Translations are selected dynamically based on source payload shape and provider
 - translation stream with end-of-stream flush and `[DONE]` handling
 - usage estimation fallback when provider usage metadata is missing
 
-## 4) Cloud Sync Degradation
-
-- sync errors are surfaced but local runtime continues
-- scheduler has retry-capable logic, but periodic execution currently calls single-attempt sync by default
-
 ## 5) Data Integrity
 
 - DB shape migration/repair for missing keys
@@ -525,7 +468,6 @@ Runtime visibility sources:
 - Initial password fallback (`INITIAL_PASSWORD`, default `123456`) must be overridden in real deployments
 - API key HMAC secret (`API_KEY_SECRET`) secures generated local API key format
 - Provider secrets (API keys/tokens) are persisted in local DB and should be protected at filesystem level
-- Cloud sync endpoints rely on API key auth + machine id semantics
 
 ## Environment and Runtime Matrix
 
@@ -535,7 +477,7 @@ Environment variables actively used by code:
 - Storage: `DATA_DIR`
 - Security hashing: `API_KEY_SECRET`, `MACHINE_ID_SALT`
 - Logging: `ENABLE_REQUEST_LOGS`
-- Sync/cloud URLing: `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_CLOUD_URL`
+- Base URL matching: `BASE_URL`, `CLOUD_URL`, `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_CLOUD_URL`
 - Outbound proxy: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase variants
 - Platform/runtime helpers (not app-specific config): `APPDATA`, `NODE_ENV`, `PORT`, `HOSTNAME`
 
@@ -544,7 +486,7 @@ Environment variables actively used by code:
 1. `usageDb` currently stores under `~/.9router` and does not follow `DATA_DIR`.
 2. `/api/v1/route.js` returns a static model list and is not the main models source used by `/v1/models`.
 3. Request logger writes full headers/body when enabled; treat log directory as sensitive.
-4. Cloud behavior depends on correct `NEXT_PUBLIC_BASE_URL` and cloud endpoint reachability.
+4. Base URL matching depends on the configured base URL variables; federation routing uses the dedicated federation configuration described in `docs/federation-spec.md`.
 
 ## Operational Verification Checklist
 

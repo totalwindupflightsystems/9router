@@ -37,7 +37,7 @@ Deploy the SAME 9router system on multiple instances across datacenters/hosts:
   providerConnections + providerNodes + proxyPools + apiKeys (+ combos/aliases/pricing in
   the same shape). Reuse as the snapshot serialization source.
 - **The "cloud sync" documented in docs/ARCHITECTURE.md does NOT exist in current master.**
-  No `/api/sync/*` route, no `initCloudSync.js`, no `cloudSyncScheduler.js`. Only vestigial
+  No external cloud-sync route or scheduler is shipped. Only vestigial
   `settings.cloudEnabled` + `CLOUD_URL`/`NEXT_PUBLIC_CLOUD_URL` env + UI references
   (`BaseUrlSelect.js`, `KiloToolCard.js`). Federation sync is a FRESH BUILD — do not hunt
   for legacy sync code. (CLAUDE.md/ARCHITECTURE.md are stale on this.)
@@ -125,7 +125,8 @@ LINKED → DEGRADED → RECOVERING → LINKED     (state persisted in federation
   services alive). Dashboard reads → local replica. Mutating dashboard API calls →
   `pendingWrites` queue (idempotency_key dedupe), respond with
   `X-Federation-State: degraded` + `X-Federation-Queued-Write-Id`. Queue capped at
-  `FEDERATION_QUEUE_MAX` (reject with 503 when full). `/api/sync/cloud` actions disabled
+  `FEDERATION_QUEUE_MAX` (reject with 503 when full). Federation is the supported
+  multi-instance synchronization design; no separate external cloud-sync actions exist.
   while degraded.
 - **RECOVERING**: heartbeat succeeds → drain `pendingWrites` to central (replay with
   idempotency keys, reject 409-stale) → catch up deltas → LINKED.
