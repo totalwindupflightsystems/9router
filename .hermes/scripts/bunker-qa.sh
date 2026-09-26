@@ -1614,6 +1614,14 @@ if [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "go" ] && [ -n "\$QA_PREV
   else
     rm -rf ~/qa-up-prev-clone 2>/dev/null
   fi
+elif [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "rust" ] && [ -n "\$QA_PREV_TAG" ]; then
+  # QA-WARPFS-13 (2026-09-26): ship_prev_tag_tree streams the rust arm
+  # (~/qa-up-prev, verified by Cargo.toml) but this cell only consumed it for
+  # go/npm — every tagged rust repo fell through to the generic "no
+  # installable previous release" FAIL. Consume the streamed tree (cargo has
+  # no installable index package; the tree-stream is the only real
+  # previous->HEAD upgrade path for rust).
+  if [ -f "\$HOME/qa-up-prev/Cargo.toml" ]; then UP_PREV="\$HOME/qa-up-prev"; fi
 elif [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "npm" ] && [ -n "\$QA_UP_PREV_DIR" ] && [ -n "\$QA_PREV_TAG" ]; then
   # QA-HEADING-009: host-streamed previous-tag tree (~/qa-up-prev-npm) for
   # non-publishable npm repos — verified by package.json, no clone fallback
@@ -2440,7 +2448,7 @@ case "${1:-}" in
   # re-detects the start command on the agent (the agent-side ladder is the
   # authoritative runtime detection); the hook's default keeps the variable
   # contract complete for tests.
-  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" DETECT_GO_URL="" DETECT_CI_FILES="" DETECT_ACT_NOTE="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
+  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" DETECT_GO_URL="" DETECT_CI_FILES="" DETECT_ACT_NOTE="" DETECT_UP_PREV_DIR="" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
   # QA-CRIER-20 test hook: detect_cmds is a pure function of the repo dir
   # (reads files, sets DETECT_* globals), so this is safe to run against any
   # directory. "$3" defaults to the same placeholder agent __gen-remote uses.
