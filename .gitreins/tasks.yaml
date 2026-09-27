@@ -1386,3 +1386,12 @@ tasks:
   status: complete
   created_at: '2026-09-27T00:40:36.428718+00:00'
   completed_at: '2026-09-27T01:47:16.102670+00:00'
+- id: DF-9ROUTER-40
+  title: Fix chained 9router model prefix normalization and fast unknown-model errors
+  criteria:
+  - Two chained 9routers expose unambiguous model ids that work verbatim in /v1/chat/completions;
+    a typo model id errors in under 5 seconds with a model-scoped message; add regression
+    tests; preserve standalone mode.
+  status: complete
+  created_at: '2026-09-27T05:48:42.172940+00:00'
+  completed_at: '2026-09-27T06:26:31.028268+00:00'
