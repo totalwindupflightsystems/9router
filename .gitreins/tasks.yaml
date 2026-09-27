@@ -1409,5 +1409,6 @@ tasks:
   - cli/README.md documents 9router xai video flags, the requirement for a running
     gateway, and one runnable example verified against cli/src/cli/commands/xaiVideo.js;
     documentation contains no incorrect command or flag claims.
-  status: in_progress
+  status: complete
   created_at: '2026-09-27T09:48:49.717632+00:00'
+  completed_at: '2026-09-27T09:56:58.493383+00:00'
