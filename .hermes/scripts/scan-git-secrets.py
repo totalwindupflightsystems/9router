@@ -464,7 +464,13 @@ PRIORITY_REPOS = [
     "/home/kara/muster",
     "/home/kara/dexdat-memory",
     "/home/kara/Kobayashi-Maru",
-    "/home/kara/frontiers-ghost-audit",  # was /home/kara/frontiers-ghost (renamed Jun 2026; stale path caused FileNotFoundError mislabeled as "timeout")
+    # scan #111 (2026-09-24): the previous value was the path /home/kara/frontiers-ghost-audit,
+    # which does NOT exist on this host → FileNotFoundError raised with cwd=repo_dir, caught by
+    # the generic OSError handler and reported as "Repo timed out (>30s budget)" on EVERY fire
+    # (~10 fires, carried as a bogus "add a REPO_TIMEOUT_OVERRIDES entry" recommendation).
+    # The real repo is /home/kara/frontiers-ghost (exists, last commit 2026-08-06); it is also
+    # discovered by the /home/kara walk — this entry only keeps it priority-scanned.
+    "/home/kara/frontiers-ghost",
 ]
 
 # Repos/dirs to NEVER scan
@@ -552,8 +558,18 @@ def is_false_positive(line, file_path):
 # the pattern's captured group, so every other secret shape on the same line still
 # fires. Applies only to rules that capture a value (the `credential` rule); key-shape
 # rules (sk-, gh[pousr]_, AKIA, telegram) have no group and are never suppressed here.
+# The 2026-09-27T16:04:56Z fire (≈ scan #122): a unit-test fixture `token: "test-token-123"` in
+# ~/duckbrain (asserting the X-API-Key header contract for examples/http-api/client.js)
+# was reported CRITICAL from the .gitreins/history commit patch — the value names
+# itself as a test token, but the suffix rule above required the value to END at
+# `token|key|secret`, so the trailing ordinal ("-123") let it through. Same failure
+# mode as scan #103/#116: it re-fires every scan, drives exit(1), and the cron
+# wrapper reports "Script Error" for a non-secret. A bounded numeric suffix
+# (1-6 digits, optionally hyphen/underscore-joined) is part of a test fixture
+# ordinal, never part of key material — `test-token-1234567` (7 digits) and any
+# alphanumeric tail (`test-token-abc`) still fire.
 PLACEHOLDER_VALUES = re.compile(
-    r'(?i)^(?:e2e|battery|test|dummy|local|scratch|fake)[-_][a-z0-9_-]*(?:token|key|secret)$'
+    r'(?i)^(?:e2e|battery|test|dummy|local|scratch|fake)[-_][a-z0-9_-]*(?:token|key|secret)(?:[-_]?\d{1,6})?$'
 )
 
 
@@ -561,6 +577,29 @@ def is_placeholder_value(match):
     """True when the match's captured VALUE is a self-describing placeholder, not key material."""
     value = match.group(1) if (match.lastindex and match.group(1) is not None) else None
     return bool(value) and bool(PLACEHOLDER_VALUES.match(value))
+
+
+# HTTP header NAME captured as a value (scan #116, 2026-09-26). crier's
+# `const HeaderNamespaceToken = "X-Crier-Namespace-Token"` (internal/namespace/namespace.go,
+# commit 886c3f5, pushed to the PUBLIC github.com/crier-dev/crier) tripped the generic
+# `token\s*[=:]\s*"..."` credential rule as CRITICAL — which also drove the scanner's
+# exit(1) and made the cron wrapper report "Script Error" for a repo whose only "secret"
+# is an HTTP header name that also appears in ~5 sibling constants (X-Crier-Fed-Hop,
+# X-Agent-Sig, X-Agent-ID, X-Request-Id, X-Crier-Namespace).
+#
+# Suppressed by VALUE and only for capture-group rules (the `credential` rule), exactly like
+# PLACEHOLDER_VALUES: every key-shape rule (sk-, gh[pousr]_, AKIA, telegram, xoxb-) has no
+# group and is NEVER suppressed here. Narrowness: the value must start `x-` and consist of
+# 2–6 hyphen-separated ALPHABETIC segments (letters only, no digits, no underscores, no
+# random body). No credential shape does this — the canary `X-Abc-Def1234567890` (digits)
+# and any `sk-`/`ghp_` value still fire.
+HEADER_NAME_VALUES = re.compile(r'^[Xx]-(?:[A-Za-z]+)(?:-[A-Za-z]+){1,5}$')
+
+
+def is_header_name_value(match):
+    """True when the captured VALUE is hyphenated `X-…` header-name text, not key material."""
+    value = match.group(1) if (match.lastindex and match.group(1) is not None) else None
+    return bool(value) and bool(HEADER_NAME_VALUES.match(value))
 
 
 def fp_window(line, match, span=120):
@@ -613,6 +652,12 @@ def scan_repo(repo_dir, since_iso):
             capture_output=True, timeout=repo_timeout(repo_dir), cwd=repo_dir
         )
         stdout_text = result.stdout.decode('utf-8', errors='replace')
+    except FileNotFoundError:
+        # scan #111 (2026-09-24): distinguish a MISSING repo path (stale PRIORITY_REPOS entry)
+        # from a slow repo — both used to surface as "Repo timed out", which sent fires chasing
+        # a non-existent coverage gap. A missing path is a config bug, not a budget problem.
+        return [{'repo': repo_dir, 'type': 'missing_repo', 'severity': 'INFO',
+                 'file': '', 'line': 'Repo path missing — stale entry, no coverage'}]
     except (subprocess.TimeoutExpired, OSError):
         # Print the EFFECTIVE budget (scan #104, 2026-09-21): the old line printed the
         # repo path where the budget belongs, so a future fire could not tell a real
@@ -636,7 +681,8 @@ def scan_repo(repo_dir, since_iso):
             if not m:
                 continue
             excerpt = fp_window(line, m)
-            if is_false_positive(excerpt, current_file) or is_placeholder_value(m):
+            if (is_false_positive(excerpt, current_file)
+                    or is_placeholder_value(m) or is_header_name_value(m)):
                 continue
             findings.append({
                 'repo': repo_dir,
@@ -674,7 +720,8 @@ def scan_plaintext_dir(base_dir, live_env_files):
                             if not m:
                                 continue
                             excerpt = fp_window(line, m)
-                            if is_false_positive(excerpt, fpath) or is_placeholder_value(m):
+                            if (is_false_positive(excerpt, fpath)
+                                    or is_placeholder_value(m) or is_header_name_value(m)):
                                 continue
                             findings.append({
                                 'repo': f'plaintext:{base_dir}',
