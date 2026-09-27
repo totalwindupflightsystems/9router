@@ -1412,3 +1412,12 @@ tasks:
   status: complete
   created_at: '2026-09-27T09:48:49.717632+00:00'
   completed_at: '2026-09-27T09:56:58.493383+00:00'
+- id: DOC-6
+  title: Document operator controls
+  criteria:
+  - Add accurate operator documentation for pxpipe, headroom, tunnel, and shutdown
+    routes, including methods, auth classes, and source anchors; verify docs against
+    the route and guard implementations.
+  status: complete
+  created_at: '2026-09-27T12:45:23.049365+00:00'
+  completed_at: '2026-09-27T13:09:16.303607+00:00'
