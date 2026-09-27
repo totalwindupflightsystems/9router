@@ -462,12 +462,65 @@ Runtime visibility sources:
 - optional deep request/translation logs under `logs/` when `ENABLE_REQUEST_LOGS=true`
 - dashboard usage endpoints (`/api/usage/*`) for UI consumption
 
+### Request-details store (`requestDetails`) and its bounds
+
+While observability is enabled, `src/lib/db/repos/requestDetailsRepo.js`
+buffers deep per-request records (sanitized headers, request/response bodies)
+in memory and writes them to the SQLite `requestDetails` table in batches.
+Four environment variables bound this pipeline. A value saved in dashboard
+settings (`observability*` keys) always wins; the environment variable is the
+fallback when no settings value is present. Config is re-read at most every
+5 seconds.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `OBSERVABILITY_MAX_RECORDS` | `200` | Retention cap. After each flush the table is trimmed back to this many rows by deleting the oldest `timestamp` entries first. Raise it to keep more inspection history; lowering it prunes the existing table on the next flush. |
+| `OBSERVABILITY_BATCH_SIZE` | `20` | Flush threshold. Once this many records sit in the write buffer, a flush is triggered immediately instead of waiting for the interval timer. Higher values batch more writes per transaction; lower values make records visible in the dashboard sooner. |
+| `OBSERVABILITY_FLUSH_INTERVAL_MS` | `5000` | Flush delay. Maximum time (milliseconds) an underrun buffer waits before flushing anyway. Any buffered records are lost if the process dies before a flush; on clean shutdown (`SIGINT`/`SIGTERM`/`exit`) the buffer is flushed once more. |
+| `OBSERVABILITY_MAX_JSON_SIZE` | `5` (KB) | Per-field size cap in kilobytes. Each of the four JSON fields (`request`, `providerRequest`, `providerResponse`, `response`) is serialized and, when it exceeds `OBSERVABILITY_MAX_JSON_SIZE * 1024` bytes, stored truncated: `{ "_truncated": true, "_originalSize": ..., "_preview": <first 200 chars> }`. Note the env value is in **KB**, not bytes — the code multiplies by 1024. |
+
+All four values are read through `parseInt`, so they must be integers.
+Request/response headers are sanitized before storage regardless of these
+bounds (`authorization`, `x-api-key`, `cookie`, `token`, `api-key` keys removed).
+
+### Video proxy fetch timeout (`VIDEO_FETCH_TIMEOUT_MS`)
+
+`open-sse/handlers/videoCore.js` transparently proxies async video jobs
+(creation, edits, extensions, and status polling) to upstream video providers.
+`VIDEO_FETCH_TIMEOUT_MS` sets the deadline, in milliseconds, for each upstream
+HTTP round-trip — job submission and polling calls alike. Default `120000`
+(2 minutes). It bounds only the network call: the video job itself renders
+asynchronously upstream and is never subject to this timeout. The deadline is
+applied via `AbortSignal.timeout` combined with the client's cancellation
+signal. Video job creation is never auto-retried on network failure (the job
+may already exist upstream); only a 401/403 credential refresh triggers a
+single retry. Raise the value only when a video provider is known to answer
+slowly; individual requests can also override it per call.
+
 ## Security-Sensitive Boundaries
 
 - JWT secret (`JWT_SECRET`) secures dashboard session cookie verification/signing
 - Initial password fallback (`INITIAL_PASSWORD`, default `123456`) must be overridden in real deployments
 - API key HMAC secret (`API_KEY_SECRET`) secures generated local API key format
 - Provider secrets (API keys/tokens) are persisted in local DB and should be protected at filesystem level
+- Peer-token proof (`NINEROUTER_PEER_TOKEN`): the production wrapper `custom-server.js`
+  derives the real client IP from the TCP socket and stamps it into `x-9r-real-ip`,
+  stripping any client-supplied copy. Because a bare `next start`/`next dev` never loads
+  the wrapper, code that reads that header first demands proof it was wrapper-stamped:
+  the wrapper also generates a random 24-byte secret per process at boot and mirrors it
+  into `x-9r-peer-token`; `src/lib/auth/trustedPeer.js` accepts `x-9r-real-ip` only when
+  `x-9r-peer-token` matches the process' own secret (a client cannot guess it, and
+  attacker-supplied copies of both headers are stripped before the handler runs). This
+  gates client-IP trust for login rate-limiting (`src/lib/auth/loginLimiter.js`) and
+  loopback checks in the dashboard guard (`src/dashboardGuard.js`).
+
+  Operator implication: the variable is process-internal — set at boot, never read from
+  `.env` (the wrapper overwrites any value it inherits), and never valid across restarts
+  or between processes. Do not set it manually. Behind a reverse proxy, requests reach
+  the wrapper over loopback and keep unspoofable IP attribution automatically; the
+  supported way to declare an external proxy's `X-Forwarded-For` trustworthy is the
+  separate `TRUST_PROXY=true` toggle, not a peer token. The `x-9r-peer-token` header is
+  redacted by the request-details sanitizer before storage.
 
 ## Environment and Runtime Matrix
 
@@ -477,6 +530,12 @@ Environment variables actively used by code:
 - Storage: `DATA_DIR`
 - Security hashing: `API_KEY_SECRET`, `MACHINE_ID_SALT`
 - Logging: `ENABLE_REQUEST_LOGS`
+- Observability bounds: `OBSERVABILITY_MAX_RECORDS`, `OBSERVABILITY_BATCH_SIZE`,
+  `OBSERVABILITY_FLUSH_INTERVAL_MS`, `OBSERVABILITY_MAX_JSON_SIZE` (request-details
+  store; dashboard settings override — see the Observability section above)
+- Process-internal peer proof: `NINEROUTER_PEER_TOKEN` (set by `custom-server.js`,
+  not operator-facing)
+- Video proxy: `VIDEO_FETCH_TIMEOUT_MS` (upstream fetch deadline, `open-sse/handlers/videoCore.js`)
 - Base URL matching: `BASE_URL`, `CLOUD_URL`, `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_CLOUD_URL`
 - Outbound proxy: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase variants
 - Platform/runtime helpers (not app-specific config): `APPDATA`, `NODE_ENV`, `PORT`, `HOSTNAME`
