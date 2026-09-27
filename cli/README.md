@@ -160,6 +160,37 @@ Any tool supporting OpenAI/Claude-compatible API works.
 
 ---
 
+## Generate a video with xAI Grok Imagine
+
+Start the 9Router gateway first, then run the subcommand in another terminal:
+
+```bash
+9router xai video --prompt "A quiet mountain lake at sunrise" --output sunrise.mp4
+```
+
+This subcommand does not start the gateway. By default it connects to `127.0.0.1:20128`, polls until the job finishes, and downloads the MP4 to the output path. The gateway must have an xAI account connected (Grok Build OAuth or an API key). If gateway authentication is enabled, provide a 9Router API key with `--api-key <key>` or `NINE_ROUTER_API_KEY`.
+
+Options:
+
+| Option | Description |
+| --- | --- |
+| `--prompt <text>` | Video description (required). |
+| `--output <file>`, `-o <file>` | Output MP4 path (default: `video.mp4`). |
+| `--model <id>` | Model (default: `xai/grok-imagine-video`). |
+| `--duration <seconds>` | Requested video duration. |
+| `--aspect-ratio <ratio>` | Aspect ratio, e.g. `16:9`, `9:16`, or `1:1`. |
+| `--resolution <res>` | Resolution: `480p`, `720p`, or `1080p`. |
+| `--image <path-or-url>` | Image input for image-to-video. |
+| `--timeout <seconds>` | Maximum wait (default: 600 seconds). |
+| `--host <host>`, `-H <host>` | Gateway host (default: `127.0.0.1`). |
+| `--port <port>`, `-p <port>` | Gateway port (default: `20128`). |
+| `--api-key <key>` | 9Router API key; alternatively set `NINE_ROUTER_API_KEY`. |
+| `--help`, `-h` | Show subcommand help. |
+
+See the exact current option list with `9router xai video --help`.
+
+---
+
 ## 📚 Documentation
 
 Full docs, advanced setup, video tutorials & development guide:
