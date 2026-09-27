@@ -522,6 +522,100 @@ slowly; individual requests can also override it per call.
   separate `TRUST_PROXY=true` toggle, not a peer token. The `x-9r-peer-token` header is
   redacted by the request-details sanitizer before storage.
 
+## Operator Control Surfaces: pxpipe, Headroom, Tunnel, Shutdown
+
+These control routes drive host-level operations — package installs, managed child
+processes, tunnel registration, and server shutdown. Access is decided centrally by the
+dashboard guard (`src/proxy.js` matcher → `src/dashboardGuard.js`) before any route
+handler runs. Three auth classes apply to the routes below:
+
+- **Ordinary dashboard auth** — the deny-by-default rule for all `/api/*` paths
+  (`src/dashboardGuard.js:244-249`): a valid session JWT cookie, a valid CLI token
+  (`x-9r-cli-token`, machine-id derived, `src/dashboardGuard.js:8-21`), or
+  `requireLogin === false` in settings (`src/dashboardGuard.js:201-206`).
+- **Local-only + auth** — routes in `LOCAL_ONLY_PATHS` (`src/dashboardGuard.js:79-95`)
+  additionally require the request itself to be local (`isLocalRequest`,
+  `src/dashboardGuard.js:128-140`: loopback peer proven by the wrapper-stamped
+  `x-9r-real-ip`, or the Host header in development only; a present `Origin` must also
+  be loopback) or carry the CLI token (`canAccessLocalOnlyRoute`,
+  `src/dashboardGuard.js:180-185`). Failure returns `403 "Local only: CLI token
+  required"` (`src/dashboardGuard.js:227`).
+- **Always protected** — `ALWAYS_PROTECTED` (`src/dashboardGuard.js:48-55`): only a
+  valid JWT cookie or CLI token is accepted (`src/dashboardGuard.js:232-236`);
+  `requireLogin === false` does NOT bypass this class.
+
+List membership is prefix-matched (`pathname.startsWith`, `src/dashboardGuard.js:225`),
+so `/api/headroom/proxy` covers the whole catch-all proxy subtree. Note:
+`PROTECTED_API_PATHS` (`src/dashboardGuard.js:58-76`, which lists `/api/tunnel`) is
+declared but never referenced by the guard's decision logic — it neither grants nor
+restricts anything; the three classes above are the operative ones.
+
+With `requireLogin === false`, ordinary-auth and local-only routes are reachable
+without login (local-only ones still from loopback only); `/api/shutdown` alone still
+demands a JWT cookie or CLI token.
+
+### pxpipe (in-process transform library)
+
+Library-mode pxpipe runs in the server process — start/stop/restart load or drop the
+in-process module rather than managing a child process. Despite `install` running the
+package installer on the host, no pxpipe route is in `LOCAL_ONLY_PATHS`
+(`src/dashboardGuard.js:79-95`): all of them use ordinary dashboard auth.
+
+| Route (`src/app/api/pxpipe/`) | Method(s) | Purpose and behavior | Auth class |
+|---|---|---|---|
+| `health` | `POST`, `GET` (alias, `route.js:16`) | Runs the pxpipe health check; GET exists so the dashboard card can probe on page load (`route.js:6-16`). | Ordinary |
+| `install` | `POST` | Installs/reinstalls the package at `@latest`, drops any previously loaded module, re-runs the health check. `maxDuration = 300` — npm install can take minutes on a cold cache (`route.js:7-16`). | Ordinary |
+| `logs` | `GET` | Install-log tail plus recent transform events; `?limit=N`, default 100, capped at 500 (`route.js:7-14`). | Ordinary |
+| `restart` | `POST` | Unloads and reloads the in-process module — picks up an upgraded install without a server restart (`route.js:8-15`). | Ordinary |
+| `start` | `POST` | Warms the in-process module ("start" in library mode). Auto-installs first when the package is missing and `pxpipeAutoInstall` is enabled; otherwise `409 NOT_INSTALLED` (`route.js:12-22`). `maxDuration = 300`. | Ordinary |
+| `stats` | `GET` | Transform statistics; `?limit=N`, default 100, capped at 500 (`route.js:6-13`). | Ordinary |
+| `status` | `GET` | Module status plus pxpipe settings (`enabled`, `autoInstall`, `minChars`, `timeoutMs`) (`route.js:7-17`). | Ordinary |
+| `stop` | `POST` | Drops the in-process module; until started again, transform requests fail open to uncompressed passthrough (`route.js:7-15`). | Ordinary |
+
+### Headroom (external compression proxy)
+
+`start`, `stop`, and the catch-all `proxy` spawn/own host processes or proxy arbitrary
+paths and are therefore local-only. `status`, `restart`, and `extras` are not in
+`LOCAL_ONLY_PATHS` and use ordinary dashboard auth.
+
+| Route (`src/app/api/headroom/`) | Method(s) | Purpose and behavior | Auth class |
+|---|---|---|---|
+| `status` | `GET` | Probes the configured Headroom URL (settings `headroomUrl` or the default) and reports the managed PID (`route.js:8-14`). | Ordinary |
+| `start` | `POST` | Spawns the managed Headroom proxy process. Port comes from `headroomUrl` (default 8787); a non-loopback `headroomUrl` is refused with `400 EXTERNAL_PROXY` — external proxies must be started outside 9Router (`route.js:17-30`). | Local-only + auth |
+| `stop` | `POST` | Stops the managed process; `409` when nothing was running (`route.js:6-10`). | Local-only + auth |
+| `restart` | `POST` | Restarts the managed process with the same non-loopback `headroomUrl` refusal (`route.js:17-30`). Not listed in `LOCAL_ONLY_PATHS` — ordinary auth despite being process-affecting. | Ordinary |
+| `extras` | `GET` | Lists available vs installed compression extras and the detected Python 3.10; `?log=1` returns the live install-log tail for progress polling (`route.js:7-21`). | Ordinary |
+| `extras` | `POST` | Installs the requested extras (JSON body `{ "extras": [...] }`); `400` on `NOT_INSTALLED`/`NO_PYTHON` (`route.js:24-33`). | Ordinary |
+| `extras` | `DELETE` | Uninstalls the requested extras (same body shape); `400` on `NO_PYTHON`/`INVALID_EXTRAS` (`route.js:36-45`). | Ordinary |
+| `proxy/**` | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` (`route.js:98-103`) | Reverse proxy to the configured Headroom URL. Forwards the caller's method and request body (`route.js:65-72`); strips hop-by-hop headers in both directions and deletes `cookie`/`authorization` unless the target host is loopback (`route.js:38-50`); does not follow redirects (`route.js:73`); rewrites `/dashboard` HTML `fetch('/…')` calls to the proxy prefix (`route.js:52-57`, `81-90`). | Local-only + auth |
+
+### Tunnel (Cloudflare tunnel + Tailscale)
+
+The tunnel control routes and all Tailscale routes are local-only — they spawn child
+processes and read host secrets (`src/dashboardGuard.js:78-88`). `status` is read-only
+probing and stays on ordinary dashboard auth.
+
+| Route (`src/app/api/tunnel/`) | Method(s) | Purpose and behavior | Auth class |
+|---|---|---|---|
+| `status` | `GET` | Tunnel + Tailscale probe status behind a 3s coalescing cache (download progress stays live) (`route.js:4-20`). | Ordinary |
+| `enable` | `POST` | Registers/starts the tunnel, restarts tunnel monitoring, then waits 8s for Cloudflare DNS warmup before responding (`route.js:6-16`). | Local-only + auth |
+| `disable` | `POST` | Tears the tunnel down and updates monitoring (`route.js:6-16`). | Local-only + auth |
+| `tailscale-check` | `GET` | Host probes: installed, custom/system daemon running, logged in, brew availability (macOS), cached sudo password; probes run in parallel with 1.5s timeouts (`route.js:37-50`). | Local-only + auth |
+| `tailscale-install` | `POST` | Installs Tailscale and responds with a `text/event-stream` of `progress`/`done`/`error` events (`route.js:36-71`). The sudo password comes from the request body or the encrypted cached password; `400` when a password is required (non-Windows, non-brew platforms) and none is available (`route.js:17-31`). | Local-only + auth |
+| `tailscale-enable` | `POST` | Starts Tailscale and reconfigures monitoring (`route.js:6-16`). | Local-only + auth |
+| `tailscale-disable` | `POST` | Stops Tailscale and updates monitoring (`route.js:6-16`). | Local-only + auth |
+
+### Shutdown
+
+- `POST /api/shutdown` (`src/app/api/shutdown/route.js:4`) — **always protected**: the
+  only route in this section on the `ALWAYS_PROTECTED` list (`src/dashboardGuard.js:48-55`,
+  gate at `src/dashboardGuard.js:232-236`); a valid session JWT cookie or CLI token is
+  required, and `requireLogin === false` does not bypass it. The handler adds its own
+  layers: `403` when `NODE_ENV === "production"` (deliberately disabled in production,
+  `route.js:5-7`), and outside production an `Authorization: Bearer $SHUTDOWN_SECRET`
+  header (`401` when the variable is unset or mismatched, `route.js:9-14`). On success
+  the Node process exits about 500 ms after the response is sent (`route.js:18-20`).
+
 ## Environment and Runtime Matrix
 
 Environment variables actively used by code:
