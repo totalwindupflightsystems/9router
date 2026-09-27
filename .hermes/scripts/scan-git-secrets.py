@@ -444,6 +444,17 @@ FP_PATTERNS = [
     # Keys on the sequential marker only — a real xoxb body is random, so real Slack
     # tokens still trip the slack_token pattern.
     re.compile(r'xox[baprs]-1234567890\d*'),
+    # ── Self-describing OpenRouter-shaped placeholder in a skill reference (2026-09-27) ──
+    # ~/.hermes/skills/devops/gitreins-workflow/references/june2026-pitfalls.md L55 documents the
+    # pre-commit guard with a value that NAMES ITSELF:
+    #   echo 'FOO="sk-or-v1-REDACTED-EXAMPLE-KEY-FORMAT-ONLY"' > src/test_secret.py
+    # (plus its Aug-23 copy under skills.bak-2026-08-23/). is_placeholder_value() cannot suppress
+    # it: that check reads the pattern's CAPTURED GROUP, and key-shape rules (sk-, sk-or-v1-,
+    # gh[pousr]_, AKIA, telegram) capture none — so the placeholder re-fired CRITICAL on every
+    # fire and drove exit(1), which the cron wrapper reported as "Script Error".
+    # Narrow by construction: the body must SPELL a placeholder word immediately after the
+    # `sk-or-v1-` prefix. Real key material is random base62 and never contains those words.
+    re.compile(r'(?i)sk-or-v1-(?:redacted|example|placeholder|dummy|sample|fake)(?:[-_][a-z0-9]+)*'),
 ]
 
 # Repos to ALWAYS scan (the active dev + config repos)
