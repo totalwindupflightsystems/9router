@@ -24,6 +24,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
+import { isOpenAICompatibleProvider } from "@/shared/constants/providers.js";
 
 /**
  * Handle chat completion request
@@ -308,6 +309,28 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     });
 
     if (result.success) return result.response;
+
+    // DF-9ROUTER-40 — on an OpenAI-compatible NODE a 404/406 is model-scoped
+    // by construction: the node's credential demonstrably worked (the request
+    // reached the upstream and was routed), so the model id simply does not
+    // resolve there. A chained 9router reports exactly this with credential
+    // wording — it receives the bare remainder, infers provider `openai` for
+    // the unknown id, and answers "No active credentials for provider:
+    // openai". Left to the generic account classifier, that wording matches
+    // the "no credentials" rule: the VALID connection is cooled down and the
+    // caller waits out the retry window for a misleading answer (measured
+    // ~95s in the 2026-09-24 dogfood). Surface the honest verdict immediately
+    // instead — no cooldown, no next account (every account on this node
+    // speaks to the same upstream), naming the id the caller asked for.
+    // Non-node providers keep the generic classification: their 404 can be a
+    // genuine credential/routing failure and stays account-scoped.
+    if (
+      (result.status === HTTP_STATUS.NOT_FOUND || result.status === HTTP_STATUS.NOT_ACCEPTABLE)
+      && isOpenAICompatibleProvider(provider)
+    ) {
+      log.warn("CHAT", `[${provider}/${model}] upstream node answered ${result.status} — model id does not resolve there (upstream said: ${String(result.error || "").slice(0, 120)})`);
+      return errorResponse(result.status, `Model not found on upstream node: ${modelStr}`);
+    }
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;
