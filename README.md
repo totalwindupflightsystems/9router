@@ -1453,9 +1453,9 @@ Models:
   vertex/gemini-2.5-flash
 
 Vertex Partner (Anthropic / DeepSeek / GLM / Qwen via Vertex):
-  vertex-partner/glm-5-maas
-  vertex-partner/deepseek-v3.2-maas
-  vertex-partner/qwen3-next-80b-a3b-thinking-maas
+  vertex-partner/zai-org/glm-5-maas
+  vertex-partner/deepseek-ai/deepseek-v3.2-maas
+  vertex-partner/qwen/qwen3-next-80b-a3b-thinking-maas
 ```
 
 **Pro Tip:** New Google Cloud accounts get $300 credits free for 90 days. Plenty for daily coding.
@@ -1794,8 +1794,8 @@ Notes:
 - `vertex/gemini-3.1-pro-preview`
 - `vertex/gemini-3-flash-preview`
 - `vertex/gemini-2.5-flash`
-- `vertex-partner/glm-5-maas`
-- `vertex-partner/deepseek-v3.2-maas`
+- `vertex-partner/zai-org/glm-5-maas`
+- `vertex-partner/deepseek-ai/deepseek-v3.2-maas`
 
 </details>
 
