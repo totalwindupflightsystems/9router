@@ -294,6 +294,28 @@ describe("compatible node model listing (DF-9ROUTER-35)", () => {
     expect(listed).toHaveLength(UPSTREAM_IDS.length + 1);
   });
 
+  it("publishes a nested 9router's node-prefixed ids under the child prefix exactly once (DF-9ROUTER-40)", async () => {
+    // The upstream is itself a 9router whose own node uses prefix `dlm`, so its
+    // /v1/models answers `dlm/<id>` (the dogfood's `up/dlm/...` shape). The
+    // child must publish exactly `u9/dlm/<id>` — one prefix added — and that
+    // stacked-but-single id is the one /v1/chat/completions resolves verbatim
+    // (proven end to end in compatible-node-chained-completion.test.js). An id
+    // the upstream echoes already carrying OUR prefix (`u9/dlm/<id>`) is the
+    // same published id again, never `u9/u9/...`.
+    upstream = await startUpstream({
+      ids: ["dlm/qwen3.8-27b", "u9/dlm/deepseek-v4-flash"],
+    });
+    mocks.getProviderConnections.mockResolvedValue([
+      compatibleConnection(upstream.baseUrl),
+    ]);
+
+    const { ids: listed } = await listIds();
+
+    expect(listed).toEqual(["u9/dlm/qwen3.8-27b", "u9/dlm/deepseek-v4-flash"]);
+    expect(listed.some((id) => id.startsWith(`${NODE_PREFIX}/${NODE_PREFIX}/`))).toBe(false);
+    expect(new Set(listed).size).toBe(listed.length);
+  });
+
   it("still answers 200 with the previous behaviour when the upstream rejects the lookup", async () => {
     upstream = await startUpstream({ status: 401 });
     mocks.getProviderConnections.mockResolvedValue([
