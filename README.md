@@ -990,7 +990,7 @@ Create combos with automatic fallback:
 
 ```
 Combo: "my-coding-stack"
-  1. cc/claude-opus-4-6        (your subscription)
+  1. cc/claude-opus-5          (your subscription)
   2. glm/glm-4.7               (cheap backup, $0.6/1M)
   3. if/kimi-k2-thinking       (free fallback)
 
@@ -1155,7 +1155,7 @@ Reality Check:
 
 ```
 Combo: "maximize-claude"
-  1. cc/claude-opus-4-7        (use subscription fully)
+  1. cc/claude-opus-5          (use subscription fully)
   2. glm/glm-5.1               (cheap backup when quota out)
   3. kr/claude-sonnet-4.5      (free emergency fallback)
 
@@ -1187,7 +1187,7 @@ Quality: Production-ready models + RTK saves 20-40% tokens
 
 ```
 Combo: "always-on"
-  1. cc/claude-opus-4-7        (best quality)
+  1. cc/claude-opus-5          (best quality)
   2. cx/gpt-5.5                (second subscription)
   3. glm/glm-5.1               (cheap, resets daily)
   4. minimax/MiniMax-M2.7      (cheapest, 5h reset)
@@ -1337,9 +1337,9 @@ Dashboard → Providers → Connect Claude Code
 → 5-hour + weekly quota tracking
 
 Models:
-  cc/claude-opus-4-7
-  cc/claude-opus-4-6
-  cc/claude-sonnet-4-6
+  cc/claude-opus-5
+  cc/claude-fable-5-1
+  cc/claude-sonnet-5
   cc/claude-haiku-4-5-20251001
 ```
 
@@ -1353,10 +1353,10 @@ Dashboard → Providers → Connect Codex
 → 5-hour + weekly reset
 
 Models:
+  cx/gpt-6-astra
+  cx/gpt-5.6-sol
   cx/gpt-5.5
   cx/gpt-5.4
-  cx/gpt-5.3-codex
-  cx/gpt-5.2-codex
 ```
 
 ### GitHub Copilot
@@ -1489,7 +1489,7 @@ Dashboard → Combos → Create New
 
 Name: premium-coding
 Models:
-  1. cc/claude-opus-4-7 (Subscription primary)
+  1. cc/claude-opus-5 (Subscription primary)
   2. glm/glm-5.1 (Cheap backup, $0.6/1M)
   3. minimax/MiniMax-M2.7 (Cheapest fallback, $0.20/1M)
 
@@ -1525,7 +1525,7 @@ Cost: $0 forever (+ 20-40% token savings via RTK)!
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [from 9router dashboard]
-  Model: cc/claude-opus-4-7
+  Model: cc/claude-opus-5
 ```
 
 Or use combo: `premium-coding`
@@ -1595,7 +1595,7 @@ Dashboard → CLI Tools → OpenClaw → Select Model → Apply
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [from dashboard]
-Model: cc/claude-opus-4-7
+Model: cc/claude-opus-5
 ```
 
 </details>
@@ -1748,19 +1748,19 @@ Notes:
 
 **Claude Code (`cc/`)** - Pro/Max:
 
-- `cc/claude-opus-4-7`
-- `cc/claude-opus-4-6`
-- `cc/claude-sonnet-4-6`
-- `cc/claude-sonnet-4-5-20250929`
+- `cc/claude-opus-5`
+- `cc/claude-fable-5-1`
+- `cc/claude-fable-5`
+- `cc/claude-sonnet-5`
 - `cc/claude-haiku-4-5-20251001`
 
 **Codex (`cx/`)** - Plus/Pro:
 
+- `cx/gpt-6-astra`
+- `cx/gpt-5.6-sol`
 - `cx/gpt-5.5`
 - `cx/gpt-5.4`
-- `cx/gpt-5.3-codex`
-- `cx/gpt-5.2-codex`
-- `cx/gpt-5.1-codex-max`
+- `cx/gpt-5.3-codex-spark`
 
 **GitHub Copilot (`gh/`)**:
 
@@ -1828,7 +1828,7 @@ Notes:
 **Rate limiting**
 
 - Subscription quota out → Fallback to GLM/MiniMax
-- Add combo: `cc/claude-opus-4-7 → glm/glm-5.1 → kr/claude-sonnet-4.5`
+- Add combo: `cc/claude-opus-5 → glm/glm-5.1 → kr/claude-sonnet-4.5`
 
 **OAuth token expired**
 
@@ -1893,7 +1893,7 @@ Authorization: Bearer your-api-key
 Content-Type: application/json
 
 {
-  "model": "cc/claude-opus-4-6",
+  "model": "cc/claude-opus-5",
   "messages": [
     {"role": "user", "content": "Write a function to..."}
   ],
