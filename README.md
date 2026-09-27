@@ -916,7 +916,6 @@ a third party under a provider named "Self-hosted".
 | 🔄 **Auto Token Refresh**                                                         | OAuth tokens refresh automatically                                                       | No manual re-login needed                         |
 | 🎨 **Custom Combos**                                                              | Create unlimited model combinations                                                      | Tailor fallback to your needs                     |
 | 📝 **Request Logging**                                                            | Debug mode with full request/response logs                                               | Troubleshoot issues easily                        |
-| 💾 **Cloud Sync**                                                                 | Sync config across devices                                                               | Same setup everywhere                             |
 | 📊 **Usage Analytics**                                                            | Track tokens, cost, trends over time                                                     | Optimize spending                                 |
 | 🌐 **Deploy Anywhere**                                                            | Localhost, VPS, Docker, Cloudflare Workers                                               | Flexible deployment options                       |
 
@@ -1029,7 +1028,6 @@ Seamless translation between formats:
 - Create unlimited model combinations
 - Mix subscription, cheap, and free tiers
 - Name your combos for easy access
-- Share combos across devices with Cloud Sync
 
 ### 📝 Request Logging
 
@@ -1037,21 +1035,6 @@ Seamless translation between formats:
 - Track API calls, headers, and payloads
 - Troubleshoot integration issues
 - Export logs for analysis
-
-### 💾 Cloud Sync
-
-- Sync providers, combos, and settings across devices
-- Automatic background sync
-- Secure encrypted storage
-- Access your setup from anywhere
-
-#### Cloud Runtime Notes
-
-- Prefer server-side cloud variables in production:
-  - `BASE_URL` (internal callback URL used by sync scheduler)
-  - `CLOUD_URL` (cloud sync endpoint base)
-- `NEXT_PUBLIC_BASE_URL` and `NEXT_PUBLIC_CLOUD_URL` are still supported for compatibility/UI, but server runtime now prioritizes `BASE_URL`/`CLOUD_URL`.
-- Cloud sync requests now use timeout + fail-fast behavior to avoid UI hanging when cloud DNS/network is unavailable.
 
 ### 📊 Usage Analytics
 
@@ -1080,7 +1063,7 @@ Seamless translation between formats:
 ### 🌐 Deploy Anywhere
 
 - 💻 **Localhost** - Default, works offline
-- ☁️ **VPS/Cloud** - Share across devices
+- ☁️ **VPS/Cloud** - Run on any server you control
 - 🐳 **Docker** - One-command deployment
 - 🚀 **Cloudflare Workers** - Global edge network
 
@@ -1711,10 +1694,10 @@ docker pull decolua/9router:latest   # update to latest
 | `PORT`                                               | framework default                        | Service port (`20128` in examples)                                                  |
 | `HOSTNAME`                                           | framework default                        | Bind host (Docker defaults to `0.0.0.0`)                                            |
 | `NODE_ENV`                                           | runtime default                          | Set `production` for deploy                                                         |
-| `BASE_URL`                                           | `http://localhost:20128`                 | Server-side internal base URL used by cloud sync jobs                               |
-| `CLOUD_URL`                                          | `https://9router.com`                    | Server-side cloud sync endpoint base URL                                            |
+| `BASE_URL`                                           | `http://localhost:20128`                 | Server-side public base URL of this instance (used when resolving callback/redirect origins for SAML/OIDC login; falls back to request headers when unset) |
+| `CLOUD_URL`                                          | `https://9router.com`                    | Dashboard URL used by the CLI endpoint presets and URL matching                               |
 | `NEXT_PUBLIC_BASE_URL`                               | `http://localhost:3000`                  | Backward-compatible/public base URL (prefer `BASE_URL` for server runtime)          |
-| `NEXT_PUBLIC_CLOUD_URL`                              | `https://9router.com`                    | Backward-compatible/public cloud URL (prefer `CLOUD_URL` for server runtime)        |
+| `NEXT_PUBLIC_CLOUD_URL`                              | `https://9router.com`                    | Backward-compatible/public dashboard URL fallback (prefer `CLOUD_URL`)             |
 | `API_KEY_SECRET`                                     | `endpoint-proxy-api-key-secret`          | HMAC secret for generated API keys                                                  |
 | `MACHINE_ID_SALT`                                    | `endpoint-proxy-salt`                    | Salt for stable machine ID hashing                                                  |
 | `ENABLE_REQUEST_LOGS`                                | `false`                                  | Enables request/response logs under `logs/`                                         |
