@@ -25,6 +25,22 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
 
+  // A model-specific 404/406 is not an account failure. Keep this decision
+  // ahead of the generic 404 rule so a bad model does not lock a healthy key.
+  // checkComboFallbackError turns the same classification into a model-only
+  // fallback, while account handlers simply surface the original error.
+  const explicitlyModelScoped = MODEL_ERROR_MARKERS.some((marker) => lowerError.includes(marker));
+  if (explicitlyModelScoped && isModelScopedError(status, errorText)) {
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
+
+  // Unsupported media is a property of the request, not the credential. Some
+  // providers return it as 400 rather than 415, and their wording can match a
+  // generic ERROR_RULES entry, so classify it before those rules.
+  if (status === 415 || (status === 400 && /unsupported\s+(?:media|mime)/u.test(lowerError))) {
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
+
   for (const rule of ERROR_RULES) {
     // Text-based rule: match substring in error message
     if (rule.text && lowerError && lowerError.includes(rule.text)) {
