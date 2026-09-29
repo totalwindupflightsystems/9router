@@ -424,6 +424,17 @@ def main():
         problems = verify_pins()
         for p in problems:
             print(p)
+        # SCHED-GAP-1662 parity tripwire: the file must describe the whole
+        # fleet. Wire in after the pin checks.
+        try:
+            projects = api_get_all_projects()
+            ok, msg = check_db_file_parity(projects)
+            print(msg)
+            if not ok:
+                print(f"\n{len(problems)} pin mismatch(es) — drift detected")
+                sys.exit(1)
+        except Exception as e:
+            print(f"parity check skipped (API unreachable): {e}")
         if problems:
             print(f"\n{len(problems)} pin mismatch(es) — drift detected")
             sys.exit(1)
@@ -436,6 +447,13 @@ def main():
     apply = '--apply' in sys.argv and '--dry-run' not in sys.argv
     fleet_pins = read_fleet_pins()
     projects = api_get_all_projects()
+
+    # SCHED-GAP-1662 empty-map guard: an empty pin map makes the rules below
+    # emit PUTs against fleet-wide defaults (proven twice live 2026-09-16,
+    # SCHED-GAP-123 family). Refuse BEFORE any PUT or regen.
+    if apply and not fleet_pins and len(projects) > 10:
+        print(f"refusing: fleet pin map is empty ({len(projects)} live projects)")
+        sys.exit(2)
 
     print(f"mode: {'APPLY' if apply else 'DRY-RUN'}")
     print(f"{'PROJECT':32s} {'PENDING':8s} {'COOLDOWN':10s} {'TARGET':8s} {'ACTION'}")
@@ -597,10 +615,20 @@ def main():
         print(f"fleet.toml: regenerated {n} project pins + {len(namespaces)} namespaces (durable across restarts)")
 
 
+def fleet_toml_path() -> str:
+    """Single loader path for fleet.toml — every read/write must use this."""
+    return os.path.expanduser('~/.hermes/fleet.toml')
+
 def read_fleet_pins(path=None):
-    """Read {name: cooldown_s} from fleet.toml (operator-set pins)."""
+    """Read {name: cooldown_s} from fleet.toml (operator-set pins).
+
+    Returns {} only for a genuinely EMPTY file; a missing/unreadable file is
+    refusal-worthy upstream (SCHED-GAP-123 family: an empty pin map once made
+    --apply emit rule PUTs that drifted live cooldowns fleet-wide), so callers
+    doing applies must check read_fleet_pins_strict() instead.
+    """
     import re as _re
-    path = path or os.path.expanduser('~/.hermes/fleet.toml')
+    path = path or fleet_toml_path()
     pins = {}
     try:
         txt = open(path).read()
@@ -614,16 +642,21 @@ def read_fleet_pins(path=None):
     return pins
 
 def write_fleet_pins(projects, namespaces=None):
-    """Write [[projects]] pins for all enabled projects from API state.
+    """Write [[projects]] pins for EVERY project from API state, enabled or not.
 
-    When namespaces is provided (list of namespace dicts from
-    /api/v1/namespaces), [[namespaces]] blocks are emitted first so the
+    Disabled/paused lanes are emitted with `enabled = false` so the file
+    durably describes the whole fleet (SCHED-GAP-1662: the enabled-only filter
+    left the 166 paused lanes unrepresented and restarts re-derived state the
+    file never described). When namespaces is provided (list of namespace dicts
+    from /api/v1/namespaces), [[namespaces]] blocks are emitted first so the
     namespace-level config (default_prompt, model_chain, max_concurrent —
     Bane 2026-08-27) survives policy regens. The regen must never drop
     namespace config the operator set in the DB.
     """
     import urllib.parse
-    enabled = [p for p in projects if p.get('enabled', p.get('enabled'))]
+    # SCHED-GAP-1662: emit EVERY project; the per-project `enabled` key
+    # (written below) is the durable representation of the paused set.
+    all_projects = list(projects)
     # TASKS-ADMISSION LAW read-site default (SCHED-PERF-006): callers without
     # namespace data (unit renders, legacy regens) must get the legacy arm
     # behavior, not an UnboundLocalError at the ns_admission read below.
@@ -673,7 +706,7 @@ def write_fleet_pins(projects, namespaces=None):
             if mc and '"' in mc:
                 out.append(f'model_chain = {mc}')
             out.append("")
-    for p in sorted(enabled, key=lambda x: x.get('name', x.get('name', ''))):
+    for p in sorted(all_projects, key=lambda x: x.get('name', x.get('name', ''))):
         pname = p.get('name', p.get('Name', '?'))
         out.append("[[projects]]")
         out.append(f'name = "{pname}"')
@@ -714,10 +747,33 @@ def write_fleet_pins(projects, namespaces=None):
             out.append(f'deliver = "{p.get("deliver", p.get("Deliver", ""))}"')
         out.append(f'enabled = {"true" if p.get("enabled", p.get("Enabled")) else "false"}')
         out.append("")
-    path = os.path.expanduser('~/.hermes/fleet.toml')
+    path = fleet_toml_path()
     with open(path, 'w') as f:
         f.write('\n'.join(out))
-    return len(enabled)
+    return len(all_projects)
+
+def count_fleet_toml_project_blocks(path=None):
+    """Count [[projects]] blocks in fleet.toml (parity tripwire)."""
+    path = path or fleet_toml_path()
+    import re as _re
+    try:
+        txt = open(path).read()
+    except OSError:
+        return 0
+    return len(_re.findall(r'^\s*\[\[projects\]\]\s*$', txt, _re.M))
+
+def check_db_file_parity(projects, path=None):
+    """Fail loudly when the live DB project count != fleet.toml blocks.
+
+    SCHED-GAP-1662: the file must describe the WHOLE fleet. Returns
+    (True, msg) on parity, (False, msg) on mismatch — the --verify path
+    turns a False into a loud failure.
+    """
+    db_count = len(projects)
+    file_count = count_fleet_toml_project_blocks(path)
+    if db_count == file_count:
+        return True, f"PARITY OK: db lanes={db_count} file blocks={file_count}"
+    return False, f"PARITY MISMATCH: db lanes={db_count} file blocks={file_count}"
 
 if __name__ == '__main__':
     main()

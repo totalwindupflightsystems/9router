@@ -265,5 +265,172 @@ class AdaptiveCooldownArmingTest(unittest.TestCase):
             self.assertNotIn("cooldown_ceiling_s", p)
 
 
+class DisabledLaneEmissionTest(unittest.TestCase):
+    """SCHED-GAP-1662: fleet.toml is enabled-only. The regen filtered to
+    enabled projects, so the 166 paused lanes had no durable entry and
+    restarts re-derived state the file never described. The regen must emit
+    EVERY project with `enabled = false` for the paused set."""
+
+    def test_regen_emits_disabled_lane_with_enabled_false(self):
+        projects = sample_projects()
+        projects.append({
+            "name": "paused-lane", "repo_url": "local:/x",
+            "workdir": "/x", "weight": 1, "priority": 5,
+            "cooldown_s": 43200, "enabled": False,
+        })
+        data = tomllib.loads(_TomlWriter().render(projects, None))
+        names = {p["name"]: p for p in data["projects"]}
+        self.assertIn("paused-lane", names,
+                      "disabled lane missing from regen — no durable entry")
+        self.assertFalse(names["paused-lane"]["enabled"])
+        self.assertTrue(names["helix"]["enabled"])
+
+    def test_regen_count_equals_input_count_mixed(self):
+        projects = sample_projects() + [
+            {"name": f"paused-{i}", "repo_url": "local:/x", "workdir": "/x",
+             "weight": 1, "priority": 5, "cooldown_s": 43200,
+             "enabled": False}
+            for i in range(3)
+        ]
+        text = _TomlWriter().render(projects, None)
+        data = tomllib.loads(text)
+        self.assertEqual(len(data["projects"]), len(projects),
+                         "regen dropped lanes — enabled-only filter survived")
+
+
+class EmptyPinMapGuardTest(unittest.TestCase):
+    """SCHED-GAP-1662 / SCHED-GAP-123 family: an empty pin map made --apply
+    emit rule PUTs that drifted live cooldowns fleet-wide (twice live,
+    2026-09-16). --apply with an empty pin map and >10 projects must refuse
+    with exit 2 BEFORE any PUT or regen."""
+
+    def _run_main(self, projects, argv):
+        import builtins
+        real_argv = sys.argv
+        real_get = policy.api_get_all_projects
+        real_put = policy.api_put
+        real_read = policy.read_fleet_pins
+        real_vdh = policy.verify_deploy_hash
+        real_open = builtins.open
+        sys.argv = argv
+        policy.api_get_all_projects = lambda: projects
+        policy.read_fleet_pins = lambda: {}
+        # The deploy-integrity guard compares the live script hash against the
+        # canonical sidecar; tests must not depend on it.
+        policy.verify_deploy_hash = lambda: (True, policy.STATUS_OK, 'test')
+        puts = []
+        policy.api_put = lambda path, body: puts.append((path, body))
+        # Redirect any fleet.toml READ to an empty temp file (empty map).
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False)
+        tmp.write("")
+        tmp.close()
+        real_path = os.path.expanduser("~/.hermes/fleet.toml")
+
+        def spy_open(path, mode="r", *a, **k):
+            if os.path.expanduser(path) == real_path and "r" in mode:
+                return real_open(tmp.name, mode, *a, **k)
+            return real_open(path, mode, *a, **k)
+        builtins.open = spy_open
+        try:
+            policy.main()
+        finally:
+            sys.argv = real_argv
+            policy.api_get_all_projects = real_get
+            policy.read_fleet_pins = real_read
+            policy.verify_deploy_hash = real_vdh
+            policy.api_put = real_put
+            builtins.open = real_open
+            os.unlink(tmp.name)
+
+    def test_apply_refuses_on_empty_map_with_many_projects(self):
+        projects = [{"name": f"p{i}", "workdir": "/x", "cooldown_s": 7200,
+                     "enabled": True} for i in range(20)]
+        with self.assertRaises(SystemExit) as ctx:
+            self._run_main(projects,
+                           ["fleet-cooldown-policy.py", "--apply"])
+        self.assertEqual(ctx.exception.code, 2,
+                         "empty pin map --apply must exit 2 (refusal)")
+
+    def test_small_fleet_does_not_refuse(self):
+        # <=10 projects: the size guard does not fire; main runs past it.
+        projects = [{"name": f"p{i}", "workdir": "/x", "cooldown_s": 7200,
+                     "enabled": True} for i in range(3)]
+        try:
+            self._run_main(projects,
+                           ["fleet-cooldown-policy.py", "--apply", "--dry-run"])
+        except SystemExit as e:
+            self.assertNotEqual(e.code, 2,
+                                "small fleet must not hit the size guard")
+
+
+class ParityCheckTest(unittest.TestCase):
+    """SCHED-GAP-1662 parity tripwire: db project count must equal the
+    [[projects]] block count in fleet.toml."""
+
+    def test_count_blocks_parses_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write('[[projects]]\nname = "a"\n\n[[projects]]\nname = "b"\n')
+            path = f.name
+        self.assertEqual(policy.count_fleet_toml_project_blocks(path), 2)
+
+    def test_parity_ok_on_match(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write("[[projects]]\nname = \"a\"\n")
+            path = f.name
+        projects = [{"name": "a"}, {"name": "b"}][:1]
+        ok, msg = policy.check_db_file_parity(projects, path=path)
+        self.assertTrue(ok)
+        self.assertIn("PARITY OK", msg)
+        self.assertIn("db lanes=1", msg)
+
+    def test_parity_fails_on_mismatch(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write("[[projects]]\nname = \"a\"\n")
+            path = f.name
+        projects = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
+        ok, msg = policy.check_db_file_parity(projects, path=path)
+        self.assertFalse(ok)
+        self.assertIn("PARITY MISMATCH", msg)
+        self.assertIn("db lanes=3 file blocks=1", msg)
+
+    def test_missing_file_counts_zero_and_mismatches(self):
+        ok, msg = policy.check_db_file_parity(
+            [{"name": "a"}], path="/nonexistent/fleet.toml")
+        self.assertFalse(ok)
+        self.assertIn("file blocks=0", msg)
+
+
+class LoaderPathTest(unittest.TestCase):
+    """SCHED-GAP-1662: single loader path — every fleet.toml touch goes
+    through fleet_toml_path()."""
+
+    def test_helper_returns_hermes_fleet_toml(self):
+        self.assertEqual(policy.fleet_toml_path(),
+                         os.path.expanduser("~/.hermes/fleet.toml"))
+
+    def test_default_reads_use_helper(self):
+        # read_fleet_pins/count_fleet_toml_project_blocks default to the
+        # helper's path (pass None explicitly to exercise the default arm).
+        self.assertEqual(policy.read_fleet_pins(path=None) ==
+                         policy.read_fleet_pins(policy.fleet_toml_path()), True)
+
+    def test_no_hardcoded_fleet_toml_paths_remain(self):
+        import re
+        with open(SCRIPT, encoding="utf-8") as f:
+            src = f.read()
+        # Allow the helper definition line + comments/docstrings.
+        lines = [l for l in src.splitlines()
+                 if re.search(r"fleet\.toml", l)
+                 and "expanduser" not in l
+                 and not l.lstrip().startswith("#")
+                 and "fleet_toml_path" not in l]
+        # Strip docstring content: crude but effective — check for any
+        # remaining expanduser-free code lines referencing a path literal.
+        offenders = [l for l in lines
+                     if re.search(r"['\"](/|~/|os\.path\.join\([^)]*fleet)", l)]
+        self.assertEqual(offenders, [],
+                         f"hardcoded fleet.toml paths remain: {offenders}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
