@@ -17,3 +17,4 @@
 {"id": "MON-MONITORING-FA5F538B-20260929-RESOLVED", "type": "alert-resolved", "lane": "monitoring", "alertname": "OOMKillsLowPressure", "host": "bunker-mvp", "severity": "warning", "resolved_at": "2026-09-29 00:31:08", "endsAt": "2026-09-29T00:30:08.579Z"}
 {"id": "MON-MONITORING-B8283F46-20260929-RESOLVED", "type": "alert-resolved", "lane": "monitoring", "alertname": "OOMKillsLowPressure", "host": "karahermes-mde-7840hs", "severity": "warning", "resolved_at": "2026-09-29 01:32:38", "endsAt": "2026-09-29T01:31:38.579Z"}
 {"ts":"2026-09-29 10:25:38","type":"pm-fold","row_id":"MON-MONITORING-B3587D82-20260929","note":"PM tick 2026-09-29: closed B3587D82 disk alert (verified live: / 70%, 65G free), folded -RESOLVED twin; new MON-GAP-017 for recurring pre-resolved pending rows"}
+{"ts":"2026-09-29 10:36:00","type":"pm-fold","row_id":"MON-MONITORING-3790B1A3-20260929","note":"PM tick: closed HighLoadPerCore (live: 0.79/core), folded -RESOLVED twin"}
