@@ -1,5 +1,22 @@
 # Unreleased
 
+- fix(ci): add a production build leg to the Test Suite workflow (DF-9ROUTER-47) —
+  CI ran vitest and the federation E2E but never `next build`, so a
+  build-breaking state at HEAD could reach `federation`/`master` unseen. The new
+  `build` job installs lockfile-exact (`npm ci`), runs `npm run build`
+  (`next build --webpack` + the postbuild standalone asset copy), then asserts
+  the artifacts a real deployment consumes — `.next/BUILD_ID`,
+  `.next/standalone/custom-server.js`, `.next/standalone/.next/static`,
+  `.next/standalone/public` — so a build that exits 0 without emitting a
+  runnable standalone output fails the check too. Every step is fatal (no
+  `|| true`, no `continue-on-error`); `NODE_OPTIONS=--stack-trace-limit=50` is
+  set on the job so a build crash prints a deep stack. Background: a 2026-09-25
+  webpack build crashed under load (`uncaughtException TypeError: Cannot read
+  properties of undefined (reading 'length')`, no BUILD_ID) and a clean retry on
+  the identical tree succeeded; 10 consecutive `npm run build` runs at HEAD
+  (loadavg 23–58, NODE_OPTIONS=--stack-trace-limit=50) are all green, i.e. the
+  crash is load-dependent, not tree-dependent.
+
 # v0.6.0-federation.1 (2026-09-24)
 
 First federation-branch release. Cut from `federation` per docs/RELEASE-UPSTREAM-FLOW.md
