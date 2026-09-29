@@ -1483,6 +1483,18 @@ if [ "\$HARNESS_NODE" = ok ]; then
 else
   cell toolchain-bootstrap INFO "HARNESS_NODE=missing — node/npm unavailable (install failed or offline); ui-probe frontend/ arm will grade ENV-BLOCKED on this environment gap, not a repo defect"
 fi
+# QA-MAFIA-AI-BENCHMARK-14 (2026-09-29): pnpm-lock repos rely on `corepack enable`
+# inside the repo's own install step, but corepack has failed silently on several
+# agents (4 consecutive mafia-ai-benchmark cycles: fresh-install/ci-pass native/
+# chaos-resource all rc=127 'pnpm: command not found' while HARNESS_NODE=ok).
+# Best-effort fallback: npm-install pnpm into the same toolchain prefix npm lives in.
+if [ -f pnpm-lock.yaml ] && ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  if ( npm install -g pnpm --no-audit --no-fund ) >\$LOGD/pnpm.log 2>&1 && command -v pnpm >/dev/null 2>&1; then
+    cell toolchain-bootstrap OK "pnpm bootstrapped via npm -g (corepack enable absent/failed)"
+  else
+    echo "WARN: pnpm bootstrap failed (offline agent?) — pnpm repos will grade ENV-BLOCKED rc=127: \$(tail -1 \$LOGD/pnpm.log 2>/dev/null)" >&2
+  fi
+fi
 # Point docker at the agent's own rootless daemon — bare 'docker' defaults to
 # /var/run/docker.sock (rootful, permission-denied for the agent uid) or the
 # user-socket guess /run/user/\$UID/docker.sock (proven chimera-v2 run 09-01).
