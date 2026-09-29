@@ -37,17 +37,24 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/custom-server.js ./custom-server.js
 COPY --from=builder /app/open-sse ./open-sse
-# FED-015 — federation runtime modules for edge mode. Next file tracing does
-# not follow custom-server.js's dynamic imports, so the standalone image
-# ships none of src/lib/federation or the DB driver chain (driver.js ->
-# paths.js -> dataDir.mjs) on its own. Without them FEDERATION_MODE=edge is
-# silently inert (requests fall through to local handlers); custom-server.js
-# now refuses to boot when they are missing.
-COPY --from=builder /app/src/lib/federation ./src/lib/federation
-COPY --from=builder /app/src/lib/db ./src/lib/db
-COPY --from=builder /app/src/lib/dataDir.mjs ./src/lib/dataDir.mjs
-# Next file tracing can omit sibling files; MITM runs server.js as a separate process.
-COPY --from=builder /app/src/mitm ./src/mitm
+# QA-9ROUTER-32 — ship the full src runtime surface. Next file tracing does
+# not follow custom-server.js's dynamic imports, so the standalone image only
+# ever contained a handful of traced src fragments. The reachable set from
+# custom-server.js is: src/lib/federation/{proxy,failover,queue,headers,state,
+# startLoops}.js, src/lib/db/driver.js, and src/sse/services/
+# backgroundTokenRefresh.js — whose transitive chain additionally needs
+# src/sse/utils/logger.js, src/sse/services/tokenRefresh.js, src/lib/localDb.js
+# and src/lib/db/repos/connectionsRepo.js. Without these, clean-machine
+# deploys died MODULE_NOT_FOUND at boot (QA repro, bunker agent + dev box).
+# COPY merges directories with the traced fragments (same bytes, same builder)
+# — it does not clobber them.
+COPY --from=builder /app/src ./src
+# src/sse/services/* import the provider engine via the bare specifier
+# "open-sse/*", which is a build-time alias (jsconfig/next.config). Plain-Node
+# ESM resolves bare specifiers through node_modules only, so link the copied
+# engine in — without this the backgroundTokenRefresh chain still fails even
+# with src/ present (verified with node import probes).
+RUN mkdir -p /app/node_modules && ln -s /app/open-sse /app/node_modules/open-sse
 # Standalone node_modules may omit deps only required by the MITM child process.
 COPY --from=builder /app/node_modules/node-forge ./node_modules/node-forge
 # Ensure `next` is available at runtime in case tracing did not include it.
@@ -57,6 +64,18 @@ COPY --from=builder /app/node_modules/next ./node_modules/next
 COPY --from=builder /app/node_modules/sql.js ./node_modules/sql.js
 # node-machine-id is createRequire-loaded at runtime; tracing omits it.
 COPY --from=builder /app/node_modules/node-machine-id ./node_modules/node-machine-id
+# QA-9ROUTER-32 — npm deps of the now-shipped src runtime surface. The
+# backgroundTokenRefresh -> src/lib/db chain needs uuid at runtime (first
+# post-fix boot logged "Cannot find package 'uuid' ... connectionsRepo.js");
+# bcryptjs/jose/undici/ora/chalk are the other production deps src/lib imports
+# that standalone tracing omits for the same reason (it never followed these
+# files). All six are real `dependencies` entries copied from the builder.
+COPY --from=builder /app/node_modules/uuid ./node_modules/uuid
+COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
+COPY --from=builder /app/node_modules/jose ./node_modules/jose
+COPY --from=builder /app/node_modules/undici ./node_modules/undici
+COPY --from=builder /app/node_modules/ora ./node_modules/ora
+COPY --from=builder /app/node_modules/chalk ./node_modules/chalk
 
 RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \

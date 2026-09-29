@@ -188,28 +188,41 @@ describe("root Dockerfile — reproducible, mirror-free dependency install", () 
     expect(builderText).toContain("NEXT_TELEMETRY_DISABLED=1");
   });
 
-  it("keeps every builder→runner copy the image depends on (federation, MITM, drivers)", () => {
+  it("keeps every builder→runner copy the image depends on (full src surface, MITM, drivers)", () => {
     const required = [
       "/app/public -> ./public",
       "/app/.next/static -> ./.next/static",
       "/app/.next/standalone -> ./",
       "/app/custom-server.js -> ./custom-server.js",
       "/app/open-sse -> ./open-sse",
-      "/app/src/lib/federation -> ./src/lib/federation",
-      "/app/src/lib/db -> ./src/lib/db",
-      "/app/src/lib/dataDir.mjs -> ./src/lib/dataDir.mjs",
-      "/app/src/mitm -> ./src/mitm",
+      // QA-9ROUTER-32: one full-src copy replaces the fine-grained
+      // src/lib/federation + src/lib/db + src/lib/dataDir.mjs + src/mitm
+      // copies — custom-server.js dynamically imports more of src/ than
+      // standalone tracing ships (src/sse/services/backgroundTokenRefresh.js
+      // and its transitive chain), and clean-machine deploys died
+      // MODULE_NOT_FOUND at boot without it.
+      "/app/src -> ./src",
       "/app/node_modules/node-forge -> ./node_modules/node-forge",
       "/app/node_modules/next -> ./node_modules/next",
       "/app/node_modules/sql.js -> ./node_modules/sql.js",
       "/app/node_modules/node-machine-id -> ./node_modules/node-machine-id",
+      // npm deps of the shipped src surface that tracing omits for the same
+      // reason (first post-fix boot died on `uuid` from connectionsRepo.js).
+      "/app/node_modules/uuid -> ./node_modules/uuid",
+      "/app/node_modules/bcryptjs -> ./node_modules/bcryptjs",
+      "/app/node_modules/jose -> ./node_modules/jose",
+      "/app/node_modules/undici -> ./node_modules/undici",
+      "/app/node_modules/ora -> ./node_modules/ora",
+      "/app/node_modules/chalk -> ./node_modules/chalk",
     ];
     for (const entry of required) {
       expect(RUNNER_COPIES).toContain(entry);
     }
-    // Federation runtime modules must still be shipped: without them
-    // FEDERATION_MODE=edge is silently inert.
-    expect(runnerText).toContain("src/lib/federation");
+    // Federation runtime modules ship via the full-src copy above: without
+    // them FEDERATION_MODE=edge is silently inert. The bare "open-sse/*"
+    // specifier is a build-time alias, so plain Node needs a node_modules
+    // link to resolve the backgroundTokenRefresh chain at runtime.
+    expect(runnerText).toMatch(/RUN\s+.*ln\s+-s\s+\/app\/open-sse\s+\/app\/node_modules\/open-sse/);
   });
 
   it("keeps the runtime surface intact (env, port, entrypoint, command, su-exec)", () => {

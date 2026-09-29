@@ -47,5 +47,7 @@ services:
       - "${HEADROOM_PORT:-8787}:8787"
 
 volumes:
-  9router-data:
-    name: 9router-data
+  # No explicit `name:` — compose scopes the volume per project
+  # (<project>_9router-data). A pinned global name made unrelated checkouts
+  # share (and tear down) the same volume (DF-9ROUTER-48 class, QA-9ROUTER-32).
+  9router-data: {}

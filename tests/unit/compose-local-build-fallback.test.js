@@ -125,11 +125,16 @@ describe("docker-compose.yml — default path still deploys the published images
     expect(baseHeadroom).toContain('- "${HEADROOM_PORT:-8787}:8787"');
   });
 
-  it("keeps container names, restart policy, data volume and its name", () => {
+  it("keeps container names, restart policy and the data volume — project-scoped, no pinned global name", () => {
     expect(base9).toContain("container_name: 9router");
     expect(base9).toMatch(/restart: always/);
     expect(base9).toContain("- 9router-data:/app/data");
-    expect(base).toMatch(/^volumes:\n {2}9router-data:\n {4}name: 9router-data$/m);
+    // QA-9ROUTER-32: the volume stays DECLARED but carries no explicit
+    // `name:`, so compose scopes it per project (<project>_9router-data).
+    // A pinned global `name: 9router-data` made unrelated checkouts share
+    // (and tear down) the same volume (DF-9ROUTER-48 class).
+    expect(base).toMatch(/^volumes:\n(?: {2}#[^\n]*\n)* {2}9router-data: \{\}$/m);
+    expect(base).not.toMatch(/^ {4}name: 9router-data$/m);
   });
 
   it("keeps .env optional at config time and embeds no secret itself", () => {
@@ -320,7 +325,11 @@ describe("docker compose render — default vs local-build fallback", () => {
         expect(nine.environment[key]).toBe(value);
       }
       expect(nine.depends_on.headroom.condition).toBe("service_started");
-      expect(config.volumes["9router-data"].name).toBe("9router-data");
+      // QA-9ROUTER-32: no pinned global name — compose derives the real
+      // volume name from the project (basename of the project directory).
+      expect(config.volumes["9router-data"].name).toBe(
+        `${path.basename(REPO_ROOT)}_9router-data`
+      );
     }
   );
 
