@@ -32,6 +32,7 @@ Usage: python3 fleet-cooldown-policy.py [--apply] [--dry-run] [--verify]
                  DB row); exit 1 with `MISMATCH <project> <field>: db=<v>
                  toml=<v>` lines = drift. Read-only, no evaluation loop.
 """
+import hashlib
 import json
 import os
 import re
@@ -40,6 +41,30 @@ import sys
 import urllib.request
 
 API = 'http://127.0.0.1:9090'
+
+# SCHED-GAP-1602 made the scheduler control surface require an operator
+# credential for mutations, but this tool still sent no auth header — so every
+# --apply died with a bare HTTP 401 and the pins below were never enforced
+# (which is how the 'below-fast residue' accumulated fleet-wide: 7 lanes sat at
+# 900s against a 21600 pin). Read the same 0600 env file the daemon loads; when
+# it is absent we send no header, so read-only/older daemons stay usable.
+def _operator_headers():
+    tok = os.environ.get('SCHEDULER_OPERATOR_TOKEN', '')
+    if not tok:
+        try:
+            with open(os.path.expanduser('~/.hermes/scheduler-auth.env'),
+                      errors='replace') as fh:
+                for line in fh:
+                    m = re.match(
+                        r'\s*(?:export\s+)?SCHEDULER_OPERATOR_TOKEN\s*=\s*(.+?)\s*$',
+                        line)
+                    if m:
+                        tok = m.group(1).strip().strip('"').strip("'")
+                        break
+        except OSError:
+            tok = ''
+    return {'X-Operator-Token': tok} if tok else {}
+
 
 # HTTP timeout for every API call. The scheduler's /api/v1/projects response is
 # 18-30s on a loaded box (one row per lane, computed fields included); the
@@ -67,6 +92,20 @@ ELEVATED_PINS = {
     'hermes-canopy-releng': 86400,  # Bane 2026-09-19: releng is 24h, not 6h
     'hermes-dagger': 900,  # Bane 2026-09-15: 15min dagger speed ruling (was living in DB only, drifted fleet.toml back to 7200)
     'hermes-canopy': 21600,  # Bane 2026-09-17: all coding-hermes primaries at 21600 (was 7200 in OPERATOR_7200)
+    # ── Role-lane cadence (supervisor 2026-09-27) ──────────────────────
+    # The role lanes below sit at their namespace's DOMINANT pinned cadence
+    # (dogfood 259200 on 32/32 enabled lanes; review 86400 on 21/24; perf
+    # 86400 on 4/5) but their fleet.toml pins went missing — the 200-lane
+    # page from SCHED-GAP-1622's pagination truncated the regen's input, so
+    # the generic REDUCE rule false-fired on them and would have made them
+    # the only outliers against a uniformly-pinned peer group. Protect the
+    # convention value; do NOT reduce satellites while the fleet is
+    # admission-starved (31 deferrals/24h measurable). Remove an entry to
+    # let the REDUCE rule take the lane to 21600.
+    'bunker-dogfood': 259200,
+    'muster-dogfood': 259200,
+    'bunker-perf': 604800,     # weekly per Bane's review/perf ruling (was hardcoded 86400, disagreeing with the DB pin)
+    'bunker-review': 604800,   # weekly per Bane's review/perf ruling (was hardcoded 86400, disagreeing with the DB pin)
 }
 
 # OPERATOR_7200 — Bane-designated 2h FAST projects (killer projects under active
@@ -194,8 +233,29 @@ def board_pending(workdir):
     return None
 
 def api_get(path):
-    with urllib.request.urlopen(API + path, timeout=HTTP_TIMEOUT) as r:
+    req = urllib.request.Request(API + path, headers=_operator_headers())
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
         return json.loads(r.read())
+
+def api_get_all_projects():
+    """Fetch EVERY project lane, paginating until `total` is covered.
+
+    SCHED-GAP-1622 (commit c531082b, 2026-09-26) paginated
+    /api/v1/projects with a default limit of 200 (max 500) while the fleet
+    runs 501 lanes — a bare GET silently hides ~60% of the fleet, and an
+    --apply regen then rewrites fleet.toml from that truncated view,
+    DELETING the pins of every lane past the alphabetical cutoff (h3,
+    heading, helios, muster, uhlp … zzz). Never call the bare endpoint.
+    """
+    out, offset = [], 0
+    while True:
+        page = api_get(f'/api/v1/projects?limit=500&offset={offset}')
+        rows = page.get('projects', [])
+        out.extend(rows)
+        total = page.get('total')
+        if not rows or total is None or len(out) >= total:
+            return out
+        offset += len(rows)
 
 def api_put(path, body):
     # Every cooldown PUT re-snapshots the adaptive floor to the new pin.
@@ -210,7 +270,8 @@ def api_put(path, body):
         body.setdefault('cooldown_floor_s', body['cooldown_s'])
     req = urllib.request.Request(
         API + path, data=json.dumps(body).encode(),
-        headers={'Content-Type': 'application/json'}, method='PUT')
+        headers={'Content-Type': 'application/json', **_operator_headers()},
+        method='PUT')
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
         return json.loads(r.read())
 
@@ -234,7 +295,7 @@ def verify_pins():
     problems = []
     fleet_pins = read_fleet_pins()
     try:
-        projects = api_get('/api/v1/projects').get('projects', [])
+        projects = api_get_all_projects()
     except Exception as exc:  # scheduler down — cannot certify, fail loud
         return [f"MISMATCH <all> api: db=<unreachable: {exc}> toml=<n/a>"]
     live = {p.get('name', ''): p for p in projects}
@@ -273,7 +334,92 @@ def verify_pins():
     return problems
 
 
+SCRIPT_PATH = os.path.realpath(__file__)
+# CANONICAL_HASH_PATH uses expanduser so HOME-override (tests) redirects the
+# sidecar without breaking SCRIPT_PATH (which must always resolve to the real
+# running file via __file__).
+CANONICAL_HASH_PATH = os.path.join(
+    os.path.expanduser('~/.hermes/scripts'), '.fleet-cooldown-policy.canonical.sha256'
+)
+
+STATUS_BOOTSTRAPPED = 'BOOTSTRAPPED'
+STATUS_OK = 'OK'
+STATUS_MISMATCH = 'MISMATCH'
+
+
+def _sha256_file(path):
+    """Return the hex sha256 of a file."""
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify_deploy_hash():
+    """Check the deployed script against the canonical sidecar.
+
+    Returns (ok: bool, status: str, detail: str).
+      BOOTSTRAPPED — no sidecar; one was written (returns ok=True).
+      OK           — sidecar matches the deployed script.
+      MISMATCH     — sidecar differs; LOUD print to stdout.
+    """
+    deployed_hash = _sha256_file(SCRIPT_PATH)
+    if not os.path.exists(CANONICAL_HASH_PATH):
+        write_canonical_hash(deployed_hash)
+        return True, STATUS_BOOTSTRAPPED, deployed_hash
+    with open(CANONICAL_HASH_PATH) as f:
+        canonical_hash = f.read().strip()
+    if canonical_hash == deployed_hash:
+        return True, STATUS_OK, deployed_hash
+    print('DEPLOY HASH MISMATCH — SCHED-PERF-003')
+    print(f'  deployed : {deployed_hash}')
+    print(f'  canonical: {canonical_hash}')
+    print(f'  The policy script has diverged from its canonical version.')
+    print(f'  If this is intentional, re-canonicalize with --update-canonical.')
+    print(f'  The sync guard (SCHED-PERF-006) blocked overwrite of the live copy.')
+    return False, STATUS_MISMATCH, canonical_hash
+
+
+def write_canonical_hash(deployed_hash=None):
+    """Write the canonical sidecar for the currently deployed script.
+
+    If deployed_hash is None it is read from the deployed script.
+    """
+    if deployed_hash is None:
+        deployed_hash = _sha256_file(SCRIPT_PATH)
+    with open(CANONICAL_HASH_PATH, 'w') as f:
+        f.write(deployed_hash + '\n')
+
+
+def _parse_args():
+    """Minimal argv parser so we can check for --update-canonical."""
+    return {'--update-canonical': '--update-canonical' in sys.argv}
+
+
 def main():
+    # ── Deploy-integrity guard (SCHED-PERF-003 / SCHED-PERF-006) ─────────
+    # Run AFTER argument parsing but BEFORE the pin evaluation on --apply /
+    # --verify paths so a mismatched hash refuses cleanly. --dry-run stays
+    # intentionally tolerant.
+    args = _parse_args()
+
+    if args.get('--update-canonical'):
+        write_canonical_hash()
+        print(f'Canonical hash updated: {_sha256_file(SCRIPT_PATH)}')
+        sys.exit(0)
+
+    if '--verify' in sys.argv or '--apply' in sys.argv:
+        ok, status, detail = verify_deploy_hash()
+        if status == STATUS_BOOTSTRAPPED:
+            print(f'DEPLOY HASH: bootstrapped (new sidecar written)')
+        elif status == STATUS_OK:
+            print(f'DEPLOY HASH: {detail} matches canonical')
+        else:
+            # MISMATCH — refuse before any fleet write
+            sys.exit(1)
+    # ── End deploy-integrity guard ─────────────────────────────────────
+
     if '--verify' in sys.argv:
         problems = verify_pins()
         for p in problems:
@@ -289,7 +435,7 @@ def main():
     # apply (argv membership test below). Dry-run never mutates live state.
     apply = '--apply' in sys.argv and '--dry-run' not in sys.argv
     fleet_pins = read_fleet_pins()
-    projects = api_get('/api/v1/projects').get('projects', [])
+    projects = api_get_all_projects()
 
     print(f"mode: {'APPLY' if apply else 'DRY-RUN'}")
     print(f"{'PROJECT':32s} {'PENDING':8s} {'COOLDOWN':10s} {'TARGET':8s} {'ACTION'}")
@@ -440,7 +586,7 @@ def main():
         # corrected state, not the pre-PUT snapshot. (Proven 2026-08-07:
         # pins for h3/muster/uhlp/dexdat-memory were written stale and
         # would have reverted the reductions on daemon restart.)
-        projects = api_get('/api/v1/projects').get('projects', [])
+        projects = api_get_all_projects()
         # Namespace config must survive the regen too (Bane 2026-08-27:
         # default_prompt / model_chain / max_concurrent are data in the DB).
         namespaces = api_get('/api/v1/namespaces').get('namespaces', [])
@@ -478,6 +624,10 @@ def write_fleet_pins(projects, namespaces=None):
     """
     import urllib.parse
     enabled = [p for p in projects if p.get('enabled', p.get('enabled'))]
+    # TASKS-ADMISSION LAW read-site default (SCHED-PERF-006): callers without
+    # namespace data (unit renders, legacy regens) must get the legacy arm
+    # behavior, not an UnboundLocalError at the ns_admission read below.
+    ns_admission = {}
     out = [
         "# Fleet configuration — cooldown overrides",
         "# These entries ensure cooldowns survive scheduler restarts.",
