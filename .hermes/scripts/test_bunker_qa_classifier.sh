@@ -50,6 +50,32 @@ check "cap applied + rc=1 -> real FAIL"   FAIL       "$(classify_resource 1 3145
 check "cap applied + build incomplete"    INFO       "$(classify_resource 1 3145728 3145728 1)"
 
 echo
+echo "=== vacuous_native_suite (QA-BUNKER-29, 2026-09-30)"
+# Mirror of the harness predicate: a log that carries the no-test-path marker,
+# or no non-whitespace content besides the cap-probe lines, proves the native
+# suite NEVER RAN — rc=0 from it must grade UNVERIFIED, never PASS/OK.
+vacuous_native_suite() { # <logfile> -> 0 when the log proves no suite ran
+  local f="$1"
+  [ -f "$f" ] || return 0
+  if grep -q 'no-test-path' "$f"; then return 0; fi
+  local rest
+  rest=$(grep -vE '^[[:space:]]*$|^(PARENT_CAP|SUBSHELL_CAP|CAP_EFFECTIVE)=' "$f")
+  [ -z "$rest" ]
+}
+TMPD=$(mktemp -d)
+printf 'no-test-path\n' > "$TMPD/native_vacuous.log"
+{ echo '============================= test session starts =============================='; echo 'collected 210 items'; echo 'tests/test_a.py .. [100%]'; echo '210 passed in 3.4s'; } > "$TMPD/native_real.log"
+printf 'PARENT_CAP=unlimited\nSUBSHELL_CAP=3145728\nCAP_EFFECTIVE=3145728 CAP_REQUESTED=3145728\nno-test-path\n' > "$TMPD/res_vacuous.log"
+: > "$TMPD/empty.log"
+{ echo 'PARENT_CAP=unlimited'; echo 'CAP_EFFECTIVE=3145728 CAP_REQUESTED=3145728'; echo 'suite ran, 12 passed'; } > "$TMPD/res_real.log"
+nv() { vacuous_native_suite "$1" && echo vacuous || echo not-vacuous; }
+check "real pytest output -> not vacuous"                 not-vacuous "$(nv "$TMPD/native_real.log")"
+check "res.log cap lines + no-test-path -> vacuous"       vacuous     "$(nv "$TMPD/res_vacuous.log")"
+check "empty log -> vacuous"                              vacuous     "$(nv "$TMPD/empty.log")"
+check "res.log cap lines + real output -> not vacuous"    not-vacuous "$(nv "$TMPD/res_real.log")"
+check "missing file -> treated vacuous (fail-closed)"     vacuous     "$(nv "$TMPD/does-not-exist.log")"
+
+echo
 echo "=== harness lockstep (the predicates above must exist in the harness)"
 if [ -f "$HARNESS" ]; then
   grep -q 'elif \[ \\$disc_rc -eq 127 \]; then cell chaos-disconnect UNVERIFIED' "$HARNESS" \
@@ -61,6 +87,23 @@ if [ -f "$HARNESS" ]; then
   grep -q 'chaos-resource UNVERIFIED "cap NOT applied' "$HARNESS" \
     && check "resource vacuous-result guard present" yes yes \
     || check "resource vacuous-result guard present" yes no
+  # QA-BUNKER-29 (2026-09-30): the vacuous-suite predicate must gate BOTH
+  # success branches before their PASS/OK grading.
+  grep -q 'vacuous_native_suite()' "$HARNESS" \
+    && check "vacuous_native_suite predicate present" yes yes \
+    || check "vacuous_native_suite predicate present" yes no
+  grep -q 'if vacuous_native_suite \\$LOGD/native.log; then' "$HARNESS" \
+    && check "ci-pass vacuous gate present (before OK grading)" yes yes \
+    || check "ci-pass vacuous gate present (before OK grading)" yes no
+  grep -q 'cell ci-pass UNVERIFIED "native suite NEVER RAN (vacuous no-test-path placeholder)' "$HARNESS" \
+    && check "ci-pass UNVERIFIED branch present" yes yes \
+    || check "ci-pass UNVERIFIED branch present" yes no
+  grep -q 'if vacuous_native_suite \\$LOGD/res.log; then' "$HARNESS" \
+    && check "chaos-resource vacuous gate present (before PASS grading)" yes yes \
+    || check "chaos-resource vacuous gate present (before PASS grading)" yes no
+  grep -q 'cell chaos-resource UNVERIFIED "suite NEVER RAN under the cap (vacuous no-test-path)' "$HARNESS" \
+    && check "chaos-resource UNVERIFIED branch present" yes yes \
+    || check "chaos-resource UNVERIFIED branch present" yes no
 else
   echo "  SKIP harness not found at $HARNESS"
 fi

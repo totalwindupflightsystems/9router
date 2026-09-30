@@ -1032,6 +1032,25 @@ grep -m1 -E '(tests?/node_modules is missing|vitest cannot be resolved|Cannot fi
 suite_deps_missing() { # <logfile> — 0 when the log carries the missing-test-deps signature
   [ -n "\$(suite_deps_missing_cause "\$1")" ]
 }
+# vacuous_native_suite — did the native leg run ANY suite at all?
+# (QA-BUNKER-29, 2026-09-30.) Repos matching no shape fall back to the
+# placeholder \`native_cmd="echo no-test-path"\` (detect_cmds): the log holds
+# ONLY the echo output, the command exits 0, and BOTH consumers of that
+# success — ci-pass ("native suite PASS") and chaos-resource ("suite survives
+# 3G memory cap") — graded a suite that NEVER RAN as a product result, six
+# ledger cycles in a row. Same class as build_incomplete/suite_deps_missing:
+# an infra refusal upstream of the suite is never a product verdict. The log
+# is vacuous when it carries the marker itself, or has zero non-whitespace
+# content besides the cap-probe lines (PARENT_CAP=/SUBSHELL_CAP=/CAP_EFFECTIVE=)
+# that the chaos-resource wrapper adds around the command.
+vacuous_native_suite() { # <logfile> -> 0 when the log proves no suite ran
+  local f="\$1"
+  [ -f "\$f" ] || return 0
+  if grep -q 'no-test-path' "\$f"; then return 0; fi
+  local rest
+  rest=\$(grep -vE '^[[:space:]]*\$|^(PARENT_CAP|SUBSHELL_CAP|CAP_EFFECTIVE)=' "\$f")
+  [ -z "\$rest" ]
+}
 # corr_grade — pure chaos-corruption decision. The caller owns truncation,
 # restart, and restoration; this function only grades the observed evidence.
 corr_grade() { # <rc> <logfile> <state_file> <ref_note> <tracked_yes_no>
@@ -1571,7 +1590,13 @@ else
   suite_dur=\$(( suite_end - suite_start ))
   if [ \$nat_rc -eq 0 ]; then
     ACTCTXOK=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTXOK=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
-    if [ "\$ci_rc" = "skip" ]; then
+    # QA-BUNKER-29 (2026-09-30): rc=0 from the `echo no-test-path` placeholder
+    # (or any other empty suite output) is NOT a suite result — nothing ran.
+    # Grade UNVERIFIED before the OK, never a false green on a suite that
+    # never ran. Non-vacuous rc=0 path is unchanged.
+    if vacuous_native_suite \$LOGD/native.log; then
+      cell ci-pass UNVERIFIED "native suite NEVER RAN (vacuous no-test-path placeholder) — no repo signal"
+    elif [ "\$ci_rc" = "skip" ]; then
       cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS"
     else
       cell ci-pass OK "act failed (rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)) — native suite PASS\$ACTCTXOK"
@@ -2026,7 +2051,16 @@ if [ "\$cap_seen" != "\$CAP_KB" ]; then
   # the child did not see the cap: the wrapper was dropped (PATH/shape problem).
   # A result from this run says NOTHING about memory behaviour.
   cell chaos-resource UNVERIFIED "cap NOT applied in the child (\$cap_note) — the suite ran UNCAPPED, so no memory finding either way (harness defect, not a repo result): rc=\$res_rc"
-elif [ \$res_rc -eq 0 ]; then cell chaos-resource PASS "suite survives 3G memory cap (\$cap_note)"
+elif [ \$res_rc -eq 0 ]; then
+  # QA-BUNKER-29 (2026-09-30): rc=0 from the vacuous `echo no-test-path`
+  # placeholder is NOT a cap-survival result — no test ever exercised the cap.
+  # Grade UNVERIFIED, never PASS on a suite that never ran. Non-vacuous rc=0
+  # path unchanged.
+  if vacuous_native_suite \$LOGD/res.log; then
+    cell chaos-resource UNVERIFIED "suite NEVER RAN under the cap (vacuous no-test-path) — the cap was never exercised by any test (\$cap_note)"
+  else
+    cell chaos-resource PASS "suite survives 3G memory cap (\$cap_note)"
+  fi
 elif [ \$res_rc -eq 127 ]; then cell chaos-resource UNVERIFIED "command not found under cap (rc=127, \$cap_note) — the suite NEVER RAN; INFRA-FAIL, not a result: \$(tail -2 \$LOGD/res.log)"
 elif grep -qiE 'killed|out of memory' \$LOGD/res.log; then cell chaos-resource INFO "OOM under cap (expected for heavy suites, \$cap_note): \$(tail -2 \$LOGD/res.log)"
 elif build_incomplete \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the build never completed under the 3G cap, so the cap was NEVER exercised (rc=\$res_rc, \$cap_note; environment or code, never memory) — not a memory finding: \$(build_incomplete_cause \$LOGD/res.log)"
