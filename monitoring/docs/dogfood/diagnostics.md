@@ -75,3 +75,39 @@ fleet-monitor).
 4. Stack changes: edit on the host, back up the file, `docker compose up -d` the
    changed service, prove from outside (curl the port / query the API), copy the
    changed file into this workdir for review.
+
+## The backup surface — how it works, and the two traps that broke it (2026-09-30 run 3)
+
+How it is built: `backup-to-s3.sh` takes a Prometheus TSDB snapshot through the admin
+API (never tar an open TSDB), dumps Grafana through sqlite `.backup` when the image
+has sqlite3 (it does not — see MON-DOGFOOD-011), bundles the host repo with
+`git bundle create --all`, writes a sha256 MANIFEST, uploads with rclone to
+`s3://karahermes-hel/monitoring/<ts>/`, and leaves a `latest` pointer plus a
+node-exporter textfile stamp that Prometheus scrapes as
+`monitoring_backup_last_success_timestamp_seconds` (alert `BackupFreshnessStale`,
+48h, runbook anchor exists). `restore-check.sh` downloads the newest set, verifies
+checksums, `git bundle verify`s the bundle, and tars-tests the snapshot. A systemd
+timer runs both nightly (03:00 UTC +600r) with `EnvironmentFile=.env`.
+
+Trap 1 — two copies of the script: the unit execs the root-level
+`/root/fleet-monitoring/backup-to-s3.sh`; the *fixed* canonical copy lives in
+`scripts/backup-to-s3.sh`. The root-level one still carries the old
+`cd $(dirname $0)` bug, so the nightly bundle silently never happened. When you fix
+a script on the host, deploy BOTH copies (or repoint ExecStart at `scripts/`).
+
+Trap 2 — git under systemd: a oneshot unit gets no PAM env, so `HOME` is unset and
+git's dubious-ownership guard refuses `/root/fleet-monitoring`
+(repro: `env -u HOME git rev-parse --git-dir` → fatal; `HOME=/root` → works). The
+bundle step skips silently and the manifest prints `git_head: none`. Fix at the unit
+(`Environment=HOME=/root`) or in the script (`git -c safe.directory=<repo>`), and
+make restore-check FAIL when the manifest has no bundle — a guard must not pass its
+own missing payload.
+
+The right way to verify a backup leg (learned here): run the real command once
+manually, then `journalctl -u fleet-monitoring-backup.service --since <date>` and
+read the manifest the TIMER produced — not the one your manual run produced. The
+timer's 3-file set vs the manual run's 5-file set was the whole finding; a green
+restore-check on my own successful run would have hidden it.
+
+Metric-text nit worth remembering: the stamp's HELP line reads "uploached" (typo,
+MON-DOGFOOD-011b) — cosmetic, but user-facing metric text ships to every dashboard.
