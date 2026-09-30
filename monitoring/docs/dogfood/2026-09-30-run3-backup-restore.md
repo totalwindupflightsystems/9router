@@ -80,6 +80,9 @@ runbook depends on — with every guard green. Nothing here is slow: timer run
   stale root-level script; restore-check must fail on missing bundle.
 - MON-DOGFOOD-010 (P1) — `make backup` env wiring.
 - MON-DOGFOOD-011 (P2) — grafana live-db tar fallback; HELP typo ("uploached").
+- MON-DOGFOOD-012 (P2, addendum) — the script never prunes its own Prom
+  snapshots: 8 orphan dirs since 09-28, prom-data volume at 483.6MB
+  (live TSDB ~60MB); unbounded growth, same class as MON-CAP-DISK-001.
 - Cross-evidence notes: MON-GAP-010 (working, closeable), MON-GAP-006.
 
 ## Skills this run used and their traps
