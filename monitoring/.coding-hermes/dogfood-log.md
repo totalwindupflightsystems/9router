@@ -29,3 +29,4 @@
 - perf: nothing user-visible slow (timer 15s, manual backup ~60s, restore-check ~15s); no PERF rows
 - left behind: docs/dogfood/2026-09-30-run3-backup-restore.md, diagnostics.md backup section, skills/monitoring-usage/SKILL.md backup section
 - foreman woken: no (cooldown pinned 86400 by fleet-toml-import; rows pending on an enabled lane)
+- addendum (same run): MON-DOGFOOD-012 (P2) — backup-to-s3.sh never prunes its own Prom snapshots: 8 orphan snapshot dirs since 09-28, prom-data volume 483.6MB (live TSDB ~60MB); unbounded growth until disk fills (same class as MON-CAP-DISK-001)
