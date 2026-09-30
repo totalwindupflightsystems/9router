@@ -107,10 +107,17 @@ const installCommands = INSTRUCTIONS.filter(
   (line) => /^RUN\s/.test(line) && /\bnpm\s+(ci|install|i)\b/.test(line),
 );
 
-/** `COPY --from=builder <src> <dest>` pairs in the runner stage. */
+/** `COPY --from=builder <src> <dest>` pairs in the runner stage.
+ * QA-9ROUTER-33: flags are allowed before --from=builder (the runner now
+ * carries --chown=node:node on every copy); the src->dest pair is still
+ * the last two tokens. */
 function builderCopies(text) {
   return instructionLines(text)
-    .map((line) => /^COPY\s+--from=builder\s+(\S+)\s+(\S+)$/.exec(line))
+    .map((line) =>
+      /^COPY\s+(?:(?:--[\w-]+(?:=\S+)?\s+)+)?--from=builder\s+(?:(?:--[\w-]+(?:=\S+)?\s+)*)(\S+)\s+(\S+)$/.exec(
+        line,
+      ),
+    )
     .filter(Boolean)
     .map((match) => `${match[1]} -> ${match[2]}`);
 }
@@ -223,6 +230,20 @@ describe("root Dockerfile — reproducible, mirror-free dependency install", () 
     // specifier is a build-time alias, so plain Node needs a node_modules
     // link to resolve the backgroundTokenRefresh chain at runtime.
     expect(runnerText).toMatch(/RUN\s+.*ln\s+-s\s+\/app\/open-sse\s+\/app\/node_modules\/open-sse/);
+    // QA-9ROUTER-33: ownership is set at COPY time (--chown=node:node on
+    // every builder→runner copy) — the old post-hoc `chown -R node:node
+    // /app` walked the whole image tree (140.2s) and stalled BuildKit's
+    // `exporting to image` with no servable result. The build-time chown
+    // is reduced to the runtime-writable paths.
+    const runnerBuilderCopies = instructionLines(runnerText).filter(
+      (line) => /^COPY\s/.test(line) && line.includes("--from=builder"),
+    );
+    expect(runnerBuilderCopies.length).toBe(RUNNER_COPIES.length);
+    for (const line of runnerBuilderCopies) {
+      expect(line).toContain("--chown=node:node");
+    }
+    expect(runnerText).toMatch(/chown node:node \/app \/app\/data \/app\/data-home/);
+    expect(runnerText).not.toMatch(/^RUN\s.*chown\s+-R\s/);
   });
 
   it("keeps the runtime surface intact (env, port, entrypoint, command, su-exec)", () => {

@@ -1,5 +1,23 @@
 # Unreleased
 
+- fix(docker): make the documented local-build docker path fast and servable
+  (QA-9ROUTER-33). Two fixes: (1) `.dockerignore` gained `**/node_modules`,
+  `**/.next-cli-build`, `.vfs`, `dagger.db*`, `.git`, `.coding-hermes`,
+  `.gitreins`, `.hermes` — the bare `node_modules`/`.next-cli-build` rules only
+  match the context root in docker's ignore matcher, so nested copies
+  (tests/node_modules 67M) and the 960M Next CLI build cache still entered the
+  build context: measured `tar --exclude-from=.dockerignore -cf - .` dropped
+  from 980,940,800 bytes (935 MiB; QA's live run reported `transferring
+  context: 1.14GB`) to 27,351,040 bytes (~26 MiB). (2) The runner stage put
+  `--chown=node:node` on every `COPY --from=builder` line and shrank the
+  recursive `chown -R node:node /app` to the three runtime-writable paths —
+  that layer walked the entire image tree, took 140.2s at HEAD, and under
+  BuildKit the metadata rewrite stalled `exporting to image` so the build
+  never produced a servable `9router:local`. Dependencies shipped via the
+  QA-9ROUTER-32 explicit node_modules list are unchanged; the runtime
+  `/entrypoint.sh` chown of `/app/data /app/data-home` (mounted volumes)
+  is kept.
+
 - fix(ci): add a production build leg to the Test Suite workflow (DF-9ROUTER-47) —
   CI ran vitest and the federation E2E but never `next build`, so a
   build-breaking state at HEAD could reach `federation`/`master` unseen. The new
