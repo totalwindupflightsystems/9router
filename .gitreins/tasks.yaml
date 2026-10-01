@@ -1421,3 +1421,20 @@ tasks:
   status: complete
   created_at: '2026-09-27T12:45:23.049365+00:00'
   completed_at: '2026-09-27T13:09:16.303607+00:00'
+- id: QA-9ROUTER-36
+  title: Fix 4 structurally-broken test files
+  criteria:
+  - '4 test files fail deterministically on every clean run: (1) tests/auth/saml.test.js
+    (2) tests/unit/cline-auth.test.js (3) tests/unit/kimchi-strip-reasoning.test.js
+    use node:test imports which vitest cannot collect (No test suite found); (4) tests/unit/db-benchmark.test.js
+    imports lowdb which is declared in NO package.json. Additionally tests/unit/embeddings.cloud.test.js
+    imports ../../cloud/src/handlers/embeddings.js but no cloud/ dir exists. FIX:
+    convert the 3 node:test files to vitest OR exclude them in vitest config; add
+    lowdb to tests/package.json devDependencies OR drop the test; fix or delete the
+    cloud import. PASS: cd tests && npx vitest run auth/saml.test.js unit/cline-auth.test.js
+    unit/kimchi-strip-reasoning.test.js unit/db-benchmark.test.js unit/embeddings.cloud.test.js
+    -> all files either pass or are excluded with no suite-load errors; full verify-no-regression
+    reports no new failures; the 26 file-fail count drops by 4-5.'
+  status: complete
+  created_at: '2026-10-01T07:07:25.770055+00:00'
+  completed_at: '2026-10-01T07:14:08.816306+00:00'
