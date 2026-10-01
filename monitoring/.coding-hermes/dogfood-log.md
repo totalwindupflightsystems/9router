@@ -30,3 +30,12 @@
 - left behind: docs/dogfood/2026-09-30-run3-backup-restore.md, diagnostics.md backup section, skills/monitoring-usage/SKILL.md backup section
 - foreman woken: no (cooldown pinned 86400 by fleet-toml-import; rows pending on an enabled lane)
 - addendum (same run): MON-DOGFOOD-012 (P2) — backup-to-s3.sh never prunes its own Prom snapshots: 8 orphan snapshot dirs since 09-28, prom-data volume 483.6MB (live TSDB ~60MB); unbounded growth until disk fills (same class as MON-CAP-DISK-001)
+## 2026-10-01 (run 4) | monitoring | PROMISING-BUT-ROUGH (hold)
+- repeat-run angle: verify open run-3 rows against LIVE production timer evidence + fresh-install re-run (005/006 marked done) + chain regression
+- promise: nightly timer ships a restorable set; restore-check refuses un-restorable sets; chain alert→row works both directions
+- reality: timer 10-01 03:09 shipped 3 files, git_head:none, NO bundle — restore-check PASSed anyway (009 reconfirmed on production evidence); make backup still bare (010 open); chain healthy (router 233/116/117, 0 errors, drain appended=0 skipped=192, duplicates dedupe); stack all-up; freshness metric 17.7h fresh
+- install: EXECUTED (bunker-las-03 agent df483f9b, bundle-clone HEAD 08b44cf, destroyed + verified); smoke: restore-check negative path honest rc=1; backup script degraded-graceful except 2 new P2s
+- top findings: MON-DOGFOOD-015 (P1: 009/010 still open 2 nights on, prod evidence attached), MON-DOGFOOD-013 (P2 grafana fallback tar-continue), MON-DOGFOOD-014 (P2 rclone unguarded/undocumented)
+- perf: drain 12.9s, prom query 2.5s — nothing user-visible slow; 122M upload 2m07s = upstream 504s, no PERF row
+- left behind: docs/dogfood/2026-10-01-run4-timer-regression-and-fresh-install.md, rows 013/014/015 (commit 7db304cca)
+- foreman woken: no (cooldown pinned 86400 by fleet-toml-import; rows pending on a live enabled lane)
