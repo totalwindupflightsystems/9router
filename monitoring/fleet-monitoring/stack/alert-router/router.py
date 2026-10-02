@@ -52,11 +52,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("ALERT_ROUTER_PORT", "8089"))
 TOKEN = os.environ.get("ALERT_ROUTER_TOKEN", "")
+PROM_URL = os.environ.get("PROM_URL", "http://prometheus:9090").rstrip("/")
+PROM_UP_TTL = int(os.environ.get("PROM_UP_TTL_SECONDS", "45"))
 BOARD_ROOT = os.environ.get("BOARD_ROOT", "/boards")
 WRITE = os.environ.get("ALERT_ROUTER_WRITE", "0") == "1"
 NOTIFY = os.environ.get("ALERT_ROUTER_NOTIFY", "0") == "1"
 SPOOL = os.environ.get("ALERT_ROUTER_SPOOL", "/spool")
-PROM_URL = os.environ.get("PROM_URL", "http://prometheus:9090").rstrip("/")
 # A slow Prometheus must never hold a webhook open: Alertmanager would time the delivery
 # out and retry the whole batch. Past this budget the check is treated as "unknown".
 PROM_STATE_TIMEOUT = 3.0
@@ -69,6 +70,45 @@ LANE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 SEVERITY_PRIORITY = {"critical": 0, "warning": 1, "info": 2}
 
 _lock = threading.Lock()
+_prom_up_cache = {"ok": False, "ts": 0.0}
+
+
+def prom_target_up(instance, job="integrations/unix", ttl=PROM_UP_TTL):
+    """True if Prometheus currently has a live `up` series for this target.
+
+    Cached for `ttl` seconds: resolution storms (whole hosts flapping) must not
+    turn into a query burst against Prometheus.
+
+    Why: when a node goes dark (power, network, kernel panic) its exporter goes
+    dark with it. Prometheus stops returning samples, the alert fires, then
+    Alertmanager resolves it once no series match — an "absence looks like
+    recovery" false resolution. Verified live 2026-10-02 on bunker-mvp: df
+    showed / 100% full minutes before the host vanished, yet Alertmanager
+    reported the DiskFull alert resolved. A resolution is only real if the
+    monitoring pipeline itself can still see the host.
+    """
+    now = time.time()
+    with _lock:
+        if now - _prom_up_cache["ts"] < ttl:
+            return _prom_up_cache["ok"]
+    ok = False
+    try:
+        q = 'up{instance="%s",job="%s"}' % (instance, job)
+        url = PROM_URL + "/api/v1/query?" + urllib.parse.urlencode({"query": q})
+        with urllib.request.urlopen(url, timeout=4) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace"))
+        series = (body.get("data") or {}).get("result") or []
+        if body.get("status") == "success" and series:
+            ok = any(float(s.get("value", [0, 0])[1]) == 1.0 for s in series)
+    except (ValueError, OSError, KeyError) as exc:
+        log("prom_target_up(%s) query failed: %s" % (instance, exc))
+        ok = False
+    with _lock:
+        _prom_up_cache["ok"] = ok
+        _prom_up_cache["ts"] = now
+    return ok
+
+
 _state_check_blocked_until = 0.0  # monotonic deadline; see STATE_CHECK_BACKOFF
 COUNTERS = {
     "received_total": 0,
@@ -78,6 +118,7 @@ COUNTERS = {
     "rows_pre_resolved_total": 0,
     "rows_statecheck_failed_total": 0,
     "resolved_total": 0,
+    "resolved_suppressed_total": 0,
     "rejected_total": 0,
     "errors_total": 0,
 }
@@ -346,6 +387,15 @@ def handle_alert(alert, when):
     directory = lane_dir(lane)
 
     if status == "resolved":
+        # Guard against "absence looks like recovery" false resolutions: only
+        # record a resolution if Prometheus still has a live `up` series for
+        # this target. A dead exporter must not close a firing alert.
+        instance = labels.get("instance") or labels.get("host") or ""
+        if instance and not prom_target_up(instance, labels.get("job") or "integrations/unix"):
+            bump("resolved_suppressed_total")
+            log("suppressing UNVERIFIED resolution for %s/%s: no live up series (target dark?)"
+                % (labels.get("alertname"), instance))
+            return
         emit_resolution(build_resolution(alert, lane, when), directory)
         return
 
