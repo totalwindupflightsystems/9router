@@ -20,6 +20,7 @@ Usage:
   fleet-topology-audit.py --apply --dry   # show exactly what would be POSTed
 """
 from __future__ import annotations
+import re
 import json, os, sqlite3, subprocess, sys, urllib.error, urllib.request
 
 DB      = os.path.expanduser("~/.hermes/coding-hermes/scheduler.db")
@@ -28,6 +29,9 @@ SKILLS  = os.path.expanduser("~/.hermes/skills")
 
 # Row names that are fleet SERVICES, not planets: they own no moons by design.
 SERVICE_ROWS = {"qa-audit", "release-engineer", "dogfooding", "stand-in"}
+# Service rows in the DB are named <service>-foreman with service-owned moons
+# (<service>-qa etc.) — those moons are NOT real moons of a planet; exclude the base.
+SERVICE_BASES = {re.sub(r"-(?:foreman|worker)$", "", n) for n in SERVICE_ROWS} | {"qa-audit"}
 
 # Satellite LANES that are themselves per-project rows: a -review or -perf row is a MOON of its
 # planet (per fleet.toml), never a planet needing moons of its own. classify() excludes rows
@@ -92,7 +96,13 @@ def classify(all_rows):
             debris[n] = r; continue
         for lane in LANES:
             if n.endswith("-" + lane):
-                moons.setdefault(n[: -(len(lane) + 1)], {})[lane] = r
+                # strip the lane suffix, then any -foreman/-worker row-suffix: the DB
+                # convention is planet row <base>-foreman with moons <base>-<lane>.
+                base = re.sub(r"-(?:foreman|worker)$", "", n[: -(len(lane) + 1)])
+                if base in SERVICE_BASES:
+                    debris[n] = r  # service-owned row, not a moon of a planet
+                else:
+                    moons.setdefault(base, {})[lane] = r
                 break
         else:
             # a -review / -perf row is itself a satellite lane of its planet — not a planet
@@ -104,7 +114,11 @@ def classify(all_rows):
             if n.endswith(DOCS_LANE_SUFFIXES):
                 debris[n] = r
                 continue
-            planets[n] = r
+            # planets are rows named <base>, <base>-foreman (or <base>-worker);
+            # key them by base so moon lookup matches
+            base = re.sub(r"-(?:foreman|worker)$", "", n)
+            if base not in SERVICE_BASES:
+                planets.setdefault(base, r)
     return planets, moons, debris
 
 
@@ -150,11 +164,11 @@ def build_payload(planet, lane, all_rows):
     skill, wd_t, w, pr, cd = MOONS[lane]
     tmpl = next((r for r in all_rows
                  if r["enabled"] and r["name"].endswith("-" + lane)
-                 and r["name"][: -(len(lane) + 1)] != planet
+                 and re.sub(r"-(?:foreman|worker)$", "", r["name"][: -(len(lane) + 1)]) != planet
                  and (r["prompt"] or "")), None)
     if not tmpl:
         return None, f"no enabled sibling template for lane '{lane}'"
-    src_p = tmpl["name"][: -(len(lane) + 1)]
+    src_p = re.sub(r"-(?:foreman|worker)$", "", tmpl["name"][: -(len(lane) + 1)])
     out = dict(tmpl)
     out["name"] = f"{planet}-{lane}"
     out["repo_url"] = f"local:/home/kara/{planet}"
@@ -178,10 +192,26 @@ def build_payload(planet, lane, all_rows):
     return out, None
 
 
+def _operator_headers():
+    """SCHED-GAP-1602: mutations require X-Operator-Token (same fix as fleet-cooldown-policy.py)."""
+    import os, re as _re
+    tok = os.environ.get('SCHEDULER_OPERATOR_TOKEN', '')
+    if not tok:
+        try:
+            with open(os.path.expanduser('~/.hermes/scheduler-auth.env'), errors='replace') as fh:
+                for line in fh:
+                    m = _re.match(r"\s*(?:export\s+)?SCHEDULER_OPERATOR_TOKEN\s*=\s*(.+?)\s*$", line)
+                    if m:
+                        tok = m.group(1).strip().strip('"').strip("'")
+                        break
+        except OSError:
+            tok = ''
+    return {'X-Operator-Token': tok} if tok else {}
+
 def post_project(payload):
     body = json.dumps(payload).encode()
     req = urllib.request.Request(f"{API}/projects", data=body, method="POST",
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json", **_operator_headers()})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return resp.status, resp.read().decode()[:300]
@@ -192,7 +222,8 @@ def post_project(payload):
 
 def resume_project(name):
     """Resume a disabled lane row (the scheduler's own verb — keeps its workdir/reason)."""
-    req = urllib.request.Request(f"{API}/projects/{name}/resume", data=b"", method="POST")
+    req = urllib.request.Request(f"{API}/projects/{name}/resume", data=b"", method="POST",
+                                headers=_operator_headers())
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return resp.status, resp.read().decode()[:200]
