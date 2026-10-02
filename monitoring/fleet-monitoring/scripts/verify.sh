@@ -25,6 +25,14 @@ if [ -f .env ]; then
   set +a
 fi
 
+# Endpoints are overridable so this gate can verify a stack published on non-default host
+# ports (an isolated `-p <project>` run on a shared box, a port remap, an SSH tunnel). The
+# defaults are exactly the compose file's loopback publications.
+PROM_URL="${PROM_URL:-http://127.0.0.1:9090}"
+LOKI_URL="${LOKI_URL:-http://127.0.0.1:3100}"
+GRAFANA_URL="${GRAFANA_URL:-http://127.0.0.1:3000}"
+ROUTER_URL="${ROUTER_URL:-http://127.0.0.1:8089}"
+
 fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; fail=1; }
@@ -60,9 +68,9 @@ else
 fi
 
 echo "== 2. prometheus has samples =="
-q() { curl -sf --max-time 10 "http://127.0.0.1:9090/api/v1/query" --data-urlencode "query=$1"; }
+q() { curl -sf --max-time 10 "$PROM_URL/api/v1/query" --data-urlencode "query=$1"; }
 if ! q 'up' >/dev/null 2>&1; then
-  bad "prometheus API not answering on 127.0.0.1:9090"
+  bad "prometheus API not answering on $PROM_URL"
 else
   for metric in node_boot_time_seconds node_filesystem_avail_bytes; do
     n=$(q "count($metric)" | python3 -c 'import json,sys
@@ -80,7 +88,7 @@ except Exception: print(0)' 2>/dev/null)
 fi
 
 echo "== 3. prometheus rules loaded =="
-rules=$(curl -sf --max-time 10 http://127.0.0.1:9090/api/v1/rules \
+rules=$(curl -sf --max-time 10 "$PROM_URL/api/v1/rules" \
   | python3 -c 'import json,sys
 try:
     g=json.load(sys.stdin)["data"]["groups"]
@@ -89,16 +97,16 @@ except Exception: print(0)' 2>/dev/null)
 if [ "${rules:-0}" -gt 0 ]; then ok "$rules alert rules loaded"; else bad "no alert rules loaded"; fi
 
 echo "== 4. loki has streams =="
-if ! curl -sf --max-time 10 http://127.0.0.1:3100/ready >/dev/null 2>&1; then
+if ! curl -sf --max-time 10 "$LOKI_URL/ready" >/dev/null 2>&1; then
   bad "loki /ready did not answer"
 else
-  streams=$(curl -sf --max-time 10 'http://127.0.0.1:3100/loki/api/v1/labels' \
+  streams=$(curl -sf --max-time 10 "$LOKI_URL/loki/api/v1/labels" \
     | python3 -c 'import json,sys
 try: print(len(json.load(sys.stdin).get("data") or []))
 except Exception: print(0)' 2>/dev/null)
   if [ "${streams:-0}" -gt 0 ]; then
     ok "loki label set has $streams entries"
-    curl -sf --max-time 10 'http://127.0.0.1:3100/loki/api/v1/query?query=%7Bjob%3D%22docker%22%7D&limit=1' >/dev/null 2>&1 \
+    curl -sf --max-time 10 "$LOKI_URL/loki/api/v1/query?query=%7Bjob%3D%22docker%22%7D&limit=1" >/dev/null 2>&1 \
       && ok "loki query returns" || info "loki query ok but empty (no docker logs yet)"
   else
     bad "loki has no labels — nothing is being shipped"
@@ -108,17 +116,17 @@ fi
 echo "== 5. grafana + datasources =="
 gpw="${GRAFANA_PASSWORD:-}"
 gu="${GRAFANA_USER:-admin}"
-if curl -sf --max-time 10 "http://127.0.0.1:3000/api/health" >/dev/null 2>&1; then
+if curl -sf --max-time 10 "$GRAFANA_URL/api/health" >/dev/null 2>&1; then
   ok "grafana health endpoint"
   if [ -n "$gpw" ]; then
     for ds in Prometheus Loki; do
-      if curl -sf --max-time 10 -u "$gu:$gpw" "http://127.0.0.1:3000/api/datasources/name/$ds" >/dev/null 2>&1; then
+      if curl -sf --max-time 10 -u "$gu:$gpw" "$GRAFANA_URL/api/datasources/name/$ds" >/dev/null 2>&1; then
         ok "datasource $ds provisioned and answering"
       else
         bad "datasource $ds not answering (check API /api/datasources/name/$ds)"
       fi
     done
-    nd=$(curl -sf --max-time 10 -u "$gu:$gpw" "http://127.0.0.1:3000/api/search?type=dash-db" \
+    nd=$(curl -sf --max-time 10 -u "$gu:$gpw" "$GRAFANA_URL/api/search?type=dash-db" \
       | python3 -c 'import json,sys
 try: print(len(json.load(sys.stdin)))
 except Exception: print(0)' 2>/dev/null)
@@ -127,11 +135,11 @@ except Exception: print(0)' 2>/dev/null)
     info "GRAFANA_PASSWORD unset — skipping datasource checks"
   fi
 else
-  bad "grafana health endpoint not answering on 127.0.0.1:3000"
+  bad "grafana health endpoint not answering on $GRAFANA_URL"
 fi
 
 echo "== 6. alert-router =="
-if ar=$(curl -sf --max-time 10 http://127.0.0.1:8089/health 2>/dev/null); then
+if ar=$(curl -sf --max-time 10 "$ROUTER_URL/health" 2>/dev/null); then
   mode=$(echo "$ar" | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("write_mode","?"))
 except Exception: print("?")' 2>/dev/null)
