@@ -1,0 +1,170 @@
+tasks:
+- id: infra-gr-04-verify
+  title: Verify GitReins JUDGE pipeline works after INFRA-GR-04
+  criteria:
+  - sdk-python .gitreins/config.yaml has pipeline.stages with tier1 guard + tier2
+    ai_eval stage
+  - sdk-python .gitreins/config.yaml has evaluator section with deepseek-v4-flash
+    model
+  - gitreins judge evaluates task and returns PASS/FAIL per criterion
+  status: in_progress
+  created_at: '2026-07-26T14:57:33.339222+00:00'
+- id: GAP-048
+  title: 'Exec-level audit via snoopy: install-exec-audit.sh + docs/exec-audit.md'
+  criteria:
+  - 'scripts/install-exec-audit.sh installs and configures snoopy on bunker hosts
+    (idempotent, re-run is a no-op, root); docs/exec-audit.md documents uid-to-agent-id
+    correlation and journalctl query patterns. PASS: script + docs committed; script
+    is idempotent (second run exits 0 with no changes); docs contain uid correlation
+    + journalctl examples.'
+  status: complete
+  created_at: '2026-08-23T23:14:05.275153+00:00'
+  completed_at: '2026-08-23T23:18:02.283267+00:00'
+- id: U-GAP-050
+  title: Code nodes are unwired in production - every DAG using a code node aborts
+    with 503 ErrHandlerNotConfigured; newWorkflowExecutor registers only SetLLMHandler
+  criteria:
+  - 'PASS: a DAG containing a code node either executes it (python snippet runs) or
+    fails with an explicit 501-style error naming the missing capability; docs/authoring.md
+    states the actual behavior.'
+  status: in_progress
+  created_at: '2026-08-25T14:07:35.841752+00:00'
+- id: SCHED-GAP-145
+  title: Reap stale 'queued' rows on startup (SCHED-GAP-145)
+  criteria:
+  - 'AC1: queued tick with spawned_at older than 2*tick_timeout reaped to status=timeout+completed_at,
+    outcome unset; AC2: fresh queued tick untouched; AC3: active_ticks excludes reaped
+    rows; AC4: fixture DB with 7 stale rows reports active_ticks=0 after startup;
+    AC5: RED-mutation (drop WHERE filter) makes AC1 fail; AC6: new function called
+    from loop.go startup path'
+  status: complete
+  created_at: '2026-09-18T16:10:36.008748+00:00'
+  completed_at: '2026-09-18T16:29:25.262376+00:00'
+- id: TR-TEST
+  title: test
+  criteria:
+  - test
+  status: pending
+  created_at: '2026-09-18T17:02:38.233336+00:00'
+- id: SCHED-GAP-181
+  title: 'commit staged /home/kara ops: TASKS-ADMISSION LAW + admission_mode + releng
+    pin'
+  criteria:
+  - ELEVATED_PINS hermes-dagger=900 (Bane 2026-09-15 15min ruling); cooldown-policy
+    --verify exits 0; 6 files committed on top of f460fea; working tree clean for
+    those paths
+  status: complete
+  created_at: '2026-09-20T02:15:32.239469+00:00'
+  completed_at: '2026-09-20T02:40:11.115616+00:00'
+- id: QA-BUNKER-19
+  title: bunker-qa.sh cleanup must surface destroy failures and verify post-destroy
+    absence (QA-BUNKER-19 items b+c)
+  criteria:
+  - '1) bash -n clean and ''bunker-qa.sh status'' still works; 2) no ''|| true'' swallow
+    on any bunker destroy call in cleanup/collect paths - each failure logs a line
+    containing ''destroy FAILED'' and appends a FAIL evidence row when an evidence
+    file is in play; 3) live probe: destroying a nonexistent id produces the loud
+    warning + evidence row, zero agent residue left on the server; 4) qa16 retry-loop
+    contract intact (ssh reachability gate + destroyed-before-retry); 5) script committed
+    to ops repo with only that file staged'
+  status: complete
+  created_at: '2026-09-21T02:58:13.022358+00:00'
+  completed_at: '2026-09-21T03:26:30.059053+00:00'
+- id: sdkts-qa-foreman-7
+  title: Real SDK failure-mode chaos probes for sdk-typescript QA cells
+  criteria:
+  - "QA chaos-corruption/errorpath cells for get-h3/sdk-typescript stop exercising\
+    \ wrong artifacts and instead exercise real SDK failure modes, with evidence-based\
+    \ grading: (1) a repo-owned probe (qa/ dir or .qa/chaos-probes) is added to sdk-typescript\
+    \ that deliberately exercises real SDK failure modes \u2014 handler exception\
+    \ \u2192 masked end(error) 200 decision (documented masking contract), invalid\
+    \ decision schema rejection, and missing-config entrypoint behavior via a proper\
+    \ ESM import of dist/ (never bare node src/index.js); (2) the harness bunker-qa.sh\
+    \ gains a GENERIC opt-in project-probe hook: when .qa/chaos-probes/<cell>.sh exists\
+    \ and is executable the chaos cells run it and grade from its exit code + named\
+    \ output file (N/A when absent \u2014 zero behavior change for the other 60+ projects),\
+    \ the harness never hardcodes any project name; (3) the harness keeps its existing\
+    \ generic vacuous-rc=1 grading (no project names added to shared code); (4) probe\
+    \ scripts are POSIX sh, self-contained, and prove their failure mode live in the\
+    \ task's own verification run (probes executed, outputs captured); (5) all existing\
+    \ gates stay green: sdk-typescript npm suite 183/183, lint, count guard; (6) board\
+    \ row + gitreins task completed with verdict."
+  status: complete
+  created_at: '2026-09-23T10:22:03.752016+00:00'
+  completed_at: '2026-09-23T10:59:43.714415+00:00'
+- id: QA9-HARNESS-RUNNER
+  title: bunker-qa.sh never provisions pytest for pip-based repos
+  criteria:
+  - 1) venv bootstrap installs pytest for pyproject repos (fresh + stale-venv top-up);
+    2) native_runner_missing_cause predicate baked into remote script, matching the
+    09-23 evidence line and rejecting real suite output; 3) ci-pass native leg grades
+    runner-missing runs UNVERIFIED instead of FAIL; 4) bash -n clean; 5) test_bunker_qa_classifier.sh
+    introduces NO NEW failures vs the HEAD~1 baseline (the 2 pre-existing QA_GO_URL
+    failures are environmental and must stay byte-identical, proven by diff); 6) __gen-remote
+    emission carries the pytest provisioning + runner guard (when the go-image probe
+    can run; heredoc-clean otherwise); 7) commit touches ONLY the QA-9 hunks in bunker-qa.sh
+    (sibling work not swept)
+  status: complete
+  created_at: '2026-09-25T02:34:36.478040+00:00'
+  completed_at: '2026-09-25T02:34:42.043274+00:00'
+- id: SCHED-GAP-177
+  title: Record output metrics for non-code lanes
+  criteria:
+  - Every enabled lane shows a non-null output count for its family on the board;
+    a lane with zero recorded output across >=8 consecutive ticks raises a HIGH event
+    naming it.
+  status: in_progress
+  created_at: '2026-09-27T00:12:42.892074+00:00'
+- id: CLN-1
+  title: 'Repo hygiene: clean up project folder structure'
+  criteria:
+  - 'Bane directive 2026-09-06: one folder-structure cleanup task per fleet project.
+    Inventory tracked root files/dirs vs the documented layout (README/AGENTS.md/docs),
+    find junk or misplaced artifacts (stray outputs, stale scripts, orphaned configs),
+    grep tests/ and CI configs before removing anything, move or archive the rest,
+    and record intentional exceptions in repo docs. Do not touch auto-generated provider
+    registries or perpetual fixtures (NEVER-DONE/E2E-001).'
+  status: complete
+  created_at: '2026-09-27T03:42:04.041536+00:00'
+  completed_at: '2026-09-27T04:08:06.342782+00:00'
+- id: GAP-098
+  title: 'P2 -  does not surface the named symbols of a flow on some repos: 1/4 key
+    flow symbols on flask and gin (bat 4/4, express 3/3, vitest 3/3); capability is
+    at parity with scc, not ahead'
+  criteria:
+  - Improve  to surface named symbols of a flow in all repos.
+  status: in_progress
+  created_at: '2026-09-27T03:44:04.922536+00:00'
+- id: MON-GAP-001
+  title: Add Tempo to monitoring stack
+  criteria:
+  - tempo healthy on its port; test trace posted to OTLP port retrievable by trace
+    id through Tempo API and visible in Grafana; datasource list reprovisionable from
+    files
+  status: in_progress
+  created_at: '2026-10-02T02:33:35.321474+00:00'
+- id: MON-GAP-002
+  title: Add Pyroscope continuous profiles
+  criteria:
+  - flame graph for at least one instrumented target shows stack frames naming functions;
+    profile ingestion visible in pyroscope metrics
+  status: in_progress
+  created_at: '2026-10-02T02:33:36.358485+00:00'
+- id: MON-MONITORING-403C290E-20261002
+  title: DiskFull bunker-mvp 0.9567% free
+  criteria:
+  - host disk freed, alert cleared, no home_retained refusals
+  status: complete
+  created_at: '2026-10-02T04:41:39.831841+00:00'
+  completed_at: '2026-10-02T04:43:47.797272+00:00'
+- id: QA-MONITORING-006
+  title: verify.sh distinguishes stack-never-started from stack-not-collecting + Makefile
+    build target for QA fresh-install
+  criteria:
+  - 'fresh-install battery cell no longer fails with the ambiguous ''no containers
+    found'' repo-defect grade: verify.sh states the cause distinctly, Makefile gains
+    a build: target the QA harness can use as install step, changed files copied to
+    lane workdir and committed'
+  status: complete
+  created_at: '2026-10-02T08:56:16.564232+00:00'
+  completed_at: '2026-10-02T09:01:30.782443+00:00'
