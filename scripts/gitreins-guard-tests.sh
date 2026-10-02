@@ -9,6 +9,22 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Board-only commits skip the suite. The foreman's JSONL board chores
+# (.coding-hermes/{tasks,events,board}.jsonl) cannot change product code, yet
+# they made up ~47% of commits and each one paid the full vitest run — which
+# takes ~4 min idle and >14 min under fleet load, so the guard's timeout was
+# blocking board hygiene with a false red (measured 2026-10-01, loadavg ~57,
+# guard log .gitreins/logs/guard-20260210T...: "Tests timed out after 180s").
+# Scope is exact: ONLY when every staged path is under .coding-hermes/.
+# Set GITREINS_FORCE_TESTS=1 to override, and CI (no staged diff) is unaffected.
+if [ "${GITREINS_FORCE_TESTS:-}" != "1" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
+  staged_board_only=$(git diff --cached --name-only --diff-filter=ACMR)
+  if [ -n "$staged_board_only" ] && ! printf '%s\n' "$staged_board_only" | grep -qv '^\.coding-hermes/'; then
+    echo "SKIP: board-only change (every staged path is under .coding-hermes/) — no suite run."
+    exit 0
+  fi
+fi
+
 CI_CONTEXT=false
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   CI_CONTEXT=true

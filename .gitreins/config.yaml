@@ -2,6 +2,11 @@ guards:
   secrets: true
   lint: false
   tests: true
+  # 180s (gitreins default) false-blocks commits under fleet load: the full
+  # suite runs ~4 min idle and >14 min at loadavg 50+. Raised 2026-10-01 after
+  # two board commits were blocked with "Tests timed out after 180s" while
+  # secrets were clean and the tree was CI-green at HEAD.
+  test_timeout: 900
   test_mode: full
   test_command: ./scripts/gitreins-guard-tests.sh
   static_analysis: false
