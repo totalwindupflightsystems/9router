@@ -99,7 +99,7 @@ rclone_s3 copyto "$WORK/latest" "$(remote "${S3_PREFIX:-monitoring}/latest")" --
 STAMP=/var/lib/fleet-monitoring/node-exporter-textfile/fleet_monitoring_backup.prom
 if [ -d "$(dirname "$STAMP")" ]; then
   cat > "$STAMP.tmp" <<EOF
-# HELP monitoring_backup_last_success_timestamp_seconds Unix time of the last successful uploached backup
+# HELP monitoring_backup_last_success_timestamp_seconds Unix time of the last successful uploaded backup
 # TYPE monitoring_backup_last_success_timestamp_seconds gauge
 monitoring_backup_last_success_timestamp_seconds $(date -u +%s)
 # HELP monitoring_backup_files Number of files in the last backup set
