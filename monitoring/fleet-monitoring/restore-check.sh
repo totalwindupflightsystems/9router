@@ -7,6 +7,8 @@
 #
 # Exit 0 = restorable. Exit 1 = the thing you would reach for is broken; fix it now.
 set -euo pipefail
+# systemd oneshot runs without HOME -> git dies on dubious ownership; fall back to /root
+export HOME="${HOME:-/root}"
 cd "$(dirname "$0")" || exit 1
 
 BUCKET="${S3_BUCKET:?S3_BUCKET unset}"
@@ -50,7 +52,8 @@ if [ -n "$BUNDLE" ]; then
     echo "  contains recorded HEAD $DEAD"
   fi
 else
-  echo "  no git bundle in this set"
+  echo "  ERROR: no git bundle in this set - backup is incomplete (git bundle + HEAD missing), FAILING" >&2
+  exit 1
 fi
 
 echo "== prometheus snapshot present =="

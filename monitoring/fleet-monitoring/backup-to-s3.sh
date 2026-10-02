@@ -12,6 +12,8 @@
 # Layout: s3://$S3_BUCKET/$S3_PREFIX/<YYYY-mm-dd_HHMMSS>/...
 #         s3://$S3_BUCKET/$S3_PREFIX/latest -> pointer file (small, overwritten each run)
 set -euo pipefail
+# systemd oneshot runs without HOME -> git dies on dubious ownership; fall back to /root
+export HOME="${HOME:-/root}"
 cd "$(dirname "$0")" || exit 1
 
 TS=$(date -u +%Y-%m-%d_%H%M%S)
@@ -61,12 +63,16 @@ else
 fi
 
 log "git bundle (the repo IS the rebuildable artefact)"
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  git bundle create "$WORK/fleet-monitoring.bundle" --all >/dev/null 2>&1 \
-    && echo "  $(du -h "$WORK/fleet-monitoring.bundle" | cut -f1)" \
-    || echo "  WARNING: bundle failed (no commits yet?)"
-  git rev-parse HEAD > "$WORK/HEAD" 2>/dev/null || true
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "ERROR: not inside a git work tree (dubious ownership? HOME unset?) - a backup without the repo bundle is incomplete, refusing to continue" >&2
+  exit 1
 fi
+if ! git bundle create "$WORK/fleet-monitoring.bundle" --all >/dev/null 2>&1; then
+  echo "ERROR: git bundle create failed" >&2
+  exit 1
+fi
+echo "  $(du -h "$WORK/fleet-monitoring.bundle" | cut -f1)"
+git rev-parse HEAD > "$WORK/HEAD" 2>/dev/null || true
 
 log "manifest"
 {
