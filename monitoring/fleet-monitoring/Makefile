@@ -59,6 +59,17 @@ verify: ## assert DATA is arriving: metrics, logs, datasources
 .PHONY: smoke
 smoke: verify ## alias for verify
 
+# ---------- build ----------
+# QA-MONITORING-006: the QA fresh-install battery probes `make build` first and falls back
+# to `make verify` only when there is no build target. There was none, so the battery ran
+# verify against a stack it never started and graded the ambiguous 'no containers' as a
+# repo defect. This target is the dependency-free compile step the battery can use — the
+# compose stack itself is pulled up by `up`, so building here means the configs render.
+.PHONY: build
+build: ## compile-check what can be compiled without a running stack
+	@test -f .env || cp .env.example .env
+	@$(COMPOSE) config -q && echo "build: compose config renders"
+
 # ---------- host / fleet ----------
 .PHONY: bootstrap
 bootstrap: ## prepare THIS host: docker, dirs, sysctls, tailscale
