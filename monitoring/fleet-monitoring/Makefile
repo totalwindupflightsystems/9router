@@ -3,7 +3,12 @@
 
 SHELL := /bin/bash
 STACK := stack
-COMPOSE := docker compose -f $(STACK)/docker-compose.yml --env-file .env
+# COMPOSE_EXTRA merges one extra compose file on top of the base. It exists so the stack can
+# be brought up on an environment that cannot use the published host ports (a shared box, or
+# an isolated project via COMPOSE_PROJECT_NAME) without editing .env or the compose file:
+#   make up COMPOSE_PROJECT_NAME=qafresh COMPOSE_EXTRA=stack/docker-compose.override.yml
+COMPOSE_EXTRA ?=
+COMPOSE := docker compose -f $(STACK)/docker-compose.yml $(COMPOSE_EXTRA:%=-f %) --env-file .env
 
 .DEFAULT_GOAL := help
 
@@ -21,8 +26,12 @@ check-env: ## fail if .env still has placeholder values
 	@scripts/check-env.sh
 
 # ---------- stack lifecycle ----------
+# QA-MONITORING-001: check-env runs BEFORE `docker compose config`. Compose interpolates the
+# file's `:?` guards during `config`, so a missing/garbage value aborts inside compose with a
+# raw interpolation error — check-env names the variable first. render-configs then selects
+# the Loki storage config (s3 vs local) that the loki service mounts.
 .PHONY: config
-config: ## validate compose + component configs (no containers started)
+config: check-env render-configs ## validate compose + component configs (no containers started)
 	$(COMPOSE) config -q && echo "compose: OK"
 	@scripts/lint-configs.sh
 
