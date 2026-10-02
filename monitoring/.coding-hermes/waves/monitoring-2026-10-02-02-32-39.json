@@ -1,0 +1,26 @@
+{
+  "tick_id": "monitoring-2026-10-02-02-32-39",
+  "created_at": "2026-10-02T02:32:39-05:00",
+  "tasks": [
+    {
+      "id": "MON-GAP-001",
+      "title": "Add Tempo to monitoring stack + OTLP receiver in Alloy + datasource as code",
+      "worktree": "ssh fleet-monitor /root/fleet-monitoring/",
+      "branch": "n/a (git-less live dir)"
+    },
+    {
+      "id": "MON-GAP-002",
+      "title": "Add Pyroscope + Alloy pyroscope.ebpf + datasource as code",
+      "worktree": "ssh fleet-monitor /root/fleet-monitoring/",
+      "branch": "n/a (git-less live dir)"
+    }
+  ],
+  "mode": "stack-work-serial",
+  "note": "Stack work is done on fleet-monitor via ssh; local worktrees created but unused. Workers skipped \u2014 foreman does it directly.",
+  "finished_at": "2026-10-02T05:05:00-05:00",
+  "outcome": {
+    "MON-GAP-001": "done+verified live (tempo /ready 200, container up)",
+    "MON-GAP-002": "NOT done - rolled to next tick (pending)"
+  },
+  "cleanup": "local worktrees wt/MON-GAP-001/002 were zero-commit stubs (stack work done via ssh); removed"
+}
