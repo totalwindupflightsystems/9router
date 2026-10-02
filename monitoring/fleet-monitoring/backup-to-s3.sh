@@ -33,6 +33,12 @@ rclone_s3() { rclone --config /dev/null \
   "$@"; }
 remote() { echo ":s3:$BUCKET/$1"; }
 
+# rclone is the only uploader; failing at upload time after all local work wastes the run
+command -v rclone >/dev/null 2>&1 \
+  || { echo "FATAL: rclone is not installed — it is required to upload the backup set to S3." >&2
+       echo "       Install rclone BEFORE running this script (see README prerequisites)." >&2
+       exit 1; }
+
 log() { printf '\033[1m== %s\033[0m\n' "$*"; }
 
 log "prometheus snapshot"
@@ -52,14 +58,21 @@ else
 fi
 
 log "grafana state"
-# .backup is safe on an open SQLite database; cp is not.
-if docker exec mon-grafana sh -c 'command -v sqlite3 >/dev/null' 2>/dev/null; then
-  docker exec mon-grafana sh -c 'sqlite3 /var/lib/grafana/grafana.db ".backup /tmp/g.db" && cat /tmp/g.db' > "$WORK/grafana.db" 2>/dev/null \
-    && echo "  grafana.db $(du -h "$WORK/grafana.db" | cut -f1)" \
-    || echo "  WARNING: grafana.db backup failed"
+# .backup is safe on an open SQLite database; cp/tar of the open db is not (MON-DOGFOOD-011).
+# The grafana image ships no sqlite3, so run the dump through a one-shot alpine container.
+if docker volume inspect fleet-monitoring_grafana-data >/dev/null 2>&1 \
+   && docker run --rm -v fleet-monitoring_grafana-data:/g:ro alpine:3.20 \
+        sh -c 'test -f /g/grafana.db' 2>/dev/null; then
+  if docker run --rm -v fleet-monitoring_grafana-data:/g:ro alpine:3.20 \
+       sh -c 'apk add --no-cache sqlite >/dev/null 2>&1 && sqlite3 /g/grafana.db ".backup /tmp/out.db" && cat /tmp/out.db' > "$WORK/grafana.db" 2>/dev/null \
+     && [ -s "$WORK/grafana.db" ]; then
+    echo "  grafana.db (sqlite .backup) $(du -h "$WORK/grafana.db" | cut -f1)"
+  else
+    echo "  WARNING: sqlite .backup failed — grafana state NOT in this backup set"
+  fi
 else
-  echo "  sqlite3 absent in image — falling back to volume copy"
-  docker run --rm -v fleet-monitoring_grafana-data:/g:ro alpine:3.20 tar czf - -C /g grafana.db > "$WORK/grafana.db.tgz"
+  echo "  WARNING: volume fleet-monitoring_grafana-data absent or has no grafana.db" \
+       "(fresh/empty host) — grafana state NOT in this backup set"
 fi
 
 log "git bundle (the repo IS the rebuildable artefact)"
@@ -93,6 +106,18 @@ log "upload"
 rclone_s3 copy "$WORK" "$(remote "$PREFIX/")" --transfers 4 --s3-no-check-bucket 2>&1 | tail -3
 printf '%s\n' "$TS" > "$WORK/latest"
 rclone_s3 copyto "$WORK/latest" "$(remote "${S3_PREFIX:-monitoring}/latest")" --s3-no-check-bucket
+
+# Prune old Prometheus snapshots inside the data volume — each run leaves one behind
+# (MON-DOGFOOD-012: 8 orphan snapshots grew prom-data to 483MB for a ~60MB live TSDB).
+# Keep the newest KEEP_SNAPSHOTS (default 2) so a recent fallback snapshot survives.
+if [ -n "$snap" ]; then
+  KEEP_SNAPSHOTS="${KEEP_SNAPSHOTS:-2}"
+  log "pruning snapshots (keep newest $KEEP_SNAPSHOTS)"
+  docker run --rm -v fleet-monitoring_prom-data:/prometheus alpine:3.20 sh -c "
+    ls -1t /prometheus/snapshots 2>/dev/null | tail -n +$((KEEP_SNAPSHOTS + 1)) | while read -r old; do
+      rm -rf \"/prometheus/snapshots/\$old\" && echo \"  pruned \$old\"
+    done"
+fi
 
 # Expose freshness to Prometheus so an alert can fire on a backup that stopped happening —
 # an unmonitored backup is a backup that silently stops.
