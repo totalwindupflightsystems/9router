@@ -1,0 +1,12 @@
+apiVersion: 1
+
+# Pyroscope (continuous profiling) — explore flame graphs next to metrics/logs/traces.
+# mon-pyroscope is the compose peer; the same server the alloy agent pushes profiles to.
+datasources:
+  - name: Pyroscope
+    uid: pyroscope
+    type: grafana-pyroscope-datasource
+    access: proxy
+    url: http://mon-pyroscope:4040
+    isDefault: false
+    editable: false

@@ -1,0 +1,244 @@
+// fleet-monitoring — the Alloy agent.
+//
+// ONE file, shipped to every host, carrying BOTH pipelines. Host and collector config cannot
+// drift apart because there is only ever one copy of it.
+//
+// Direction of travel matters: the monitoring host has no inbound service ports (the public
+// posture is outbound-only + Tailscale), so agents PUSH to it across the tailnet rather than
+// being scraped. That is why this config uses remote_write and loki.write and defines no
+// scrape target on the monitoring side.
+//
+// Configure per host:
+//   MON_HOST        tailnet address (or name) of the monitoring host
+//   HOSTNAME_LABEL  stable name for this host — use the SSH alias, NOT $(hostname), so a
+//                   rebuilt box does not fork its own metric history
+//   ENVIRONMENT     dev | prod (labels, so dev noise can be filtered out of alerts)
+//
+// NO `locals` BLOCK, deliberately. A locals block whose members reference EACH OTHER
+// (`common = {host = local.host}`) fails to load — Alloy rejects the whole block and then every
+// `local.*` reference is reported as "component does not exist or is out of scope", which reads
+// like a typo hunt across the file rather than one scope rule. sys.env() inline is equally
+// readable here and cannot fail that way.
+
+// ---------------------------------------------------------------- metrics
+prometheus.exporter.unix "host" {
+	disable_collectors = ["arp", "bcache", "bonding", "btrfs", "infiniband", "nfs", "nfsd",
+		"schedstat", "selinux", "sockstat", "tapestats", "xfs", "zfs"]
+	enable_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev",
+		"netstat", "pressure", "stat", "systemd", "textfile", "time", "uname"]
+
+	textfile {
+		directory = "/var/lib/node_exporter/textfile"
+	}
+}
+
+// The container runs with pid: host and the host's /sys mounted, so this reads HOST metrics.
+// Without either, node_exporter silently reports the CONTAINER's — a dashboard that looks
+// plausible and describes the wrong machine, which is worse than no dashboard.
+discovery.relabel "host" {
+	targets = prometheus.exporter.unix.host.targets
+
+	rule {
+		source_labels = ["__address__"]
+		target_label  = "instance"
+		replacement   = sys.env("HOSTNAME_LABEL")
+	}
+}
+
+prometheus.scrape "host" {
+	targets         = discovery.relabel.host.output
+	scrape_interval = "30s"
+	scrape_timeout  = "10s"
+	forward_to      = [prometheus.remote_write.monitoring.receiver]
+}
+
+prometheus.remote_write "monitoring" {
+	endpoint {
+		// PROM_WRITE_HOST exists for the monitoring host's OWN agent, which runs inside the
+		// compose network: there, 127.0.0.1 is the alloy container itself and the push is refused
+		// forever. Remote agents leave it unset and use MON_HOST (the tailnet address).
+		url = "http://" + coalesce(sys.env("PROM_WRITE_HOST"), sys.env("MON_HOST")) + ":9090/api/v1/write"
+
+		queue_config {
+			capacity             = 10000
+			max_shards           = 8
+			max_samples_per_send = 2000
+			batch_send_deadline  = "5s"
+		}
+
+		// NOTE: there is deliberately no `retry_on_http_429` here. It is not an attribute of this
+		// block in Alloy v1.20.0 — setting it fails the whole config load with
+		// "unrecognized attribute name", taking the agent down at boot. Retrying on 429 is the
+		// default behaviour anyway.
+
+		// Bound the damage of a monitoring-host outage: buffer, do not grow without limit.
+		write_relabel_config {
+			source_labels = ["__name__"]
+			regex         = "go_gc_duration_seconds.*|prometheus_tsdb_.*|alloy_.*"
+			action        = "drop"
+		}
+	}
+	external_labels = {
+		host        = sys.env("HOSTNAME_LABEL"),
+		environment = coalesce(sys.env("ENVIRONMENT"), "prod"),
+	}
+}
+
+// ---------------------------------------------------------------- logs: journal
+loki.relabel "journal" {
+	forward_to = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "unit"
+		regex         = "(.+)"
+	}
+
+	rule {
+		target_label = "host"
+		replacement  = sys.env("HOSTNAME_LABEL")
+	}
+
+	rule {
+		source_labels = ["__journal_priority_keyword"]
+		target_label  = "level"
+	}
+}
+
+loki.source.journal "system" {
+	path          = "/var/log/journal"
+	max_age       = "12h"
+	relabel_rules = loki.relabel.journal.rules
+	labels        = {
+		host        = sys.env("HOSTNAME_LABEL"),
+		environment = coalesce(sys.env("ENVIRONMENT"), "prod"),
+		job         = "fleet",
+	}
+	forward_to = [loki.write.monitoring.receiver]
+}
+
+// ---------------------------------------------------------------- logs: docker
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+	targets = discovery.docker.containers.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		target_label  = "compose_project"
+	}
+
+	rule {
+		target_label = "host"
+		replacement  = sys.env("HOSTNAME_LABEL")
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "docker"
+	}
+}
+
+loki.source.docker "containers" {
+	host    = "unix:///var/run/docker.sock"
+	targets = discovery.relabel.containers.output
+	labels  = {
+		host        = sys.env("HOSTNAME_LABEL"),
+		environment = coalesce(sys.env("ENVIRONMENT"), "prod"),
+	}
+	forward_to       = [loki.write.monitoring.receiver]
+	refresh_interval = "30s"
+}
+
+loki.write "monitoring" {
+	endpoint {
+		// same reasoning as PROM_WRITE_HOST above — in-network name on the monitoring host,
+		// tailnet address for remote agents
+		url = "http://" + coalesce(sys.env("LOKI_WRITE_HOST"), sys.env("MON_HOST")) + ":3100/loki/api/v1/push"
+	}
+	external_labels = {
+		environment = coalesce(sys.env("ENVIRONMENT"), "prod"),
+	}
+}
+
+// ---------------------------------------------------------------- traces: OTLP -> Tempo
+// Receives OTLP traces on the host's 4317/4318 (mapped through compose to the Alloy
+// container) and forwards them to Tempo. Tempo is a compose peer reachable as 'tempo'.
+otelcol.receiver.otlp "traces" {
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
+
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		traces = [otelcol.processor.batch.traces.input]
+	}
+}
+
+otelcol.processor.batch "traces" {
+	timeout = "2s"
+
+	output {
+		traces = [otelcol.exporter.otlp.tempo.input]
+	}
+}
+
+otelcol.exporter.otlp "tempo" {
+	client {
+		endpoint = "tempo:4317"
+
+		tls {
+			insecure = true
+		}
+	}
+}
+
+// ---------------------------------------------------------------- profiles: eBPF -> Pyroscope
+// Zero-code continuous profiling of the host's processes. discovery.process lists every
+// running process (pid: host makes /proc the host's own); without any relabel keep-rule the
+// ebpf component profiles ALL of them, grouping under the default target (one service per
+// discovered exe name). Capabilities live in compose (cap_add BPF/PERFMON/SYS_ADMIN/SYSLOG/
+// SYS_PTRACE + memlock unlimited) — empirically required on kernel 6.8: without them the
+// tracer fails with "unable to read kallsyms addresses - check capabilities" / "failed to
+// adjust rlimit". Sampled error noise, not failures: host binaries on go1.27 exceed the
+// tracer's Go-symbol resolution ceiling (go1.26); those processes still profile with generic
+// frames.
+discovery.process "all" {
+}
+
+pyroscope.ebpf "profiles" {
+	targets    = discovery.process.all.targets
+	forward_to = [pyroscope.write.monitoring.receiver]
+}
+
+pyroscope.write "monitoring" {
+	endpoint {
+		// peer of prometheus/loki in the compose network; remote agents would use MON_HOST
+		url = "http://mon-pyroscope:4040"
+	}
+}
+// ---------------------------------------------------------------- self-observability
+// If the agent cannot reach the monitoring host, that fact must be visible ON the host.
+prometheus.exporter.self "alloy" { }
+
+prometheus.scrape "alloy_self" {
+	targets         = prometheus.exporter.self.alloy.targets
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.monitoring.receiver]
+}
