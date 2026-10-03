@@ -461,7 +461,12 @@ FP_PATTERNS = [
 PRIORITY_REPOS = [
     "/home/kara/helios-work",
     "/home/kara/conscientiousness",
-    "/home/kara/muster",
+    # scan #137 (2026-10-02): was /home/kara/muster — that path no longer exists; the muster
+    # repo moved to /home/kara/wojons/muster (active: commits 2026-10-02). A stale entry here
+    # surfaces as a phantom `missing_repo / no coverage` INFO on EVERY fire (scan #111's exact
+    # class) and silently drops the priority-scan guarantee. The walk still finds wojons/muster
+    # at depth 2; this entry keeps it priority-scanned.
+    "/home/kara/wojons/muster",
     "/home/kara/dexdat-memory",
     "/home/kara/Kobayashi-Maru",
     # scan #111 (2026-09-24): the previous value was the path /home/kara/frontiers-ghost-audit,
@@ -568,8 +573,24 @@ def is_false_positive(line, file_path):
 # (1-6 digits, optionally hyphen/underscore-joined) is part of a test fixture
 # ordinal, never part of key material — `test-token-1234567` (7 digits) and any
 # alphanumeric tail (`test-token-abc`) still fire.
+# Scan #138 (2026-10-03T04:02Z): the alert-router regression fixture
+# `/home/kara` `monitoring/fleet-monitoring/stack/alert-router/test_pre_resolve.py:43`
+#   TOKEN = "gap017-test-token"
+# names itself as a test token but carries the MON-GAP-017 ticket id in its PREFIX, so the
+# start-anchored marker above never matched and the generic `token\s*[=:]\s*"…"` credential
+# rule re-fired CRITICAL (→ exit 1 → cron-wrapper "Script Error") for a value that only ever
+# authenticates a locally-spawned test router subprocess. The live token is unrelated
+# (`$ALERT_ROUTER_TOKEN`; `.env.example` ships `dev-only-router-token`; the value occurs
+# nowhere else on the host). Fix: allow ONE bounded ticket-id prefix (`[a-z]{2,10}[-_]?\d{1,6}[-_]`).
+# Narrow by construction — the value must still be an all-lowercase -/_/. word chain that
+# SPELLS one of the marker words and ENDS in token|key|secret, so real key material
+# (base62/hex, mixed case, no such words) can never match; non-placeholder lookalikes
+# (`sk-test-abc123`, `test-token-abc`, `test-token-1234567`) still fire. Canary 12/12;
+# pre/post real-diff on the carrier path 1 → 0; whole-repo `scan_repo('/home/kara')` 1 → 0.
 PLACEHOLDER_VALUES = re.compile(
-    r'(?i)^(?:e2e|battery|test|dummy|local|scratch|fake)[-_][a-z0-9_-]*(?:token|key|secret)(?:[-_]?\d{1,6})?$'
+    r'(?i)^(?:[a-z]{2,10}[-_]?\d{1,6}[-_])?'          # optional ticket-id prefix: gap017-, abc-12-, T-123-
+    r'(?:e2e|battery|test|dummy|local|scratch|fake)[-_][a-z0-9_-]*(?:token|key|secret)'
+    r'(?:[-_]?\d{1,6})?$'
 )
 
 
