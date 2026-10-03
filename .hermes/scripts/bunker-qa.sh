@@ -353,7 +353,19 @@ detect_cmds() {
     native_cmd="npm test -- --runInBand"
   fi
   elif [ -f "$repo/go.mod" ]; then native_cmd="go test ./... -count=1"
-  elif [ -f "$repo/pyproject.toml" ]; then native_cmd="pytest -x -q"
+  elif [ -f "$repo/pyproject.toml" ]; then
+    # QA-DIGEST-022 (2026-10-03, digest chaos-resource): a pyproject repo whose
+    # pytest lives in a PEP-735 dependency-group gets rc=127 'pytest: command
+    # not found' from the agent's broken venv on EVERY leg. The toolchain-
+    # bootstrap cell tops pytest into ~/tools/venv earlier in the same agent
+    # run — use it when PATH has no pytest. If it is absent too, keep the bare
+    # name: native_runner_missing grades UNVERIFIED honestly, and the bootstrap
+    # cell already warned which leg will fail and why.
+    if ! command -v pytest >/dev/null 2>&1 && [ -x "$HOME/tools/venv/bin/pytest" ]; then
+      native_cmd="$HOME/tools/venv/bin/pytest -x -q"
+    else
+      native_cmd="pytest -x -q"
+    fi
   # QA-FOREMAN-2026-09-26 (auger): pytest.ini/conftest.py-only repos matched NO
   # shape and got the vacuous `echo no-test-path` — the battery graded
   # ci-pass OK in 57ms with zero tests run while the repo carries 210 tests.
