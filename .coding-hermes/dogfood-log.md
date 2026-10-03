@@ -204,3 +204,26 @@ install-leg result (bunker-las-02, agent c5d61826, evidence /tmp/bunker-qa-evide
 2026-09-25 (nudge2 continuation) | SHIPPABLE (verified) | tick-416 wave recovery: DF-42/43/44 work was already merged and judged by the interrupted session; this tick live-verified all three fixes at HEAD 133a53b2 on the persisted scratch instance (undici 8.11.0): chat 200 stream+non-stream, TTS 200 RIFF, STT 200 with AND without MIME — DF-43's no-MIME rejection itself is fixed at HEAD. Rows closed with verdict citations; host-local verdict dirs cited (history gitignored). New finding DF-9ROUTER-47 P2: npm run build crashed once transiently (webpack uncaughtException, no BUILD_ID), clean retry green — CI has no production build leg. No bunker install leg: this was a verification tick, previous same-day run carried it (install 87s, boot <60s). Kill the P0: chat 503 is dead at HEAD no longer.
 
 2026-09-25 | PROMISING-BUT-ROUGH (compose deployment surface) | t2fs: compose federation stack usable ~5 min after build (247s build+boot on N100; standalone published-image up 19s warm; fresh-daemon cold install 271s incl. build) | friction 4 | 4 findings (DF-9ROUTER-48 P1 compose coexistence command omits -p -> resolves onto LIVE stack network+volumes silently + 9router-data pinned globally; DF-9ROUTER-49 P1 DOCKER.md never explains login/.env/INITIAL_PASSWORD; DF-9ROUTER-50 P2 first-completion cold outlier 17.9s upstream-attributed, baseline recorded; DF-9ROUTER-51 P2 SKIPPED-install-bunker — all 4 las hosts down/stuck, compensated by fresh-daemon dind install proof) | ANGLE: docker-compose deployment surface (never driven by 14 prior runs; battery compose cells always died on plugin): federation A/A+/B/C/D lifecycle ALL PASS with containers as the unit (degraded ~15s, replica serving 1.8s, 202+queued-write, re-link ~20s, reconcile both sides, row-level integrity byte-identical in-container), standalone quickstart + headroom sidecar wiring + upgrade-in-place via local-build override all PASS | perf: /v1/models through router 180-209ms vs 363ms direct (cache wins), steady completions 610-670ms vs 326ms direct (~280ms overhead), restart->serving 3s; nothing user-noticeable, no PERF row | artifacts docs/dogfood/2026-09-25-compose-integration.md + diagnostics.md s16 + skills/9router-compose/SKILL.md | install leg: bunker-qa/bunker SKIPPED (DF-51) — fresh-daemon leg on-host: 271s cold -> FRESH-DAEMON-OK | foreman: not woken (rows pending at normal cadence; live stack on :20128 is THIS project's production instance — coordination caution noted in report)
+
+## 2026-10-02 19:45 UTC — Dogfood tick (9router-dogfood lane)
+
+**Verdict**: PARTIAL SUCCESS
+
+**Findings**:
+- DOGFOOD-001: API key auth fails for remote requests (HIGH) — isLocalRequest() requires trusted peer headers in production, breaking all remote API access
+- DOGFOOD-002: No providers configured (MEDIUM) — cannot test LLM routing
+- DOGFOOD-003: Federation untested (LOW) — both instances running but no traffic observed
+- DOGFOOD-004: Fast endpoints (INFO) — dashboard 31ms, health 8ms
+
+**Files**:
+- Report: /tmp/9router-dogfood-report.md
+- Findings: /tmp/dogfood-findings.jsonl
+- Board: 4 rows appended (DOGFOOD-001 through DOGFOOD-004)
+
+**Blockers**: Cannot complete full dogfood without fixing DOGFOOD-001 and configuring at least one provider.
+
+**Next steps**:
+1. Fix API key authentication for remote access
+2. Configure OpenAI or Anthropic provider
+3. Test federation edge→central proxy
+4. Add integration tests for remote API auth
