@@ -2,3 +2,4 @@
 {"id": 2, "timestamp": "2026-10-02T05:29:03.421554+00:00", "event_type": "task_created", "task_id": "DOC-002", "actor": "foreman", "detail": "{\"id\":\"DOC-002\",\"status\":\"pending\"}", "tick_number": null}
 {"id": 3, "timestamp": "2026-10-02T05:29:17.516903+00:00", "event_type": "task_created", "task_id": "DOC-003", "actor": "foreman", "detail": "{\"id\":\"DOC-003\",\"status\":\"pending\"}", "tick_number": null}
 {"id": 4, "timestamp": "2026-10-02T05:29:33.317783+00:00", "event_type": "task_created", "task_id": "DOC-004", "actor": "foreman", "detail": "{\"id\":\"DOC-004\",\"status\":\"pending\"}", "tick_number": null}
+{"ts":"2026-10-04T02:50:00Z","actor":"releng-satellite","event_type":"release_sweep","task_id":"RELEASE-001","detail":"NO-GO: no tracked repo/forge/tag/CI/version for qa-audit lane artifacts; evidence ~/.hermes/qa/evidence/releng-qa-audit-2026-10-04.txt; DOC-001..003 premises re-verified live"}
