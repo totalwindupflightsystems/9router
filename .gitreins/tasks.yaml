@@ -144,12 +144,16 @@ tasks:
   status: in_progress
   created_at: '2026-10-02T02:33:35.321474+00:00'
 - id: MON-GAP-002
-  title: Add Pyroscope continuous profiles
+  title: Add Pyroscope continuous profiling + Alloy pyroscope.ebpf + Grafana datasource
+    as code
   criteria:
-  - flame graph for at least one instrumented target shows stack frames naming functions;
-    profile ingestion visible in pyroscope metrics
-  status: in_progress
-  created_at: '2026-10-02T02:33:36.358485+00:00'
+  - Pyroscope deployed on fleet-monitor, Alloy pyroscope.ebpf component configured
+    for zero-code profiling, Grafana datasource provisioned as code, flame graph queryable
+    via API showing real stack frames (not just syscalls), profile ingestion visible
+    in Pyroscope metrics
+  status: complete
+  created_at: '2026-10-03T03:03:47.904960+00:00'
+  completed_at: '2026-10-03T03:08:27.853375+00:00'
 - id: MON-MONITORING-403C290E-20261002
   title: DiskFull bunker-mvp 0.9567% free
   criteria:
@@ -168,3 +172,57 @@ tasks:
   status: complete
   created_at: '2026-10-02T08:56:16.564232+00:00'
   completed_at: '2026-10-02T09:01:30.782443+00:00'
+- id: QA-MONITORING-001
+  title: fresh-install path completes on a clean machine
+  criteria:
+  - cp .env.example .env && make config passes; make up brings up a stack where Loki
+    boots with S3 creds unset (local fallback, no crash-loop); make verify runs and
+    exits 0 on the started stack; verified in a scratch clone on this box
+  status: complete
+  created_at: '2026-10-02T15:51:05.442623+00:00'
+  completed_at: '2026-10-02T16:30:28.259752+00:00'
+- id: MON-GAP-017
+  title: alert-router never writes a pending row whose alert is already resolved
+  criteria:
+  - router.py checks the alert's live state (Prometheus API) before appending a firing
+    row; a resolved/recovered alert produces either one self-closed row or none; proven
+    with a fake Alertmanager payload + stub Prometheus, verified by grepping the resulting
+    board for pending rows
+  status: complete
+  created_at: '2026-10-02T15:51:05.656329+00:00'
+  completed_at: '2026-10-02T16:32:34.617371+00:00'
+- id: MON-DOGFOOD-011
+  title: grafana backup leg uses sqlite .backup through a one-shot container (never
+    tar of the live db)
+  criteria:
+  - backup set contains grafana.db produced by sqlite3 .backup (not a tar of the open
+    db); fresh/empty volume aborts the leg loudly (013 guard preserved); HELP text
+    typo 'uploached' fixed; verified live on fleet-monitor with a real unit run
+  status: complete
+  created_at: '2026-10-02T15:55:36.315418+00:00'
+  completed_at: '2026-10-02T16:09:44.630022+00:00'
+- id: MON-DOGFOOD-012
+  title: backup-to-s3.sh prunes prometheus snapshots after successful upload (keep-last-N)
+  criteria:
+  - 'after rclone exit 0 the script prunes /prometheus/snapshots inside prom-data
+    to the newest KEEP_SNAPSHOTS (default 2); verified live: after a unit run the
+    volume holds only the newest snapshots and prom-data size drops'
+  status: complete
+  created_at: '2026-10-02T15:55:36.569488+00:00'
+  completed_at: '2026-10-02T16:15:43.805896+00:00'
+- id: asce-neverdone-398
+  title: NEVER-DONE tick 398 desk audit
+  criteria:
+  - build+vet PASS, go test -short 28 pkgs 0 FAIL, stack healthy, both route checks
+    exit 0, 0 unpushed commits
+  status: in_progress
+  created_at: '2026-10-03T12:38:44.599202+00:00'
+- id: QA-DIGEST-022
+  title: 'chaos-resource runner resolution: venv-pytest fallback in bunker-qa.sh'
+  criteria:
+  - pyproject arm of detect_cmds resolves ~/tools/venv/bin/pytest when PATH lacks
+    pytest; bare pytest otherwise; bash -n clean; resolution verified in isolation
+    for both cases
+  status: complete
+  created_at: '2026-10-03T18:37:52.965610+00:00'
+  completed_at: '2026-10-03T18:38:28.942047+00:00'
