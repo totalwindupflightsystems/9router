@@ -66,29 +66,22 @@ services:
     <<: *safe
     image: grafana/loki:3.7.8
     container_name: mon-loki
-    # QA-MONITORING-001: the config file is SELECTED, not fixed. scripts/render-configs.sh
-    # resolves LOKI_STORAGE (auto|s3|local) and writes loki-config.active.yml — S3 chunks when
-    # credentials are present, the filesystem otherwise — so a clean machine with no secrets
-    # boots Loki instead of crash-looping on empty S3 credentials.
-    # -config.expand-env=true is REQUIRED: both configs interpolate ${LOKI_RETENTION} and
-    # (s3) ${S3_*}. Loki does not inherit .env on its own, so the env vars are passed below.
+    # -config.expand-env=true is REQUIRED: the config interpolates ${S3_*}, and without the
+    # flag Loki treats "${S3_ACCESS_KEY}" as a literal string and dies at boot with
+    # "not a valid duration string: ${LOKI_RETENTION:-720h}". The env vars below are what it
+    # expands — Loki does not inherit them from .env on its own.
     command:
-      - -config.file=/etc/loki/loki-config.active.yml
+      - -config.file=/etc/loki/loki-config.yml
       - -config.expand-env=true
     environment:
-      LOKI_STORAGE: ${LOKI_STORAGE:-auto}
-      # Optional: empty credentials are legal in local storage mode. check-env requires them
-      # only when LOKI_STORAGE resolves to s3.
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT in .env}
+      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in .env}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
       S3_REGION: ${S3_REGION:-hel1}
       LOKI_RETENTION: ${LOKI_RETENTION:-720h}
     volumes:
-      # the whole config dir, so the container always reads whichever file render-configs
-      # selected at a stable path (and a missing render fails loudly, not with a mystery)
-      - ./loki:/etc/loki:ro
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     ports:
       - "${BIND_IP:-0.0.0.0}:3100:3100"
@@ -146,6 +139,7 @@ services:
     environment:
       ALERT_ROUTER_TOKEN: ${ALERT_ROUTER_TOKEN:?set ALERT_ROUTER_TOKEN in .env}
       ALERT_ROUTER_PORT: "8089"
+      PROM_URL: http://prometheus:9090
       BOARD_ROOT: ${BOARD_ROOT:-/boards}
       ALERT_ROUTER_WRITE: ${ALERT_ROUTER_WRITE:-0}
       ALERT_ROUTER_NOTIFY: ${ALERT_ROUTER_NOTIFY:-0}
@@ -153,7 +147,9 @@ services:
     volumes:
       # lane boards, read for existing ids and appended to when WRITE=1
       - ${BOARD_ROOT:-/tmp/boards}:${BOARD_ROOT:-/boards}
-      - router-spool:/spool
+      # bind the host spool dir (drained by the fleet side over rsync) - a named
+      # volume here is root-owned and the container runs as uid 10001
+      - /var/lib/fleet-monitoring/spool:/spool
     ports:
       - "127.0.0.1:8089:8089"
     networks: [mon]
@@ -216,20 +212,25 @@ services:
       - "127.0.0.1:8081:8081"
     networks: [mon]
 
-  tempo:
+  cadvisor:
     <<: *safe
-    image: grafana/tempo:2.6.1
-    container_name: mon-tempo
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: mon-cadvisor
+    privileged: true
     command:
-      - -config.file=/etc/tempo.yml
+      - --containerd=/run/containerd/containerd.sock
+      - --containerd-namespace=moby
+      - --housekeeping_interval=30s
+    cgroup: host
+    devices:
+      - /dev/kmsg
     volumes:
-      - ./tempo/tempo.yml:/etc/tempo.yml:ro
-      - tempo-data:/var/tempo
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
     ports:
-      # OTLP gRPC + HTTP for trace ingestion; query API on 3200 (loopback only)
-      - "${BIND_IP:-0.0.0.0}:4317:4317"
-      - "${BIND_IP:-0.0.0.0}:4318:4318"
-      - "127.0.0.1:3200:3200"
+      - "127.0.0.1:8080:8080"
     networks: [mon]
 
 networks:
@@ -242,5 +243,3 @@ volumes:
   loki-data:
   grafana-data:
   alloy-data:
-  router-spool:
-  tempo-data:
