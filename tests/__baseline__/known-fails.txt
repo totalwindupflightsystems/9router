@@ -74,3 +74,18 @@ tests/unit/kiro-external-idp.test.js :: Kiro external_idp (CLIProxyAPI) import a
 tests/unit/openai-to-commandcode.test.js :: openaiToCommandCodeRequest — native image blocks maps OpenAI image_url data URI to CommandCode {type:image,image,mimeType}
 tests/unit/openai-to-commandcode.test.js :: openaiToCommandCodeRequest — native image blocks maps Claude/OpenAI base64 image source to a data-URI image block
 tests/unit/opencode-session.test.js :: OpenCode Stable Session Reuse (429 follow-up) declares forceStream on the opencode transport so chatCore serves SSE upstream
+
+# [2026-10-04 SYNC-9ROUTER-001] 9 entries absorbed: upstream-shipped-red at v0.5.95
+# (verified red on upstream's own pristine a99cf572 worktree; evidence /tmp/9r436_up_test.log
+# + /tmp/9r436_up_fed2.log — upstream's 4a57df8b keyed byApiKey by full key, breaking their
+# own AUDIT-002 source assertion; undici/golden drift on their side). Not merge-caused:
+# byte-identical test+source on both trees or upstream-authored test vs upstream code.
+tests/unit/security-audit.test.js :: AUDIT-002: API key masking byApiKey object keys should use masked key, not raw key
+tests/unit/cline-free-tier-models.test.js :: cline-free namespace pricing still bills the paid twin at its published rate
+tests/unit/codex-gpt6-lite.test.js :: Codex GPT-6 Sol/Luna transport lists gpt-6.1-sol with Codex capabilities
+tests/unit/codex-refresh-token.test.js :: Codex Refresh Token getRefreshLeadMs (early refresh config) should return provider-specific lead time for OAuth providers
+tests/unit/image-generation.test.js :: handleImageGenerationCore generates image with Codex gpt-5.5-image using current Codex version header
+tests/unit/image-generation.test.js :: handleImageGenerationCore generates image with Codex gpt-5.6-sol-image using current Codex version header
+tests/unit/image-generation.test.js :: handleImageGenerationCore generates image with Codex gpt-5.6-terra-image using current Codex version header
+tests/unit/image-generation.test.js :: handleImageGenerationCore generates image with Codex gpt-5.6-luna-image using current Codex version header
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest thinking budget clamps reasoning_effort max to Kiro max_thinking_length 32000

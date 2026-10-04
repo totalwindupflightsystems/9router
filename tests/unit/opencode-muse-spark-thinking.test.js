@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OPENCODE_FINGERPRINT_TOOLS } from "../../open-sse/utils/opencodeFingerprint.js";
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
 import { PROVIDER_MODELS, getModelTargetFormat } from "../../open-sse/config/providerModels.js";
 import { getThinkingLevels } from "../../open-sse/providers/thinkingLevels.js";
@@ -214,8 +215,9 @@ describe("OpenCode Free Muse Spark thinking", () => {
     // User message, function_call, function_call_output, and next user message survive
     const types = out.input.map((item) => item.type);
     expect(types).toEqual(["message", "function_call", "function_call_output", "message"]);
-    // Tools flattened and empty properties added
-    expect(out.tools).toEqual([
+    // Tools flattened and empty properties added; upstream v0.5.95 appends the
+    // fingerprint quartet after the caller's tools (403 FreeTierError fix).
+    expect(out.tools.slice(0, 1)).toEqual([
       {
         type: "function",
         name: "shell",
@@ -223,5 +225,7 @@ describe("OpenCode Free Muse Spark thinking", () => {
         parameters: { type: "object", properties: {} },
       },
     ]);
+    const appended = out.tools.slice(1).map((t) => t.name);
+    expect(appended).toEqual(OPENCODE_FINGERPRINT_TOOLS);
   });
 });

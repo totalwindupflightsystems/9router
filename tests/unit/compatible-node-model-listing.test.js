@@ -431,6 +431,10 @@ describe("compatible node model listing (DF-9ROUTER-35)", () => {
     const { ids: listed } = await listIds();
 
     expect(upstream.seen).toHaveLength(0);
-    expect(listed).toEqual([]);
+    // No compatible node → no upstream fan-out. The only static entry a fresh
+    // install advertises is the credentialless mmf/mimo-auto (UI-alias
+    // resolution via ALIAS_TO_PROVIDER_ID, upstream v0.5.95) — see
+    // fresh-install-model-catalog-339.test.js.
+    expect(listed).toEqual(["mmf/mimo-auto"]);
   });
 });

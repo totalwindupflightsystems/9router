@@ -101,11 +101,14 @@ describe("fresh-install model catalog (DF-9ROUTER-2)", () => {
     // Nothing outside the registry-declared usable-without-credentials set may
     // leak through.
     expect(nonCredentiallessIds(list)).toEqual([]);
-    // Honest consequence: opencode was the only credentialless LLM provider, so
-    // a fresh install now advertises no STATIC LLM models at all (a custom
-    // model on a credentialless provider still surfaces — see the custom-model
-    // row below). Advertising zero beats advertising models that 403.
-    expect(list).toEqual([]);
+    // Since upstream v0.5.95 the route resolves UI aliases through
+    // ALIAS_TO_PROVIDER_ID (merged with ALIAS_TO_ID), so `mmf` — the UI alias
+    // of the hidden, noAuth provider `mimo-free` (Xiaomi's free MiMo channel)
+    // — now resolves and its credentialless model legitimately advertises on a
+    // fresh install (chat routes it fine: noAuth). Before that fix the alias
+    // failed to resolve, the provider was skipped, and this list was empty —
+    // the old `toEqual([])` pinned the resolution gap, not a product rule.
+    expect(list).toEqual(["mmf/mimo-auto"]);
   });
 
   it("keeps genuinely credentialless non-LLM providers in zero-connection capability listings", async () => {
