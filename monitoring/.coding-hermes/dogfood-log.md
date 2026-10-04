@@ -51,3 +51,10 @@
 - left behind: rows 016/017 (commits 32352d9d6, 8e989d83b on origin/main via wt/sched-gap-1662); no repo files touched beyond board + log (meta-repo sibling work in flight)
 - foreman woken: no (lane cooldown-pinned; P0 row is pending on a live enabled lane)
 - verdict: FAILED — one honest real-use probe showed the flagship workflow (alert->row) delivering nothing for ~2 days while every green metric lied
+## 2026-10-04 (run 6) | monitoring | CORROBORATION + INSTALL-RETRY (same day as run 5)
+- angle: independently re-probe run 5's P0 (MON-DOGFOOD-016) + retry the install leg (017) + verify the new tip's zero-edit boot path
+- reality: P0 reconfirmed live (probe 200 in 6.0ms, errors 56->57, rows_spooled 0, Permission denied on /spool at 23:01:48Z); QA-MONITORING-008 fix independently verified at tip aeb7d3d (fresh archive tree: make build rc=0, make config rc=0 in 7.3s, LOKI_STORAGE=auto -> local); install leg SKIPPED again — bunker-mvp per-agent port 2223 closed (bunkerd itself ONLINE 8/50), las-bunker-03 tailnet down, local bunker CLI token rejected; corroboration NOTES appended to 016 + QA-MONITORING-008 (no duplicate rows)
+- perf: nothing user-visible slow (webhook 6ms, config 7.3s) — no PERF rows
+- left behind: docs/dogfood/2026-10-04-run6-corroboration-and-install-retry.md, notes on 2 rows, this entry
+- foreman woken: no (P0 pending on live enabled lane from run 5)
+- verdict: FAILED-product / PASS-run — the flagship alert->row chain still delivers nothing ~3h after filing, while every health endpoint is green
