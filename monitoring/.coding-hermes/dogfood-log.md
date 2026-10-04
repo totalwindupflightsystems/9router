@@ -58,3 +58,34 @@
 - left behind: docs/dogfood/2026-10-04-run6-corroboration-and-install-retry.md, notes on 2 rows, this entry
 - foreman woken: no (P0 pending on live enabled lane from run 5)
 - verdict: FAILED-product / PASS-run — the flagship alert->row chain still delivers nothing ~3h after filing, while every health endpoint is green
+
+## Run 6 — 2026-10-04 23:39Z (tick monitoring-dogfood-2026-10-04-22-39-03) — DUPLICATE FIRING, converted into independent re-verification
+- Lane fired again ~4.5h after run 5 had already filed 016/017. Run 6 did NOT re-file the
+  same findings: it independently RE-DERIVED run 5's P0 from sources run 5 did not use, and
+  re-attempted the skipped install leg.
+- Chain verification (independent of run5's docker-logs path):
+  1. REMOTE Prometheus (fleet-monitor:9090 over Tailscale): {job="alert-router"} counters
+     received_total=58, errors_total=57, rows_spooled_total=0, rows_appended_total=0 — scraped
+     evidence, not container logs. targets: all up (alertmanager, alert-router, blackbox x8,
+     cadvisor, loki, prometheus).
+  2. Container fs: fleet-monitoring_router-spool/_data is root:root drwxr-xr-x; container
+     uid=10001(router); `touch /spool/.wtest` as router -> Permission denied.
+  3. OWN probe (token from host .env, not run5's method): POST /webhook -> 200 in 0.0048s,
+     then docker logs show `resolved spool failed: [Errno 13] Permission denied:
+     /spool/board-rows.jsonl`; errors_total 57->58 live. Probe row DF6PROBE never landed.
+     Unauth probe 401 (auth path healthy, matches run5).
+  -> MON-DOGFOOD-016 CONFIRMED by independent sources; MON-DOGFOOD-018 filed carrying the
+     new evidence (P1).
+- Install leg: attempted 6x on 4 bunker servers (las-02 invalid token, mvp agent network
+  down, fleet-01 unreachable, fleet-03 x2: subdir-path misconfig then E2BIG on qa-run.sh
+  push). All deterministic errors, evidence in /tmp/bunker-qa-mon-df6*.jsonl.
+  MON-DOGFOOD-019 filed (P2) extending 017's skip record with the new E2BIG harness note.
+- Perf (census, MON-DOGFOOD-020 P3): prom health 0.36-0.43s, instant query 0.39s, 23h range
+  query 1.47s (Tailscale relay), webhook 4.8ms, restore-check negative path 0.04-0.15s
+  (honest rc=1). Nothing user-noticeable; no profile warranted.
+- Values: stack read paths healthy and fast; restore-check honest-failure path intact;
+  backup/restore legs (run 5's greens) not re-litigated. The ONE thing broken is the
+  alert->row chain — still dark, now with ~58 silently dropped events.
+- foreman woken: no (lane cooldown-pinned 259200 by api; rows wait on a live lane).
+- verdict: FAILED-product / PASS-run — independent re-derivation of the P0; two new rows
+  (018/019) + perf census (020).
