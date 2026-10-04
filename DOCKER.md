@@ -127,6 +127,11 @@ docker compose -f docker-compose.yml -f docker-compose.local-build.yml \
 - Port overrides (`PORT`, `HEADROOM_PORT`), the optional `.env` and the
   `9router-data` volume behave exactly as in the default path; only the 9router
   service gains a `build:` section.
+
+**Host port conflict:** the compose file maps host port `20128` by default
+(`${PORT:-20128}:20128`). If `20128` is occupied, run
+`PORT=<free-port> docker compose up -d` to move the host-side mapping — the
+container still serves on 20128 internally.
 - Headroom has **no local build** in this repository (it is a third-party
   project), which is why the second command omits the sidecar instead of
   building it. Once the headroom image is pullable again, start it with

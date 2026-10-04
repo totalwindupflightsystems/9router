@@ -249,6 +249,17 @@ cp .env.example .env   # REQUIRED before first up — the container reads its
 docker compose up -d
 ```
 
+> **Port already in use?** `20128` is the default host port. If another
+> process (or another 9router instance) holds it, move the host side:
+>
+> ```bash
+> PORT=30128 docker compose up -d
+> ```
+>
+> The container still listens on 20128 internally; only the host-side
+> mapping changes. Update your client base URL accordingly
+> (`http://localhost:30128/v1`).
+
 > `docker-compose.yml` treats `.env` as optional at config time (so
 > `docker compose config` validates on a fresh clone), but you still need it
 > for a real deployment — set `INITIAL_PASSWORD` / `JWT_SECRET` /

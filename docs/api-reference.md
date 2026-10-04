@@ -13,6 +13,20 @@ http://localhost:20128/v1
 The port defaults to `20128` and can be changed with the `PORT` env var.
 All `/v1` endpoints accept CORS from any origin.
 
+## Configuration (environment variables)
+
+The authoritative list of environment variables is
+[`.env.example`](../.env.example) (39 keys, each commented with its default
+and effect): auth secrets (`INITIAL_PASSWORD`, `JWT_SECRET`,
+`API_KEY_SECRET`), server settings (`PORT`, `HOSTNAME`, `DATA_DIR`,
+`REQUIRE_API_KEY`), and provider/API-key credentials for the routing
+backends. Copy it with `cp .env.example .env` and edit before first boot.
+Federation-specific keys (`FEDERATION_MODE`, `FEDERATION_CENTRAL_URL`,
+`FEDERATION_TOKEN`, `FEDERATION_EDGE_ID`, `FEDERATION_REDACT_FIELDS`) are
+documented in [FEDERATION.md](FEDERATION.md). Test-harness-only variables
+(`RUN_E`, `RUN_REAL`) live in [`tests/`](../tests) and never affect a
+production deployment.
+
 ## Authentication
 
 9Router has two independent auth surfaces, and neither is a blanket
