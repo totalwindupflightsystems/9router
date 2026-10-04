@@ -1042,8 +1042,8 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
 }
 # go_toolchain_oom — did the go TOOLCHAIN itself die building under the memory
 # cap? (QA-HERMES-CANOPY-38, 2026-10-04.) On a 3G address-space cap the toolchain
-# can fail before any test runs: `runtime/cgo: SystemResources` during tool
-# bootstrap, or `cannot allocate memory` from the compiler. That is the CAP vs
+# can fail before any test runs: \`runtime/cgo: SystemResources\` during tool
+# bootstrap, or \`cannot allocate memory\` from the compiler. That is the CAP vs
 # TOOLCHAIN interaction, not a repo memory finding — grading it FAIL rc!=0
 # blamed the code for an environment ceiling.
 go_toolchain_oom_cause() { # <logfile> - print the line proving the toolchain failed to build
@@ -1081,7 +1081,7 @@ capped_fail_summary() { # <logfile> - FAIL/panic lines, else tail -3
 # on it and chaos cells burned UNVERIFIED rows across 5 ledger cycles).
 native_runner_missing_cause() { # <logfile> - print the line proving the runner was absent
   # QA-FOREMAN-2026-09-26: python module-missing form added — a pytest.ini-only
-  # repo on a bare agent dies `/usr/bin/python3: No module named pytest`, which
+  # repo on a bare agent dies \`/usr/bin/python3: No module named pytest\`, which
   # the command-not-found regex never matched (suite NEVER RAN, must grade
   # UNVERIFIED, not FAIL).
   grep -m1 -E "^(bash: )?(line [0-9]+: )?(pytest|python3?|npm|pnpm|yarn|node|go|cargo|make): (command )?not found|command not found: (pytest|python3?|npm|pnpm|yarn|node|go|cargo|make)|No module named (pytest|nose|unittest2)" "\$1" 2>/dev/null | cut -c1-220
@@ -1475,7 +1475,7 @@ if [ -n "\$BIN" ] && ! command -v \${BIN%% *} >/dev/null 2>&1; then BIN=""; fi
 #       QA_ACT_NOTE says why.
 #   (2) a step failure inside act caused by the WORKFLOW's own registry/docker
 #       coordinates (docker/login-action with no docker in the container, a
-#       `docker pull` of a private image, a registry 401/403) is not a
+#       \`docker pull\` of a private image, a registry 401/403) is not a
 #       branch-push regression. Such steps are CLASSIFIED from the log alone
 #       (ci_only_failure): the cell leaves the red FAIL band. A workflow that
 #       fails for any other reason — a real test failure, a parse error, a
@@ -1599,7 +1599,7 @@ if [ "\$HARNESS_NODE" = ok ]; then
 else
   cell toolchain-bootstrap INFO "HARNESS_NODE=missing — node/npm unavailable (install failed or offline); ui-probe frontend/ arm will grade ENV-BLOCKED on this environment gap, not a repo defect"
 fi
-# QA-MAFIA-AI-BENCHMARK-14 (2026-09-29): pnpm-lock repos rely on `corepack enable`
+# QA-MAFIA-AI-BENCHMARK-14 (2026-09-29): pnpm-lock repos rely on \`corepack enable\`
 # inside the repo's own install step, but corepack has failed silently on several
 # agents (4 consecutive mafia-ai-benchmark cycles: fresh-install/ci-pass native/
 # chaos-resource all rc=127 'pnpm: command not found' while HARNESS_NODE=ok).
@@ -1676,7 +1676,7 @@ ci_rc=skip   # no triggerable workflow: act never ran, so it has no verdict
 fi
 #QA-CELL:ci-pass:start
 # NOTE: the first test is a STRING compare on purpose — ci_rc is the literal
-# "skip" when there was no triggerable workflow, and `[ skip -eq 0 ]` makes bash
+# "skip" when there was no triggerable workflow, and \`[ skip -eq 0 ]\` makes bash
 # print "integer expression expected" and take the wrong branch.
 if [ "\$ci_rc" = "0" ]; then
   cell ci-pass OK "act: \$(grep -cE 'Job succeeded|✅ Success' \$LOGD/ci.log || true) jobs green — rc=0 (\$ACT_WF_COUNT triggerable workflow(s))"
@@ -1687,7 +1687,7 @@ else
   suite_dur=\$(( suite_end - suite_start ))
   if [ \$nat_rc -eq 0 ]; then
     ACTCTXOK=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTXOK=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
-    # QA-BUNKER-29 (2026-09-30): rc=0 from the `echo no-test-path` placeholder
+    # QA-BUNKER-29 (2026-09-30): rc=0 from the \`echo no-test-path\` placeholder
     # (or any other empty suite output) is NOT a suite result — nothing ran.
     # Grade UNVERIFIED before the OK, never a false green on a suite that
     # never ran. Non-vacuous rc=0 path is unchanged.
@@ -2207,7 +2207,7 @@ if [ "\$cap_seen" != "\$CAP_KB" ]; then
   # A result from this run says NOTHING about memory behaviour.
   cell chaos-resource UNVERIFIED "cap NOT applied in the child (\$cap_note) — the suite ran UNCAPPED, so no memory finding either way (harness defect, not a repo result): rc=\$res_rc"
 elif [ \$res_rc -eq 0 ]; then
-  # QA-BUNKER-29 (2026-09-30): rc=0 from the vacuous `echo no-test-path`
+  # QA-BUNKER-29 (2026-09-30): rc=0 from the vacuous \`echo no-test-path\`
   # placeholder is NOT a cap-survival result — no test ever exercised the cap.
   # Grade UNVERIFIED, never PASS on a suite that never ran. Non-vacuous rc=0
   # path unchanged.
