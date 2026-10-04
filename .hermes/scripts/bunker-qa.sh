@@ -2296,10 +2296,24 @@ run() {
   if [ ! -d "$repo/.git" ]; then
     local git_top
     git_top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
-    echo "ERROR: $repo is not a git repo (git resolves toplevel: ${git_top:-none}) — dispatch against the primary repo workdir" >&2
-    printf '{"cell":"run_battery","status":"FAIL","detail":"run refused: %s is not a git repo (git resolves toplevel: %s) — a role-lane workdir was dispatched instead of the primary repo; re-dispatch against the real workdir","ts":"%s"}\n' \
-      "$repo" "${git_top:-none}" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
-    exit 1
+    # QA-HARNESS-SCOPE-20261004: same subdir-of-git-repo guard as launch() — a
+    # project dir that is a SUBDIRECTORY of a git repo used to fall through here
+    # and sync the WHOLE parent repo. Mirror launch(): BUNKER_QA_SUBDIR opts into
+    # subdirectory scoping, otherwise refuse with the product-mismatch message.
+    if [ -n "${BUNKER_QA_SUBDIR:-}" ]; then
+      repo="$repo/${BUNKER_QA_SUBDIR%/}"
+      PROJ=$(basename "$repo")
+    elif [ -n "$git_top" ] && [ "$git_top" != "$(cd "$repo" && pwd)" ]; then
+      echo "ERROR: $repo is a SUBDIRECTORY of git repo $git_top — bunker-qa.sh would sync the whole parent repo and grade the wrong product. Set BUNKER_QA_SUBDIR=<subdir-relative-to-repo> (e.g. BUNKER_QA_SUBDIR=monitoring/fleet-monitoring) or dispatch against the real product git root." >&2
+      printf '{"cell":"run_battery","status":"FAIL","detail":"run refused: %s is a subdirectory of git repo %s — syncing the parent would grade the wrong product (project=%s). Set BUNKER_QA_SUBDIR=<relative subdir> or use the product git root","ts":"%s"}\n' \
+        "$repo" "$git_top" "$PROJ" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+      exit 1
+    else
+      echo "ERROR: $repo is not a git repo (git resolves toplevel: ${git_top:-none}) — dispatch against the primary repo workdir" >&2
+      printf '{"cell":"run_battery","status":"FAIL","detail":"run refused: %s is not a git repo (git resolves toplevel: %s) — a role-lane workdir was dispatched instead of the primary repo; re-dispatch against the real workdir","ts":"%s"}\n' \
+        "$repo" "${git_top:-none}" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+      exit 1
+    fi
   fi
 
   log "QA project: $PROJ — fresh-system pass on $SERVER (ttl $TTL)"
