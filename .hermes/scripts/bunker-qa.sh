@@ -2638,8 +2638,28 @@ PY
   # ONE cheap probe classifies the remote state. The pgrep pattern is
   # bracket-escaped ([q]a-run\.sh) so this PROBE's own shell argv — which
   # contains the pattern text — can never match itself and report RUNNING forever.
-  local probe
-  probe=$(BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh "if [ -f ~/qa-run.finished ]; then echo FINISHED; elif pgrep -f '[q]a-run\.sh' >/dev/null 2>&1; then echo RUNNING; else echo GONE; fi" 2>/dev/null | tail -1)
+  #
+  # QA-OFF-BY-ONE-BATTERY-LOST (2026-10-04, off-by-one on dedi-2): the probe is
+  # ONE ssh connection, and a TRANSIENT ssh failure (connection refused while
+  # sshd restarts, auth hiccup, host under load) returned no state — collect
+  # recorded "cannot reach agent … agent left intact" and EXITED while the
+  # battery was still producing evidence. The agent died at TTL with a finished
+  # battery on it; only a manual probe recovered the rows. The probe is now a
+  # 3-attempt ladder with backoff: a real state (FINISHED/GONE/RUNNING) wins on
+  # the first try (zero change to the happy path); only 3 consecutive empty
+  # probes (~3+ min window) classify unreachable, and the FAIL row then names
+  # the transient-probe suspicion and the recovery path instead of implying the
+  # agent is gone.
+  local probe="" attempt
+  for attempt in 1 2 3; do
+    probe=$(BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh "if [ -f ~/qa-run.finished ]; then echo FINISHED; elif pgrep -f '[q]a-run\.sh' >/dev/null 2>&1; then echo RUNNING; else echo GONE; fi" 2>/dev/null | tail -1)
+    case "$probe" in
+      FINISHED|GONE|RUNNING) break ;;
+    esac
+    # transient (empty/refused/denied): back off and re-probe; the state probe
+    # is cheap and idempotent, so re-running it cannot disturb the battery.
+    [ "$attempt" -lt 3 ] && sleep $((attempt * 30))
+  done
 
   case "$probe" in
     RUNNING)
@@ -2650,7 +2670,10 @@ PY
     FINISHED|GONE)
       : ;;  # marker present, or the process is gone → pull what it produced
     *)
-      append_collect_row FAIL "cannot reach agent=$agent on $SERVER (ssh probe returned no state) — agent left intact"
+      # QA-OFF-BY-ONE-BATTERY-LOST: empty after the 3-attempt ladder is most
+      # often a TRANSIENT ssh/auth failure, not a dead agent (a finished battery
+      # died with its agent at TTL this way). Name the suspicion + recovery path.
+      append_collect_row FAIL "cannot reach agent=$agent on $SERVER after 3 probe attempts (last: $(printf '%s' "$probe" | tr '\n' ' ' | cut -c1-80)) — may be TRANSIENT ssh/auth, NOT a dead agent. Recover: bunker-qa.sh collect --evidence $evidence (idempotent re-probe), or manual ssh probe of the agent before TTL; agent left intact"
       echo "COLLECT-FAIL unreachable-agent"
       exit 0
       ;;
