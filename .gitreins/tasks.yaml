@@ -226,3 +226,25 @@ tasks:
   status: complete
   created_at: '2026-10-03T18:37:52.965610+00:00'
   completed_at: '2026-10-03T18:38:28.942047+00:00'
+- id: QA-HARNESS-SCOPE-20261004
+  title: bunker-qa.sh mis-scopes non-git-repo project dirs (subdir of git repo syncs
+    whole parent)
+  criteria:
+  - bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the
+    dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR
+    names the real product subdir, in which case sync is scoped to it; bash -n clean;
+    commit reachable from origin main
+  status: in_progress
+  created_at: '2026-10-04T18:55:27.027980+00:00'
+- id: QA-OFF-BY-ONE-BATTERY-LOST
+  title: collect probe retries transient ssh failure (3-attempt ladder)
+  criteria:
+  - '1) bunker-qa.sh collect''s state probe is a 3-attempt ladder with backoff: grep
+    ''for attempt in 1 2 3'' in the probe block. 2) After 3 consecutive empty probes
+    the FAIL row names the transient-ssh suspicion and recovery path (grep ''TRANSIENT
+    ssh'' in script). 3) Extraction-harness proof: transient,transient,FINISHED sequence
+    ends COLLECTED with evidence rows pulled; 3 transients end COLLECT-FAIL with the
+    recovery note; instant FINISHED/GONE/RUNNING paths unchanged. 4) bash -n passes.'
+  status: complete
+  created_at: '2026-10-04T22:25:40.227211+00:00'
+  completed_at: '2026-10-04T22:25:44.696788+00:00'
