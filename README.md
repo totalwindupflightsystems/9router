@@ -1789,9 +1789,20 @@ Notes:
 **Cursor (`cu/`)** - Subscription:
 
 - `cu/claude-4.6-opus-max`
+- `cu/claude-4.6-sonnet-medium-thinking`
+- `cu/claude-4.5-opus-high-thinking`
+- `cu/claude-4.5-opus-high`
+- `cu/claude-4.5-opus`
 - `cu/claude-4.5-sonnet-thinking`
+- `cu/claude-4.5-sonnet`
+- `cu/claude-4.5-haiku`
 - `cu/gpt-5.3-codex`
+- `cu/gpt-5.2-codex`
+- `cu/gpt-5.2`
+- `cu/gemini-3-flash-preview`
 - `cu/kimi-k2.5`
+
+The list is synced from the provider registry (`open-sse/providers/registry/cursor.js`); `cu/auto` is also available (server picks).
 
 **GLM (`glm/`)** - $0.6/1M:
 
