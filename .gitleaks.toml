@@ -40,4 +40,9 @@ paths = [
   # Whole-tree scan trips on it whenever a backport touches the file.
   # (Both gitreins' built-in scanner and gitleaks itself honor this paths list.)
   '''src/lib/oauth/constants/oauth\.js''',
+  # SYNC-9ROUTER-001: usage-attribution test uses FAKE placeholder keys
+  # ("sk-mac...1111"/"sk-mac...2222") to prove same-prefix keys land in
+  # separate buckets. gitleaks' generic-api-key rule trips on the sk- shape
+  # despite the ellipsis; the values are not credentials.
+  '''tests/unit/usage-api-key-attribution\.test\.js''',
 ]

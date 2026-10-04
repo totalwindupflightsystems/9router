@@ -878,8 +878,15 @@ suite("QA-battery cell detection (QA-9ROUTER-21/22/26)", () => {
       });
       const verdict = ciPassVerdict(cells);
       expect(verdict.status).toBe("OK");
-      // ...but it NAMES the act failure rather than reporting a clean pass
-      expect(verdict.detail).toContain("act failed (rc=1");
+      // ...but the act failure is never folded into a clean pass. Harness
+      // QA-CHIMERA-V2-39 (2026-10-04) split the verdict into TWO cells:
+      // ci-pass OK carries "native suite PASS (see ci-act …)" and the act leg
+      // gets its own ci-act UNVERIFIED cell naming "act failed rc=N" — so a
+      // failed act leg can never read OK. Assert the two-cell contract.
+      expect(verdict.detail).toContain("see ci-act for the act leg");
+      const actCell = cells.split("\n").find((l) => l.startsWith("cell ci-act "));
+      expect(actCell).toBeTruthy();
+      expect(actCell).toContain("act failed rc=1");
     });
 
     it("a workflow's OWN registry/docker artifact is classified INFO, not a product FAIL", () => {
