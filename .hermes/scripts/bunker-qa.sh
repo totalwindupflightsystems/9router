@@ -1753,7 +1753,16 @@ fi
 # whose name starts with 'act-') so a repo's own freshly-upped stack is never
 # touched; best-effort — a teardown failure logs and continues.
 if [ -x \$HOME/bin/docker ] && [ -n "\${DOCKER_HOST:-}" ]; then
-  ACT_LEFT=\$(\$HOME/bin/docker ps -aq --filter 'label=com.docker.compose.project' 2>/dev/null \
+  # QA-DEXDAT-CORE-16 (2026-10-04): act CI legs leak containers that have NO
+  # compose label (act names them act-<Job>-<id>) but still PUBLISH host ports
+  # (e.g. 127.0.0.1:6379 from an act redis) - the label-only sweep missed them
+  # and the docker-deploy leg died 'Bind for 127.0.0.1:6379 failed: port is
+  # already allocated' (agent 5e0f55e0 @ 854726d, dc.log:3020). Sweep BOTH
+  # classes: label-bearing compose leftovers AND anything named act-*,
+  # running or exited, before the deploy legs start.
+  ACT_LEFT=\$( { \$HOME/bin/docker ps -aq --filter 'label=com.docker.compose.project' 2>/dev/null;
+                  \$HOME/bin/docker ps -aq --filter 'name=^act-' 2>/dev/null; } \
+    | sort -u \
     | while IFS= read -r cid; do
         [ -n "\$cid" ] || continue
         if \$HOME/bin/docker rm -f "\$cid" >/dev/null 2>&1; then echo "teardown: rm battery container \$cid"; fi
@@ -2311,6 +2320,17 @@ run() {
     local err_detail
     err_detail=$(tail -3 "$spawn_err" | tr '\n' ' ' | cut -c1-300)
     rm -f "$spawn_err"
+    # QA-CHIMERA-V2-40: an unreachable agent SSH port is the reachability
+    # gate failing, not a docker fault — name it so interpreters see the
+    # root cause (and the port-22 escape hatch) directly in the FAIL cell.
+    local qaprobe="${BUNKER_QA_SSH_PORT:-2223}"
+    if ! timeout 10 ssh -p "$qaprobe" -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
+      if timeout 10 ssh -p 22 -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
+        err_detail="$err_detail [root cause: agent ssh port $qaprobe unreachable on $SERVER but port 22 answers - set BUNKER_QA_SSH_PORT=22]"
+      else
+        err_detail="$err_detail [root cause: agent ssh port $qaprobe AND port 22 unreachable on $SERVER - server/network down, not a docker fault]"
+      fi
+    fi
     echo "ERROR: spawn failed on $SERVER: $err_detail" >&2
     printf '{"cell":"run_battery","status":"FAIL","detail":"spawn failed on %s: %s","ts":"%s"}\n' \
       "$SERVER" "$err_detail" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
@@ -2408,10 +2428,26 @@ launch() {
   if [ ! -d "$repo/.git" ]; then
     local git_top
     git_top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null || true)
-    echo "ERROR: $repo is not a git repo (git resolves toplevel: ${git_top:-none}) — dispatch against the primary repo workdir" >&2
-    printf '{"cell":"run_battery","status":"FAIL","detail":"launch refused: %s is not a git repo (git resolves toplevel: %s) — a role-lane workdir was dispatched instead of the primary repo; re-dispatch against the real workdir","ts":"%s"}\n' \
-      "$repo" "${git_top:-none}" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
-    exit 1
+    # QA-HARNESS-SCOPE-20261004: a project dir that is a SUBDIRECTORY of a git
+    # repo (git resolves toplevel != repo) used to pass this check and sync the
+    # WHOLE parent repo (monitoring lane: /home/kara/monitoring resolved to the
+    # kara-hermes home meta-repo; battery graded the wrong product as
+    # project=kara). Refuse with the product-mismatch message unless the caller
+    # names the real product dir via BUNKER_QA_SUBDIR (relative to repo).
+    if [ -n "${BUNKER_QA_SUBDIR:-}" ]; then
+      repo="$repo/${BUNKER_QA_SUBDIR%/}"
+      PROJ=$(basename "$repo")
+    elif [ -n "$git_top" ] && [ "$git_top" != "$(cd "$repo" && pwd)" ]; then
+      echo "ERROR: $repo is a SUBDIRECTORY of git repo $git_top — bunker-qa.sh would sync the whole parent repo and grade the wrong product. Set BUNKER_QA_SUBDIR=<subdir-relative-to-repo> (e.g. BUNKER_QA_SUBDIR=monitoring/fleet-monitoring) or dispatch against the real product git root." >&2
+      printf '{"cell":"run_battery","status":"FAIL","detail":"launch refused: %s is a subdirectory of git repo %s — syncing the parent would grade the wrong product (project=%s). Set BUNKER_QA_SUBDIR=<relative subdir> or use the product git root","ts":"%s"}\n' \
+        "$repo" "$git_top" "$PROJ" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+      exit 1
+    else
+      echo "ERROR: $repo is not a git repo (git resolves toplevel: ${git_top:-none}) — dispatch against the primary repo workdir" >&2
+      printf '{"cell":"run_battery","status":"FAIL","detail":"launch refused: %s is not a git repo (git resolves toplevel: %s) — a role-lane workdir was dispatched instead of the primary repo; re-dispatch against the real workdir","ts":"%s"}\n' \
+        "$repo" "${git_top:-none}" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+      exit 1
+    fi
   fi
 
   log "QA LAUNCH project: $PROJ — detached battery on $SERVER (ttl $TTL)"
@@ -2426,6 +2462,17 @@ launch() {
     local err_detail
     err_detail=$(tail -3 "$spawn_err" | tr '\n' ' ' | cut -c1-300)
     rm -f "$spawn_err"
+    # QA-CHIMERA-V2-40: an unreachable agent SSH port is the reachability
+    # gate failing, not a docker fault — name it so interpreters see the
+    # root cause (and the port-22 escape hatch) directly in the FAIL cell.
+    local qaprobe="${BUNKER_QA_SSH_PORT:-2223}"
+    if ! timeout 10 ssh -p "$qaprobe" -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
+      if timeout 10 ssh -p 22 -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
+        err_detail="$err_detail [root cause: agent ssh port $qaprobe unreachable on $SERVER but port 22 answers - set BUNKER_QA_SSH_PORT=22]"
+      else
+        err_detail="$err_detail [root cause: agent ssh port $qaprobe AND port 22 unreachable on $SERVER - server/network down, not a docker fault]"
+      fi
+    fi
     echo "ERROR: spawn failed on $SERVER: $err_detail" >&2
     printf '{"cell":"run_battery","status":"FAIL","detail":"spawn failed on %s: %s","ts":"%s"}\n' \
       "$SERVER" "$err_detail" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
