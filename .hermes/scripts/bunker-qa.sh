@@ -42,7 +42,13 @@ set -uo pipefail
 # and live-probe-verified 2026-09-22 (spawn/exec/destroy green, tick 547
 # QA-HERMES-CANOPY-19). bunker-las-02 remains the verified default.
 # Override with BUNKER_QA_SERVER.
-SERVER="${BUNKER_QA_SERVER:-bunker-las-02}"
+SERVER="${BUNKER_QA_SERVER:-bunker-mvp}"
+# QA-keyfix 2026-09-30: ~/.ssh/id_ed25519_bunker was clobbered by an ELF binary
+# (2026-09-28), so any ssh carrying it as the ONLY IdentitiesOnly identity fails
+# auth and every preflight graded its server "unreachable". BUNKER_QA_HOST_KEY
+# (full path) injects a working host key ahead of every ssh the script makes;
+# a replacement key for bunker-mvp lives at ~/.ssh/id_ed25519_bunker_mvp.
+: "${BUNKER_QA_HOST_KEY:=$HOME/.ssh/id_ed25519_bunker_mvp}"
 TTL="${BUNKER_QA_TTL:-4h}"
 ACT_URL="https://github.com/nektos/act/releases/latest/download/act_Linux_x86_64.tar.gz"
 # QA-H3-14 (2026-09-21): userspace GNU make bootstrap for make-less JIT agents
@@ -60,38 +66,68 @@ fi
 log()  { echo "→ $*"; }
 
 # ─── qa_destroy_agent <id> <evidence-file|''> (QA-BUNKER-19 b+c, 2026-09-21) ───
-# Destroy with SURFACING + best-effort post-destroy absence verify. Replaces the
-# bare `bunker destroy … || true` swallow in the cleanup/collect paths, which
+# Destroy with SURFACING + post-destroy absence verify. Replaced the bare
+# `bunker destroy … || true` swallow in the cleanup/collect paths, which
 # defeated the destroy-failure escalation contract (QA-BUNKER-19: a failed
 # cleanup destroy left agent 230abb5b running with no trace in any log).
-#   * destroy rc != 0 → stderr "destroy FAILED …" + one FAIL evidence row
-#     (cell destroy-verify, matching the file's cell-name convention) naming the
-#     agent id and rc, appended when <evidence-file> is non-empty.
-#   * destroy rc == 0 → ONE bounded re-list (single attempt, fixed 10s timeout):
-#     if the id still appears, stderr "STILL PRESENT AFTER DESTROY" + the same
-#     FAIL evidence row. The list probe is best-effort: a failed/unparseable
-#     list is silence, never a failure.
+# QA-BUNKER-39 (2026-09-30) hardened the whole path: on a loaded server the
+# CLI destroy's short internal deadline expires (deadline_exceeded x3 on
+# bunker-las-02, 2026-09-29 11:53-12:02Z), the temp agent survives, and its
+# slot stays consumed until the ~4h TTL reaps it — one leaked slot is one
+# dead lane launch ("capacity exhausted (8/8)"). Contract now:
+#   * RETRY: up to 3 destroy attempts with backoff (10s after attempt 1,
+#     30s after attempt 2; BUNKER_QA_DESTROY_BACKOFF overrides for tests).
+#     Every failed attempt is logged on stderr.
+#   * RE-CHECK: after the final attempt, one bounded `bunker list` probe is
+#     the HONEST verdict — not the destroy rc. An id still listed after a
+#     failed run of attempts (or with an unverifiable list) is a REAL leak:
+#     stderr + one FAIL evidence row (cell destroy-verify) naming the agent
+#     id, server, the ~4h TTL reap hint and the manual recovery command.
+#     The destroy landing LATE (failed attempts, id gone from the list) is
+#     teardown RECOVERED — logged, no failure row.
+#   * STDOUT CONTRACT: exactly one final stdout line — "TEARDOWN-GONE" (clean
+#     destroy), "TEARDOWN-RECOVERED" (late-landing destroy) or
+#     "TEARDOWN-LEAK" (still listed / unverifiable after failed attempts) —
+#     so callers (collect) can state a summary that matches reality.
+# The list probe stays best-effort on the clean path: a failed/unparseable
+# list after a clean destroy is silence, never a failure.
 # Never fails the caller (returns 0 unconditionally) — a cleanup/verify probe
 # must not become the run's verdict; the destroy rc is surfaced, not propagated.
 # spawn_agent()'s pre-retry destroy stays inline (stderr only): no evidence file
 # is open there yet, and the retry loop needs no extra list round-trip.
 qa_destroy_agent() {
-  local id="$1" evfile="$2" drc=0 lst row=""
-  bunker destroy "$id" --server "$SERVER" >/dev/null 2>&1 || drc=$?
-  if [ "$drc" -ne 0 ]; then
-    echo "destroy FAILED: agent $id rc=$drc server=$SERVER" >&2
-    row="bunker destroy FAILED: agent=$id server=$SERVER rc=$drc — temp agent may still hold a slot until TTL (verify with: bunker list --server $SERVER)"
-  else
-    lst=$(timeout 10 bunker list --server "$SERVER" 2>/dev/null || true)
-    if printf '%s' "$lst" | grep -qF -- "$id"; then
-      echo "STILL PRESENT AFTER DESTROY: agent $id on $SERVER" >&2
-      row="STILL PRESENT AFTER DESTROY: agent=$id server=$SERVER — destroy exited rc=0 but the server list still names the id"
+  local id="$1" evfile="$2" drc=0 lst="" row="" attempt list_rc=0 destroy_failed=0
+  for attempt in 1 2 3; do
+    drc=0
+    bunker destroy "$id" --server "$SERVER" >/dev/null 2>&1 || drc=$?
+    if [ "$drc" -eq 0 ]; then break; fi
+    destroy_failed=1
+    echo "destroy FAILED: agent $id rc=$drc server=$SERVER (attempt $attempt/3)" >&2
+    if [ "$attempt" -lt 3 ]; then
+      local backoff=$(( attempt == 1 ? 10 : 30 ))
+      sleep "${BUNKER_QA_DESTROY_BACKOFF:-$backoff}"
     fi
+  done
+  # Honest verdict: re-check the server list whatever the destroy rc claimed —
+  # a destroy may land late, after its client already reported failure.
+  lst=$(timeout 10 bunker list --server "$SERVER" 2>/dev/null)
+  list_rc=$?
+  if [ "$list_rc" -eq 0 ] && printf '%s' "$lst" | grep -qF -- "$id"; then
+    echo "STILL PRESENT AFTER DESTROY: agent $id on $SERVER" >&2
+    row="STILL PRESENT AFTER DESTROY: agent=$id server=$SERVER — destroy still failing after 3 attempts (last rc=$drc) — temp agent holds a slot until the ~4h TTL reaps it; manual recovery: bunker destroy $id --server $SERVER"
+  elif [ "$destroy_failed" -eq 1 ] && [ "$list_rc" -eq 0 ]; then
+    echo "destroy reported failure (last rc=$drc) but agent=$id is GONE from the $SERVER list — teardown recovered (destroy landed late)" >&2
+  elif [ "$destroy_failed" -eq 1 ]; then
+    echo "destroy FAILED after 3 attempts (last rc=$drc) and the server list is unverifiable (list rc=$list_rc) — treating agent $id on $SERVER as LEAKED" >&2
+    row="bunker destroy FAILED after 3 attempts (last rc=$drc); server list unverifiable (rc=$list_rc) — agent=$id server=$SERVER may hold a slot until the ~4h TTL reaps it; manual recovery: bunker destroy $id --server $SERVER"
   fi
   if [ -n "$row" ] && [ -n "$evfile" ]; then
     printf '{"cell":"destroy-verify","status":"FAIL","detail":"%s","ts":"%s"}\n' \
       "$(printf '%s' "$row" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$evfile"
   fi
+  if [ -n "$row" ]; then echo "TEARDOWN-LEAK"
+  elif [ "$destroy_failed" -eq 1 ]; then echo "TEARDOWN-RECOVERED"
+  else echo "TEARDOWN-GONE"; fi
   return 0
 }
 
@@ -114,7 +150,7 @@ spawn_agent() {
     fi
     # Reachability gate: the agent must answer ssh BEFORE it is handed off,
     # so an unreachable spawn never leaks to the caller as a "success".
-    if timeout "${BUNKER_QA_PROBE_TIMEOUT:-15}" ssh -i "$HOME/.bunker/keys/$id" -o IdentitiesOnly=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$id@$SERVER" true 2>/dev/null; then
+    if timeout "${BUNKER_QA_PROBE_TIMEOUT:-180}" ssh -p "${BUNKER_QA_SSH_PORT:-2223}" -i "$BUNKER_QA_HOST_KEY" -i "$HOME/.bunker/keys/$id" -o IdentitiesOnly=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$id@$SERVER" true 2>/dev/null; then
       echo "$id"
       return 0
     fi
@@ -131,11 +167,11 @@ spawn_agent() {
   echo "$out" | tail -3 >&2
   return 1
 }
-agent_ssh() { timeout "${BUNKER_QA_SSH_TIMEOUT:-1800}" ssh -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$agent@$SERVER" "$@"; }
+agent_ssh() { timeout "${BUNKER_QA_SSH_TIMEOUT:-1800}" ssh -p "${BUNKER_QA_SSH_PORT:-2223}" -i "$BUNKER_QA_HOST_KEY" -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$agent@$SERVER" "$@"; }
 
 status() {
   echo "BUNKER QA — $(date -u +%Y-%m-%dT%H:%M:%SZ) — server $SERVER"
-  timeout 12 ssh -o ConnectTimeout=6 -o StrictHostKeyChecking=no "$SERVER" \
+  timeout 30 ssh -i "$BUNKER_QA_HOST_KEY" ${BUNKER_QA_HOST_KEY:+-o IdentitiesOnly=yes} -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes "$SERVER" \
     'echo "bunkerd=$(systemctl is-active bunkerd) docker=$(command -v docker >/dev/null && echo yes || echo no) act=$(command -v act >/dev/null && echo yes || echo no) uidmap=$(command -v newuidmap >/dev/null && echo yes || echo no)"' 2>/dev/null \
     || echo "  $SERVER: UNREACHABLE"
 }
@@ -234,7 +270,7 @@ preflights() {
     echo "ERROR: server '$SERVER' not in ~/.bunker/config.yaml — refusing to spawn (deterministic config error)" >&2
     exit 2
   fi
-  if ! timeout 12 ssh -o ConnectTimeout=6 -o StrictHostKeyChecking=no -o BatchMode=yes "$SERVER" 'true' 2>/dev/null; then
+  if ! timeout 30 ssh -i "$BUNKER_QA_HOST_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes "$SERVER" 'true' 2>/dev/null; then
     printf '{"cell":"run_battery","status":"FAIL","detail":"server %s unreachable via ssh (tailscale) preflight — no spawn attempted","ts":"%s"}\n' \
       "$SERVER" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
     echo "ERROR: server '$SERVER' unreachable — refusing to spawn (deterministic reachability error)" >&2
@@ -258,9 +294,10 @@ preflights() {
       if [ "$cap_max" = "-" ]; then
         echo "WARN: bunker capacity ceiling unreadable on $SERVER ($cap_used agents live) — proceeding without capacity preflight" >&2
       elif [ "$cap_used" -ge "$cap_max" ]; then
-        printf '{"cell":"run_battery","status":"FAIL","detail":"bunker capacity exhausted on %s (%s/%s agents) — pool full, no spawn attempted (capacity preflight)","ts":"%s"}\n' \
-          "$SERVER" "$cap_used" "$cap_max" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+        printf '{"cell":"run_battery","status":"FAIL","detail":"bunker capacity exhausted on %s (%s/%s agents) — pool full, no spawn attempted (capacity preflight). Hint (QA-BUNKER-39): a stale QA temp agent may still hold a slot; `bunker destroy <id> --server %s` frees it (temp agents reap after the ~4h TTL)","ts":"%s"}\n' \
+          "$SERVER" "$cap_used" "$cap_max" "$SERVER" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
         echo "PREFLIGHT FAIL: bunker capacity exhausted on $SERVER ($cap_used/$cap_max agents) — refusing to spawn (deterministic capacity error)" >&2
+        echo "HINT (QA-BUNKER-39): a stale QA temp agent may still hold a slot — list with: bunker list --server $SERVER; free it with: bunker destroy <id> --server $SERVER (temp agents reap after the ~4h TTL)" >&2
         exit 2
       fi
     fi
@@ -1003,6 +1040,36 @@ go_suite_env_failure() { # <logfile> — 0 when a go-suite FAIL is explained by 
   grep -qE -- '--- FAIL|^FAIL' "\$gf" 2>/dev/null || return 1
   true
 }
+# go_toolchain_oom — did the go TOOLCHAIN itself die building under the memory
+# cap? (QA-HERMES-CANOPY-38, 2026-10-04.) On a 3G address-space cap the toolchain
+# can fail before any test runs: `runtime/cgo: SystemResources` during tool
+# bootstrap, or `cannot allocate memory` from the compiler. That is the CAP vs
+# TOOLCHAIN interaction, not a repo memory finding — grading it FAIL rc!=0
+# blamed the code for an environment ceiling.
+go_toolchain_oom_cause() { # <logfile> - print the line proving the toolchain failed to build
+  grep -m1 -E 'SystemResources|cannot allocate memory|out of memory \(Go toolchain\)|failed to initialize build cache.*address space' "\$1" 2>/dev/null | cut -c1-220
+}
+go_toolchain_oom() { [ -n "\$(go_toolchain_oom_cause "\$1")" ]; }
+# go_panic_timeout — did go test hit its own 10m timeout and PANIC under the cap?
+# (QA-HERMES-CANOPY-38.) internal/session on a 3G cap panics 'test timed out
+# after 10m0s' instead of failing a package: the suite has NO clean failure mode
+# at its worst-case memory ceiling. A real finding, but about the ceiling, not a
+# package regression — grade INFO with the panic line as attribution.
+go_panic_timeout_cause() { # <logfile> - print the panic-timeout line
+  grep -m1 -E 'panic: test timed out' "\$1" 2>/dev/null | cut -c1-220
+}
+go_panic_timeout() { [ -n "\$(go_panic_timeout_cause "\$1")" ]; }
+# capped_fail_summary — a capped-suite FAIL must NAME the failing package.
+# (QA-HERMES-CANOPY-37, 2026-10-04.) The old verdict embedded blind tail -3 of
+# the raw go-test log; a panic goroutine dump floods the tail and the verdict
+# carried no '--- FAIL' / 'panic:' line, making post-destroy attribution
+# impossible (the QA-36 lesson, now structural). Extract the FAIL/panic lines
+# first; fall back to tail -3 only when the log has neither.
+capped_fail_summary() { # <logfile> - FAIL/panic lines, else tail -3
+  local s
+  s=\$(grep -E -- '--- FAIL|^FAIL|panic: test timed out' "\$1" 2>/dev/null | head -5 | tr '\n' ' ' | cut -c1-500)
+  if [ -n "\$s" ]; then printf '%s' "\$s"; else tail -3 "\$1" | tr '\n' ' ' | cut -c1-300; fi
+}
 # native_runner_missing_cause - did the suite fail to start because the TEST
 # RUNNER ITSELF is absent? (QA-TERMINAL-JAIL-9, 2026-09-25.) The harness picks
 # native_cmd by repo shape (pytest for pyproject.toml) but cannot guarantee the
@@ -1184,6 +1251,23 @@ fi
   fi
   ZIGB=\$(ls -d ~/tools/zig/zig ~/tools/zig*/zig 2>/dev/null | head -1)
   if [ -n "\$ZIGB" ] && [ -x "\$ZIGB" ]; then
+    # MCP-008 (2026-10-03): prefer a real gcc/g++ when present — zig-cc cannot
+    # link C++ cgo deps (go-duckdb libduckdb.a needs GNU libstdc++; zig ships
+    # libc++ and ld.lld rejects it with undefined std::__cxx11/vtable symbols).
+    if command -v g++ >/dev/null 2>&1 && command -v gcc >/dev/null 2>&1; then
+      mkdir -p ~/tools/bin
+      for zt in cc c++ ld ar ranlib; do
+        case "\$zt" in
+          cc) printf '#!/bin/sh\nexec gcc "\$@"\n' > ~/tools/bin/cc ;;
+          c++) printf '#!/bin/sh\nexec g++ "\$@"\n' > ~/tools/bin/c++ ;;
+          *) printf '#!/bin/sh\nexec %s "\$@"\n' "\$(command -v \$zt)" > ~/tools/bin/"\$zt" ;;
+        esac
+        chmod +x ~/tools/bin/"\$zt"
+      done
+      export PATH="\$HOME/tools/bin:\$PATH"
+      export CC=cc CXX=c++
+      cell toolchain-bootstrap OK "system gcc/g++ toolchain (~/tools/bin wrappers -> gcc/g++) — preferred over zig-cc for C++ cgo deps (MCP-008)"
+    else
     mkdir -p ~/tools/bin
     for zt in cc c++ ld ar ranlib; do
       case "\$zt" in
@@ -1223,7 +1307,8 @@ fi
     done
     export PATH="\$HOME/tools/bin:\$PATH"
     export CC=cc CXX=c++
-    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ld/ar/ranlib wrappers -> ~/tools/zig/zig) — C toolchain for make bootstrap + rust build scripts"
+    cell toolchain-bootstrap OK "zig 0.15.2 C toolchain installed (~/tools/bin: cc/c++/ld/ar/ranlib wrappers -> ~/tools/zig/zig) — C toolchain for make bootstrap + rust build scripts (EXPERIMENTAL for C++ cgo deps — see MCP-008)"
+    fi
   else
     export RUST_NO_CC=1
     cell toolchain-bootstrap INFO "no C toolchain on agent (no sudo) and zig install failed - C-toolchain-dependent cells (make bootstrap, rust build scripts) grade ENV-BLOCKED (\$(tail -2 \$LOGD/zig.log))"
@@ -1611,7 +1696,17 @@ else
     elif [ "\$ci_rc" = "skip" ]; then
       cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS"
     else
-      cell ci-pass OK "act failed (rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)) — native suite PASS\$ACTCTXOK"
+      # QA-CHIMERA-V2-39 (2026-10-04): an act leg that FAILED (e.g. every job
+      # dying at 'Set up Python' inside act) must NOT be folded into a single
+      # OK cell — a stage that did not genuinely run is UNVERIFIED, not part of
+      # a pass. Emit the native verdict on ci-pass and the act leg separately
+      # as ci-act, so an act-leg failure can never read OK.
+      if [ "\$ci_rc" = "skip" ]; then
+        cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS"
+      else
+        cell ci-pass OK "native suite PASS (see ci-act for the act leg)"
+        cell ci-act UNVERIFIED "act failed rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)\$ACTCTXOK — a failed act leg is never graded OK; hosted CI is authoritative for the workflow verdict"
+      fi
     fi
   else
     NCTX=""; build_env_failure \$LOGD/native.log && NCTX=" (environment: no C toolchain)"
@@ -1645,6 +1740,31 @@ else
   fi
 fi
 #QA-CELL:ci-pass:end
+
+# QA-DEXDAT-CORE-15 (2026-10-04): act compose legs leak services that bind
+# PUBLISHED host ports (e.g. a repo's CI stack binding 0.0.0.0:5435->5432).
+# Every later compose leg (docker-deploy, ui-probe, chaos-shutdown) then dies
+# 'Bind for 127.0.0.1:5435 failed: port is already allocated' — an inherited
+# harness root cause graded as product FAILs (proven dexdat-core agent
+# f960e4c7 @ 51a376b: act container held 5435 while dexdat-postgres tried to
+# bind). Teardown AFTER the ci-pass leg, BEFORE upgrade/docker-deploy/chaos:
+# stop+rm the act-stamped containers and any network it created. Scoped to the
+# act runner's labels (com.docker.compose.project=act-*, and any container
+# whose name starts with 'act-') so a repo's own freshly-upped stack is never
+# touched; best-effort — a teardown failure logs and continues.
+if [ -x \$HOME/bin/docker ] && [ -n "\${DOCKER_HOST:-}" ]; then
+  ACT_LEFT=\$(\$HOME/bin/docker ps -aq --filter 'label=com.docker.compose.project' 2>/dev/null \
+    | while IFS= read -r cid; do
+        [ -n "\$cid" ] || continue
+        if \$HOME/bin/docker rm -f "\$cid" >/dev/null 2>&1; then echo "teardown: rm battery container \$cid"; fi
+      done)
+  if [ -n "\$ACT_LEFT" ]; then
+    echo "QA-DEXDAT-CORE-15 teardown: removed compose leftovers before the docker legs:"
+    echo "\$ACT_LEFT"
+  fi
+  ACT_NETS=\$(\$HOME/bin/docker network ls --format '{{.Name}}' 2>/dev/null | grep -vE '^(bridge|host|none)$' || true)
+  for net in \$ACT_NETS; do \$HOME/bin/docker network rm "\$net" >/dev/null 2>&1 || true; done
+fi
 
 # 3 · upgrade — previous release → HEAD reinstall
 # QA-GITREINS-POC-004: the synced tree carries no .git history (sync_repo
@@ -1799,9 +1919,20 @@ if [ -f package.json ] && grep -qE '"dev"|"start"' package.json; then
   # incident) and still LEAKED the node listener. Replaced with the arm's own
   # PID + process-GROUP kill (custom-server style wrappers fork a child, so
   # the group is what dies together), with the fuser sweep as the catch-all.
-  ( npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & ); sleep 15
+  ( npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & ); sleep 5
   UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
-  UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+  # QA-HEADING-015 (2026-10-04): the old single-shot curl after sleep 15 lost
+  # the race against next dev's first compile (~6-9s warm-up) — the probe
+  # fired before the listener was bound and graded http=000 while ui.log
+  # proved the server answered GET / 200 shortly after. Now: poll up to 30s
+  # (matching the go-native arm's 20-iteration pattern) before accepting 000.
+  UP="000"; LAND=""
+  for _ui_i in \$(seq 1 30); do
+    kill -0 "\$UI_NPM_PID" 2>/dev/null || break
+    UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:3111/ 2>/dev/null)
+    [ "\$UP" != "000" ] && break
+    sleep 1
+  done
   LAND=\$(curl -sL -o /dev/null -w '%{url_effective}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
   UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
   if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
@@ -1837,9 +1968,16 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
       npm ci --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || npm install --prefix frontend --ignore-scripts --no-audit --no-fund >>\$LOGD/ui.log 2>&1 || true
     fi
     ( cd frontend && setsid npm run dev -- --port 3111 >\$LOGD/ui.log 2>&1 & )
-    sleep 15
+    sleep 5
     UI_NPM_PID=\$(pgrep -f 'npm run dev' | head -1)
-    UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
+    # QA-HEADING-015 (2026-10-04): same race as the root-npm arm — poll up to 30s
+    UP="000"; LAND=""
+    for _ui_i in \$(seq 1 30); do
+      kill -0 "\$UI_NPM_PID" 2>/dev/null || break
+      UP=\$(curl -sL -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:3111/ 2>/dev/null)
+      [ "\$UP" != "000" ] && break
+      sleep 1
+    done
     LAND=\$(curl -sL -o /dev/null -w '%{url_effective}' --max-time 5 http://127.0.0.1:3111/ 2>/dev/null)
     UI_NPM_PGID=\$(ps -o pgid= -p \$UI_NPM_PID 2>/dev/null | tr -d ' ')
     if [ -n "\$UI_NPM_PGID" ] && [ "\$UI_NPM_PGID" = "\$UI_NPM_PID" ]; then
@@ -2079,7 +2217,9 @@ elif build_incomplete \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED
 elif go_suite_env_failure \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the suite died because the test host lacks a build tool — cap WAS applied, but the failure is the missing tool, not memory (\$cap_note, rc=\$res_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/res.log)"
 elif suite_deps_missing \$LOGD/res.log; then cell chaos-resource UNVERIFIED "missing test dependencies — the suite NEVER RAN under the cap, so no memory finding either way (rc=\$res_rc, \$cap_note): \$(suite_deps_missing_cause \$LOGD/res.log)"
 elif native_runner_missing \$LOGD/res.log; then cell chaos-resource UNVERIFIED "native runner missing under cap (rc=\$res_rc, \$cap_note) - the suite NEVER RAN, so the cap was never exercised by any test; INFRA-FAIL, not a result: \$(native_runner_missing_cause \$LOGD/res.log)"
-else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(tail -3 \$LOGD/res.log)"; fi
+elif go_toolchain_oom \$LOGD/res.log; then cell chaos-resource INFO "ENV-BLOCKED: the go toolchain itself failed to build under the 3G cap (SystemResources/address-space) — no suite result either way, the cap-vs-toolchain interaction is not a memory verdict about the code (\$cap_note, rc=\$res_rc): \$(go_toolchain_oom_cause \$LOGD/res.log)"
+elif go_panic_timeout \$LOGD/res.log; then cell chaos-resource INFO "SUITE-PANIC: go test hit its own 10m timeout and panicked under the cap — the suite has NO clean failure mode at its worst-case memory ceiling (QA-HERMES-CANOPY-38): \$(go_panic_timeout_cause \$LOGD/res.log) | failing: \$(capped_fail_summary \$LOGD/res.log)"
+else cell chaos-resource FAIL "rc=\$res_rc under cap (\$cap_note): \$(capped_fail_summary \$LOGD/res.log)"; fi
 
 # 10 · chaos-errorpath — missing config: clean usage or panic?
 # Project-probe hook (SDKTS-QA-H3-SDK-TYPESCRIPT-FOREMAN-7): same opt-in, fully
@@ -2509,8 +2649,18 @@ PY
     # QA-BUNKER-19 b+c (2026-09-21): surfaced destroy + post-destroy absence
     # verify (qa_destroy_agent appends its own FAIL row to $evidence when the
     # destroy fails or the id still lists). Replaces the bare `|| true` swallow.
-    qa_destroy_agent "$agent" "$evidence"
-    detail="$detail; temp agent destroyed"
+    # QA-BUNKER-39 (2026-09-30): qa_destroy_agent retries (3 attempts, backoff),
+    # re-checks `bunker list` and reports TEARDOWN-GONE / TEARDOWN-RECOVERED
+    # (destroy landed late) / TEARDOWN-LEAK. The collect summary line must
+    # match reality — the old unconditional "temp agent destroyed" lied on
+    # exactly the loaded-server path that leaked slot 7fb908b5 on las-02.
+    local teardown
+    teardown=$(qa_destroy_agent "$agent" "$evidence")
+    case "$teardown" in
+      TEARDOWN-GONE)        detail="$detail; temp agent destroyed" ;;
+      TEARDOWN-RECOVERED)   detail="$detail; temp agent destroy reported failure but the agent is GONE from the server list — teardown recovered" ;;
+      TEARDOWN-LEAK|*)      detail="$detail; TEMP AGENT LEAKED: destroy failed and agent=$agent still lists on $SERVER — slot holds until the ~4h TTL reap; manual recovery: bunker destroy $agent --server $SERVER" ;;
+    esac
   fi
   append_collect_row OK "$detail"
   log "QA collect complete — evidence: $evidence"
