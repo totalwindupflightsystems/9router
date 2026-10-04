@@ -39,3 +39,15 @@
 - perf: drain 12.9s, prom query 2.5s — nothing user-visible slow; 122M upload 2m07s = upstream 504s, no PERF row
 - left behind: docs/dogfood/2026-10-01-run4-timer-regression-and-fresh-install.md, rows 013/014/015 (commit 7db304cca)
 - foreman woken: no (cooldown pinned 86400 by fleet-toml-import; rows pending on a live enabled lane)
+
+## 2026-10-04 (run 5) | monitoring | FAILED — live delivery chain dark again
+- repeat-run angle: verify closed P1 rows (009/010/011) against LAST NIGHT's production timer evidence + chain health + perf re-measure
+- promise: nightly timer ships a restorable set; restore-check proves it; alerts become board rows both directions
+- reality: backup/restore legs now GREEN on production evidence — timer 10-04 03:03 shipped 5-file set (bundle 1.1MB + HEAD 0a2d78c7 + grafana.db 1.6MB + prom snapshot 232MB + MANIFEST), restore-check PASS incl. bundle-valid + HEAD-match; snapshot pruning active (keep-2); manual re-run 46s PASS. BUT the alert->row chain is DARK again since the router container restarted ~2026-10-02 04:00Z: 56 events received, 55 errors, 0 rows spooled, spool dir EMPTY. Live probe (valid token) confirmed: POST /webhook -> 200 then 'resolved spool failed: [Errno 13] Permission denied: /spool/board-rows.jsonl' — router-spool volume root not writable by uid 10001 (router). Same uid/perm class as closed MON-DOGFOOD-001, recurred on restart/volume recreate; silent because the webhook still 200s. Auth path healthy (unauth probe -> 401).
+- install: SKIPPED-install-bunker — no reachable bunkerd host (las-03 offline 9h, las-01 14h, las-02 daemon offline/unauthenticated); MON-DOGFOOD-017 filed. Material: fleet-monitoring subtree changed since run 4's leg (cbc9dcc, DOC-004).
+- time-to-first-success: backup 46s; chain probe reached delivery failure in seconds (the failure IS the finding)
+- top findings: MON-DOGFOOD-016 (P0 chain dark: spool Permission denied under 200-masking webhook, 55 events lost since 10-02), MON-DOGFOOD-017 (P2 skipped install leg, evidence attached)
+- perf: prom query 2ms, router health 5ms, grafana 3ms, webhook 2.6ms, backup+restore-check 46s — nothing user-visible slow; no PERF rows
+- left behind: rows 016/017 (commits 32352d9d6, 8e989d83b on origin/main via wt/sched-gap-1662); no repo files touched beyond board + log (meta-repo sibling work in flight)
+- foreman woken: no (lane cooldown-pinned; P0 row is pending on a live enabled lane)
+- verdict: FAILED — one honest real-use probe showed the flagship workflow (alert->row) delivering nothing for ~2 days while every green metric lied
