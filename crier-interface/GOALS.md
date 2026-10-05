@@ -3,8 +3,8 @@
 **Status:** ACTIVE · opened 2026-10-03 · owner: Bane · maintained by: Hermes
 **One line:** build the **entire** comms system — the primary interface for humans to talk to agents —
 register users with the right access, then tag agents, groups of agents and sessions, so people and
-projects can send messages and get the data they need. **Built to grow**, on a **dual backend**
-(PostgreSQL + JSONL, kept in sync).
+projects can send messages and get the data they need. **Built to grow**, with portable JSONL,
+embedded SQLite for Postgres-free deployments, and PostgreSQL as an optional server backend.
 
 This file is the canonical goal. Subgoals are added as Bane gives detail. Every subgoal carries its own
 status and the evidence or decision it waits on.
@@ -22,15 +22,18 @@ status and the evidence or decision it waits on.
 5. **Brand.** charcoal `#0b0d12`, mint `#4cc38a`, lavender/amber accents, robots as mascots.
 6. **Build the whole system, designed to grow.** Not a slice — the full comms interface, so more
    projects, more teams and more agents slot in without a redesign. (Bane, 2026-10-03.)
-7. **Dual backend, kept in sync: PostgreSQL + JSONL files.** PostgreSQL is the queryable store; JSONL is
-   the **transport/interchange** form (bundle a session, ship it, re-import). Postgres alone is "big and
-   heavy" — JSONL must be a first-class peer, not an export. (Bane, 2026-10-03.)
+7. **PostgreSQL is NOT required.** JSONL is the portable append/interchange format; SQLite is a
+   first-class embedded queryable/durable backend for local or single-user deployments; PostgreSQL is
+   an optional server backend for multi-user/scale deployments. The same records must round-trip across
+   them, and JSONL must be a first-class format, not a Postgres-only export. (Bane, 2026-10-03/05.)
 8. **Trust is a chain, never a shared secret.** Cross-instance federation and cross-instance signatures
    must resolve through an explicit trust ANCHOR the holder already has. Today's single `CR_FED_TOKEN` is
    the thing being replaced, not the model. (Bane, 2026-10-03.)
 9. **Summaries and merges are an INDEX, never the record.** A summary, a roll-up of summaries, or a
    compiled/merged message is always generated and marked as such, always cites what it was made from,
    and never replaces the messages underneath. The trace is the record. (Bane, 2026-10-03.)
+10. **Ship what we test.** The exact built release binary and Docker image must pass the comms,
+    persistence and federation acceptance flows before they are published. (Bane, 2026-10-05.)
 
 ---
 
@@ -70,6 +73,8 @@ status and the evidence or decision it waits on.
 | G30 | **Dagger control interface** — create, run, observe, cancel and resume a DAG from crier | OPEN | CR-CHAT-033, **D18** |
 | G31 | **Dagger as a scheduling engine** — DAG nodes that drive agents over crier, and crier events that trigger a DAG | OPEN | CR-CHAT-034 |
 | G32 | **Remote or local DAG execution** — one interface, run wherever the work belongs | OPEN | CR-CHAT-035 |
+| G33 | **Postgres-free persistence** — JSONL portability + embedded SQLite as a first-class backend; PostgreSQL remains optional for server/scale deployments | OPEN | CR-CHAT-036, **D19** |
+| G34 | **Release/deployment proof** — the actual binary and Docker image pass the comms, backend and federation E2E matrix before publish | OPEN | CR-CHAT-037 |
 
 ---
 
@@ -87,8 +92,10 @@ status and the evidence or decision it waits on.
 | G8 Multi-team scale | **CR-CHAT-010** | P2 | 003, 006 |
 | G9 Where it ships | decision only (D5) — no row until called | — | Bane |
 | G10 Wire stays honest | folded into **CR-CHAT-009** | P2 | 002–005 |
-| G11 Dual backend | **CR-CHAT-006** | P1 | 001 |
+| G11 Dual backend (JSONL + PostgreSQL) | **CR-CHAT-006** | P1 | 001 |
 | G12 Grows without redesign | folded into **CR-CHAT-010** | P2 | 003, 006 |
+| G33 Postgres-free persistence (JSONL + SQLite; PostgreSQL optional) | **CR-CHAT-036** | P1 | 006 |
+| G34 Release/deployment proof on built binaries + Docker image | **CR-CHAT-037** | P1 | 009, 023–025, 036 |
 | G13 Agent classes & resource ownership | **CR-CHAT-012** | P1 | 001 |
 | G14 Slack surfaces (channels / DMs / groups) | **CR-CHAT-013** | P1 | 001, 004 |
 | G15 Assets (S3) | **CR-CHAT-014** | P2 | 001, 006 |
@@ -139,6 +146,7 @@ Filed on the crier board 2026-10-03. **CR-CHAT-001 is the gate** — everything 
 | D16 | **Trust depth** — is trust transitive (a trusted peer's vouching for a third key is enough)? | **direct peers only by default**; transitive only through an explicit delegation, with a revocation path. No silent second-hand trust |
 | D17 | **A merged / compiled message** — a new message, or a view over the sources? | **a NEW message** whose parts each cite the source id, sources stay resolvable, never an untraceable blob |
 | D18 | **The dagger boundary** — does crier embed a runner, or call the existing dagger surface? | **call the existing surface** — crier holds the run id + evidence refs; no second executor, no second truth |
+| D19 | **Which persistence modes are required?** | JSONL portable append/interchange + SQLite embedded queryable backend with no Postgres dependency; PostgreSQL optional for server/scale. All modes share the same record contract and parity tests. |
 
 ---
 
@@ -147,13 +155,15 @@ Filed on the crier board 2026-10-03. **CR-CHAT-001 is the gate** — everything 
 The trap is two independent stores with live two-way writes: that needs distributed-transaction
 machinery and loses on conflict. The shape that works — and that this fleet already runs — is:
 
-- **JSONL is the ordered append log** (the transport form). One line per record-version, append-only,
-  git-friendly, ship-anywhere. This is exactly the board/DuckBrain pattern already in use.
-- **PostgreSQL is the query view** built from that log — indexed, searchable, transactional, the thing
-  the API serves from.
-- **Idempotent keys + keep-LAST** on replay, so re-importing a bundle is safe and repeatable.
-- **A reconciler** (the same shape as the fleet's board reconciler) proves the view and the log agree —
-  a mismatch is a *finding*, not a silent drift.
+- **JSONL is the portable ordered append/interchange log.** One line per record-version, append-only,
+  git-friendly, ship-anywhere.
+- **SQLite is the embedded queryable/durable backend** for local and single-user deployments; it must
+  run without a PostgreSQL server.
+- **PostgreSQL is an optional server query backend** for multi-user/scale deployments, not a prerequisite.
+- **Idempotent keys + keep-LAST** on replay, so re-importing a bundle is safe and repeatable across
+  SQLite and PostgreSQL.
+- **A reconciler** proves each query backend agrees with the JSONL log — a mismatch is a *finding*, not
+  silent drift.
 
 That gives "easy transport" (a session is a file bundle) without giving up Postgres's query power, and
 it keeps the protocol honest: the JSONL *is* the wire format we already speak.
@@ -167,7 +177,8 @@ it keeps the protocol honest: the JSONL *is* the wire format we already speak.
 - **Muster bridge pattern** — `scripts/onboard-connection.sh <platform>`, OpenAPI as target, one agent identity per platform connection.
 - **A2A Agent Card** — external discovery for non-crier agents.
 - **Inbox + lease/ack + TTL**, **guard** (prompt-injection classification), **webhooks**, **federation**.
-- **Postgres durability already landed** (CR-FEAT-034) — the dual backend extends it, it does not replace it.
+- **Postgres durability already landed** (CR-FEAT-034) — keep it as the optional server backend, not a prerequisite for every user.
+- **SQLite is newly required** as an embedded first-class backend; CR-CHAT-036 owns it.
 - **JSONL precedent fleet-wide**: boards are JSONL append-logs (keep-LAST), DuckBrain's storage of record
   is git-backed JSONL row-images, the scheduler ships config/templates as JSONL via a deploy API.
 - There is **no UI today** (`cmd/` = `server` + `crier-mcp`), so G1 is genuinely net-new.
