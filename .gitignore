@@ -113,3 +113,7 @@ start-dev-silent.cjs
 debug.log
 .gitreins/logs/
 .gitreins/*.lock
+
+# internal board/gitreins state — fork-only, stripped from PR head
+/.coding-hermes/
+/.gitreins/
