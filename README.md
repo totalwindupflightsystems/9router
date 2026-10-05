@@ -1369,10 +1369,12 @@ Dashboard → Providers → Connect Codex
 → 5-hour + weekly reset
 
 Models:
+  cx/gpt-6.1-sol
+  cx/gpt-6-sol
   cx/gpt-6-astra
+  cx/gpt-6-luna
   cx/gpt-5.6-sol
   cx/gpt-5.5
-  cx/gpt-5.4
 ```
 
 ### GitHub Copilot
@@ -1772,11 +1774,12 @@ Notes:
 
 **Codex (`cx/`)** - Plus/Pro:
 
+- `cx/gpt-6.1-sol`
+- `cx/gpt-6-sol`
 - `cx/gpt-6-astra`
+- `cx/gpt-6-luna`
 - `cx/gpt-5.6-sol`
 - `cx/gpt-5.5`
-- `cx/gpt-5.4`
-- `cx/gpt-5.3-codex-spark`
 
 **GitHub Copilot (`gh/`)**:
 
