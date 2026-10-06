@@ -1452,7 +1452,7 @@ Models:
 ```bash
 Dashboard → Connect Kiro
 → AWS Builder ID, AWS IAM Identity Center, Google, or GitHub
-→ Unlimited usage
+→ ~50 credits/month free (paid tiers above)
 
 Models:
   kr/claude-sonnet-4.5
@@ -1463,7 +1463,7 @@ Models:
   kr/deepseek-3.2
 ```
 
-**Pro Tip:** Best free option for Claude. No API key, no payment, fully unlimited.
+**Pro Tip:** Best free option for Claude. No API key, no payment; free tier ~50 credits/mo.
 
 ### OpenCode Free (No auth, auto-fetch models)
 
