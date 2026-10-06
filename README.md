@@ -1024,7 +1024,7 @@ Create combos with automatic fallback:
 Combo: "my-coding-stack"
   1. cc/claude-opus-5          (your subscription)
   2. glm/glm-4.7               (cheap backup, $0.6/1M)
-  3. if/kimi-k2-thinking       (free fallback)
+  3. if/kimi-k2               (free fallback)
 
 → Auto switches when quota runs out or errors occur
 ```
