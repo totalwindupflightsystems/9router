@@ -108,6 +108,32 @@ ELEVATED_PINS = {
     'bunker-review': 604800,   # weekly per Bane's review/perf ruling (was hardcoded 86400, disagreeing with the DB pin)
 }
 
+
+# ── SCHED-GAP-1671 derived REDUCE guard ─────────────────────────────────────
+# Role-suffix lanes whose cadence is a fleet CONVENTION (set by supervisor
+# rulings, e.g. review/perf weekly on 2026-09-28), not the policy matrix.
+# The REDUCE rule must never normalise these to the 6h default just because
+# their fleet.toml pin went missing (SCHED-GAP-1622 truncation family).
+CONVENTION_ROLE_SUFFIXES = (
+    '-review', '-perf', '-dogfood', '-releng', '-readme', '-docs',
+    '-sync', '-pm', '-qa',
+)
+
+def _is_convention_lane(name, pin, fleet_pins):
+    """True when a lane above TARGET_IDLE is on a convention cadence.
+
+    Derived rule (SCHED-GAP-1671 acceptance 1): the guard must come from the
+    lane's identity, not a hand-maintained list. A slow satellite-role lane
+    (…-review, …-perf, …) whose live cooldown exceeds TARGET_IDLE is on its
+    convention cadence — the policy never writes those values, so a missing
+    pin is truncation residue, NOT licence to reduce. A lane escapes the
+    guard only by being re-pinned to a canonical policy value in fleet.toml
+    (3600/21600/43200/7200), which is an explicit operator re-decision.
+    """
+    if pin in (TARGET_ACTIVE, TARGET_IDLE, TARGET_COMPLETED, 7200):
+        return False  # canonical pin says the policy matrix owns this lane
+    return any(name.endswith(sfx) for sfx in CONVENTION_ROLE_SUFFIXES)
+
 # OPERATOR_7200 — Bane-designated 2h FAST projects (killer projects under active
 # development). The RAISE rule must never lift these to the 6h default, and the
 # fleet.toml regen always writes the canonical 7200 (Bane 2026-08-23).
@@ -495,6 +521,21 @@ def main():
         if elevated is not None:
             print(f"{name:32s} {'-':8s} {cooldown:10d} {elevated:8d} ok (operator elevated pin {elevated} — hard-skipped)")
             continue
+        # DERIVED REDUCE GUARD (SCHED-GAP-1671): the hand-maintained
+        # ELEVATED_PINS list covered 9 named lanes while 33+ review/perf
+        # lanes sat outside it — a lost/truncated fleet.toml pin made the
+        # REDUCE rule see a convention-cadenced lane (weekly 604800 review,
+        # 86400 perf) as licence to normalise it to 21600. The guard is now
+        # DERIVED, not listed: a lane whose role is convention-cadenced
+        # (slow satellite roles) or whose live cooldown already exceeds
+        # TARGET_IDLE while no canonical pin says otherwise is operator
+        # convention — hard-skipped, named in the log. Removing a lane from
+        # convention means re-pinning it in fleet.toml to a canonical policy
+        # value (3600/21600/43200), which re-enables the rules.
+        if cooldown > TARGET_IDLE and _is_convention_lane(name, pin, fleet_pins):
+            print(f"{name:32s} {'-':8s} {cooldown:10d} {cooldown:8d} ok (convention cadence {cooldown}s above default — derived hard-skip, SCHED-GAP-1671)")
+            continue
+
         pending = board_pending(workdir)
 
         if pending is None:

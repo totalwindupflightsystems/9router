@@ -8,6 +8,9 @@
 #   4) routing-billing-guard.py        — api_server sessions billed to the PAYG
 #      gateway default = the provider-field leak (Bane 2026-08-31). Scans the
 #      last 6h; post-fix, dagger agent/llm/tool traffic MUST bill sub lanes.
+#   5) test_fleet_cooldown_policy_deploy_hash.py — SCHED-PERF-006/003 deploy
+#      integrity: the live fleet-cooldown-policy.py must match its canonical
+#      sidecar; a mismatch means something deployed a non-canonical variant.
 FAILED=0
 
 OUT=$(~/.hermes/venvs/board/bin/python3 ~/.hermes/scripts/test_fleet_cooldown_policy.py 2>&1)
@@ -47,6 +50,17 @@ OUT=$(~/.hermes/venvs/board/bin/python3 ~/.hermes/scripts/routing-billing-guard.
 RC=$?
 if [ $RC -ne 0 ]; then
   echo "ROUTING-BILLING REGRESSION: api_server sessions billed on the PAYG gateway default:"
+  echo "$OUT"
+  FAILED=1
+fi
+
+# Suite 5: deploy-hash integrity (SCHED-PERF-006/003). The live policy script
+# must match its canonical sidecar; a mismatch means a non-canonical variant
+# got deployed (the clobber class that struck twice on 09-21/09-22).
+OUT=$(~/.hermes/venvs/board/bin/python3 ~/.hermes/scripts/test_fleet_cooldown_policy_deploy_hash.py 2>&1)
+RC=$?
+if [ $RC -ne 0 ]; then
+  echo "DEPLOY-HASH REGRESSION: live fleet-cooldown-policy.py does not match its canonical sidecar:"
   echo "$OUT"
   FAILED=1
 fi

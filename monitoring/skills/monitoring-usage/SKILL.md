@@ -49,3 +49,20 @@ BOARD_ROOT, else spools for the drain. One row per problem per day (fingerprint+
   unit flaps on a state-dir lock. Export DOCKER_HOST to the bunkerd socket.
 - Loki hard-requires reachable S3 at boot (compactor delete-store) — a fake endpoint
   gives a restart loop, not a config error.
+
+## Backup/restore surface (run 3, 2026-09-30)
+
+- **Backup/restore is wired as: timer → root-level `backup-to-s3.sh` +
+  `restore-check.sh`, `EnvironmentFile=.env`.** The nightly timer
+  (`fleet-monitoring-backup.timer`, 03:00 UTC) is the production path; `make
+  backup` is documented but currently broken (env never reaches the script,
+  MON-DOGFOOD-010). Until that's fixed, source `.env` first:
+  `set -a && . ./.env && set +a && scripts/backup-to-s3.sh`.
+- **Verify the TIMER's manifests, not your manual run's.** journalctl -u
+  fleet-monitoring-backup.service shows what production actually shipped —
+  as of 09-30 the timer sets lacked the git bundle (MON-DOGFOOD-009), so the
+  rebuild runbook's input was missing while restore-check PASSed.
+- **A "no git bundle in this set" from restore-check is a red flag, not info** —
+  it currently exits 0; treat it as failure until MON-DOGFOOD-009 lands.
+- restore-check PASS on a set you just made by hand proves the guard works on
+  good sets; it says nothing about what the timer produced last night.

@@ -1,0 +1,50 @@
+{
+  "tick": "monitoring-foreman-2026-10-02-15-44-09",
+  "created_utc": "2026-10-02T16:05:00Z",
+  "budget": 3,
+  "workers": [
+    {
+      "task_id": "QA-MONITORING-001",
+      "title": "fresh-install path completes on a clean machine (env/example + Loki S3-optional)",
+      "worktree": "/home/kara/worktrees/monitoring-qa001-fresh-install",
+      "branch": "wt/qa001-fresh-install",
+      "base": "origin/main@ff74dcf21",
+      "paths": [
+        "monitoring/fleet-monitoring/Makefile",
+        "monitoring/fleet-monitoring/.env.example",
+        "monitoring/fleet-monitoring/scripts/check-env.sh",
+        "monitoring/fleet-monitoring/scripts/render-configs.sh",
+        "monitoring/fleet-monitoring/stack/"
+      ],
+      "priority": "P1"
+    },
+    {
+      "task_id": "MON-GAP-017",
+      "title": "alert-router: no pending row for an alert already resolved at webhook time",
+      "worktree": "/home/kara/worktrees/monitoring-gap017-router",
+      "branch": "wt/gap017-router",
+      "base": "origin/main@ff74dcf21",
+      "paths": [
+        "monitoring/fleet-monitoring/stack/alert-router/router.py"
+      ],
+      "priority": "P2"
+    }
+  ],
+  "foreman_own": [
+    {
+      "task_id": "MON-DOGFOOD-011",
+      "note": "sqlite .backup one-shot container for grafana leg; live host /root/fleet-monitoring"
+    },
+    {
+      "task_id": "MON-DOGFOOD-012",
+      "note": "snapshot prune keep-last-N after successful upload; prune 8 existing orphans"
+    }
+  ],
+  "independence": "workers touch disjoint paths (env/check-env/render-configs vs stack/alert-router); foreman edits a different file (backup-to-s3.sh) on the live host only",
+  "board_writes": "foreman-only, after merge; workers must not touch .coding-hermes",
+  "finished_at": "2026-10-02T17:15:00Z",
+  "outcome": {
+    "QA-MONITORING-001": "merged 556318353 (worker 139d8c1d9), complete",
+    "MON-GAP-017": "merged 671748b9f (landed 880419c34), deployed live, complete"
+  }
+}

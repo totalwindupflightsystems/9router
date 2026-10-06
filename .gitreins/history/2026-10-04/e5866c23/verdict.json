@@ -1,0 +1,105 @@
+{
+  "task_id": "QA-HARNESS-SCOPE-20261004",
+  "task_title": "bunker-qa.sh mis-scopes non-git-repo project dirs (subdir of git repo syncs whole parent)",
+  "task_criteria": [
+    "bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR names the real product subdir, in which case sync is scoped to it; bash -n clean; commit reachable from origin main"
+  ],
+  "passed": false,
+  "worktree": "/home/kara",
+  "branch": "wt/sched-gap-1662",
+  "commit": "ba54df0c8896025944e813bfb5ad4b2389cf8923",
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": false,
+      "any_failed": true,
+      "summary": "  \u2717 tests: scanners: nice=nice -n 10\n  \u2717 lint: scanners: nice=nice -n 10\n  ~ secrets: Command timed out after 120s (step budget)",
+      "steps": [
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": false,
+          "output": "scanners: nice=nice -n 10\nnpm notice run kara@1.0.0 test\nnpm notice run echo \"Error: no test specified\" && exit 1\nError: no test specified\n",
+          "error": "",
+          "data": {
+            "exit_code": 1
+          }
+        },
+        {
+          "id": "lint",
+          "type": "script",
+          "passed": false,
+          "output": "scanners: nice=nice -n 10\nnpm notice run kara@1.0.0 npx\nnpm notice run 'eslint' .\n\nOops! Something went wrong! :(\n\nESLint: 10.12.0\n\nESLint couldn't find an eslint.config.* file.\n\nFrom ESLint v9.0.0, the default configuration file is now eslint.config.*.\nIf you are using a .eslintrc.* file, please follow the migration guide\nto update your configuration file to the new format:\n\nhttps://eslint.org/docs/latest/use/configure/migration-guide\n\nIf you still have problems after following the migration guide, please stop by\nhttps://eslint.org/chat/help to chat with the team.\n\n",
+          "error": "",
+          "data": {
+            "exit_code": 2
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": false,
+          "output": "",
+          "error": "Command timed out after 120s (step budget)",
+          "data": {
+            "timed_out": true,
+            "timeout_s": 120
+          }
+        }
+      ],
+      "coverage": "secrets+lint+tests",
+      "degraded": true,
+      "skipped_steps": [
+        "secrets"
+      ],
+      "degradation_reason": "skipped at runtime \u2014 secrets: timed out after 120s (step budget)"
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n\n(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 5 column 330 (char 551)) The committed blob at origin/main contains both guards (2\u00d7 \"SUBDIRECTORY of git repo\"), 10\u00d7 BUNKER_QA_SUBDIR references, and is bash -n clean.\n\nAll elements of the criterion are verified with live, reproducible evidence:\n\n1. **launch/run refuse subdir-of-git-repo with product-mismatch error + FAIL e",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n\n(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 5 column 330 (char 551)) The committed blob at origin/main contains both guards (2\u00d7 \"SUBDIRECTORY of git repo\"), 10\u00d7 BUNKER_QA_SUBDIR references, and is bash -n clean.\n\nAll elements of the criterion are verified with live, reproducible evidence:\n\n1. **launch/run refuse subdir-of-git-repo with product-mismatch error + FAIL e",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [],
+            "summary": "(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 5 column 330 (char 551)) The committed blob at origin/main contains both guards (2\u00d7 \"SUBDIRECTORY of git repo\"), 10\u00d7 BUNKER_QA_SUBDIR references, and is bash -n clean.\n\nAll elements of the criterion are verified with live, reproducible evidence:\n\n1. **launch/run refuse subdir-of-git-repo with product-mismatch error + FAIL e"
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: QA-HARNESS-SCOPE-20261004\n\nStage tier1: FAIL\n  WARNING: coverage is secrets+lint+tests \u2014 secrets did not run (skipped at runtime \u2014 secrets: timed out after 120s (step budget)); run `gitreins guard` for the full gate\n    \u2717 tests: scanners: nice=nice -n 10\n  \u2717 lint: scanners: nice=nice -n 10\n  ~ secrets: Command timed out after 120s (step budget)\n\nStage tier2: PASS\n  COMPLETE\n\n(auto-parsed from non-JSON response \u2014 JSON parse failed: Expecting property name enclosed in double quotes: line 5 column 330 (char 551)) The committed blob at origin/main contains both guards (2\u00d7 \"SUBDIRECTORY of git repo\"), 10\u00d7 BUNKER_QA_SUBDIR references, and is bash -n clean.\n\nAll elements of the criterion are verified with live, reproducible evidence:\n\n1. **launch/run refuse subdir-of-git-repo with product-mismatch error + FAIL e\n\nOverall: FAIL \u2717",
+  "evaluated_at": "2026-10-04T19:11:40.328653",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-10-04T19:11:40.390355+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 3573,
+        "truncated": false,
+        "source": "git show ba54df0c8896"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 262176,
+        "truncated": true,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "QA-HARNESS-SCOPE-20261004"
+  }
+}

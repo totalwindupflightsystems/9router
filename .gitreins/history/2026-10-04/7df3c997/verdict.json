@@ -1,0 +1,111 @@
+{
+  "task_id": "QA-HARNESS-SCOPE-20261004",
+  "task_title": "bunker-qa.sh mis-scopes non-git-repo project dirs (subdir of git repo syncs whole parent)",
+  "task_criteria": [
+    "bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR names the real product subdir, in which case sync is scoped to it; bash -n clean; commit reachable from origin main"
+  ],
+  "passed": false,
+  "worktree": "/home/kara",
+  "branch": "wt/sched-gap-1662",
+  "commit": "4df04147a4f109bd416a750ffe67257ebc1226d2",
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": false,
+      "any_failed": true,
+      "summary": "  \u2717 tests: scanners: nice=nice -n 10\n  \u2717 lint: scanners: nice=nice -n 10\n  ~ secrets: Command timed out after 120s (step budget)",
+      "steps": [
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": false,
+          "output": "scanners: nice=nice -n 10\nnpm notice run kara@1.0.0 test\nnpm notice run echo \"Error: no test specified\" && exit 1\nError: no test specified\n",
+          "error": "",
+          "data": {
+            "exit_code": 1
+          }
+        },
+        {
+          "id": "lint",
+          "type": "script",
+          "passed": false,
+          "output": "scanners: nice=nice -n 10\nnpm warn exec The following package was not found and will be installed: eslint@10.12.0\nnpm notice run kara@1.0.0 npx\nnpm notice run 'eslint' .\n\nOops! Something went wrong! :(\n\nESLint: 10.12.0\n\nESLint couldn't find an eslint.config.* file.\n\nFrom ESLint v9.0.0, the default configuration file is now eslint.config.*.\nIf you are using a .eslintrc.* file, please follow the migration guide\nto update your configuration file to the new format:\n\nhttps://eslint.org/docs/latest/use/configure/migration-guide\n\nIf you still have problems after following the migration guide, please stop by\nhttps://eslint.org/chat/help to chat with the team.\n\n",
+          "error": "",
+          "data": {
+            "exit_code": 2
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": false,
+          "output": "",
+          "error": "Command timed out after 120s (step budget)",
+          "data": {
+            "timed_out": true,
+            "timeout_s": 120
+          }
+        }
+      ],
+      "coverage": "secrets+lint+tests",
+      "degraded": true,
+      "skipped_steps": [
+        "secrets"
+      ],
+      "degradation_reason": "skipped at runtime \u2014 secrets: timed out after 120s (step budget)"
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": false,
+      "any_failed": true,
+      "summary": "INCOMPLETE\n  \u2717 bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR names the real product subdir, in which case sync is scoped to it; bash -n clean; commit reachable from origin main: The criterion requires BOTH launch and run to refuse. Only launch() was fixed. launch() (lines 2398-2545) has the fix at 2437-2449: BUNKER_QA_SUBDIR scoping (repo=\"$repo/${BUNKER_QA_SUBDIR%/}\"; PROJ=basename) plus subdir refusal with product-mismatch message + FAIL evidence cell \u2014 live test `bunker-qa.sh launch /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is a SUBDIRECTORY of git repo /home/kara ... grade the wrong product' and wrote a FAIL cell. run() (lines 2275-2397) was NOT modified: `grep -c BUNKER_QA_SUBDIR` in run() = 0 (launch() = 5); its repo check at 2296-2304 still emits only the OLD 'is not a git repo' message with no product-mismatch and no subdir scoping. Live test `bunker-qa.sh run /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is not a git repo (git resolves toplevel: /home/kara)' (old message), and with BUNKER_QA_SUBDIR=fleet-monitoring set it STILL refused with the same old message and never scoped. run() is a documented first-class entry point ('SYNCHRONOUS compat mode', usage line 16) and does not call launch() \u2014 it has its own inline check, and no shared subdir helper exists (grep for subdir_scope/check_repo_scope/refuse_subdir = 0 hits). bash -n .hermes/scripts/bunker-qa.sh -> exit 0 (PASS). Commit 08a085e91 reachable from origin/main: `git merge-base --is-ancestor 08a085e91 origin/main` exit 0 and it appears in `git log origin/main` (PASS). Note: the commit message cites evidence=/tmp/qa-scope-ev.jsonl but that file is 0 bytes (empty).\nlaunch() correctly refuses subdir targets with a product-mismatch FAIL cell and honors BUNKER_QA_SUBDIR, bash -n is clean and the commit is on origin/main, but the criterion's 'launch/run' requirement is unmet because run() was left untouched and still emits the old 'not a git repo' message while ignoring BUNKER_QA_SUBDIR.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": false,
+          "output": "INCOMPLETE\n  \u2717 bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR names the real product subdir, in which case sync is scoped to it; bash -n clean; commit reachable from origin main: The criterion requires BOTH launch and run to refuse. Only launch() was fixed. launch() (lines 2398-2545) has the fix at 2437-2449: BUNKER_QA_SUBDIR scoping (repo=\"$repo/${BUNKER_QA_SUBDIR%/}\"; PROJ=basename) plus subdir refusal with product-mismatch message + FAIL evidence cell \u2014 live test `bunker-qa.sh launch /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is a SUBDIRECTORY of git repo /home/kara ... grade the wrong product' and wrote a FAIL cell. run() (lines 2275-2397) was NOT modified: `grep -c BUNKER_QA_SUBDIR` in run() = 0 (launch() = 5); its repo check at 2296-2304 still emits only the OLD 'is not a git repo' message with no product-mismatch and no subdir scoping. Live test `bunker-qa.sh run /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is not a git repo (git resolves toplevel: /home/kara)' (old message), and with BUNKER_QA_SUBDIR=fleet-monitoring set it STILL refused with the same old message and never scoped. run() is a documented first-class entry point ('SYNCHRONOUS compat mode', usage line 16) and does not call launch() \u2014 it has its own inline check, and no shared subdir helper exists (grep for subdir_scope/check_repo_scope/refuse_subdir = 0 hits). bash -n .hermes/scripts/bunker-qa.sh -> exit 0 (PASS). Commit 08a085e91 reachable from origin/main: `git merge-base --is-ancestor 08a085e91 origin/main` exit 0 and it appears in `git log origin/main` (PASS). Note: the commit message cites evidence=/tmp/qa-scope-ev.jsonl but that file is 0 bytes (empty).\nlaunch() correctly refuses subdir targets with a product-mismatch FAIL cell and honors BUNKER_QA_SUBDIR, bash -n is clean and the commit is on origin/main, but the criterion's 'launch/run' requirement is unmet because run() was left untouched and still emits the old 'not a git repo' message while ignoring BUNKER_QA_SUBDIR.",
+          "error": "",
+          "data": {
+            "verdict": "INCOMPLETE",
+            "items": [
+              {
+                "criterion": "bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR names the real product subdir, in which case sync is scoped to it; bash -n clean; commit reachable from origin main",
+                "status": "FAIL",
+                "detail": "The criterion requires BOTH launch and run to refuse. Only launch() was fixed. launch() (lines 2398-2545) has the fix at 2437-2449: BUNKER_QA_SUBDIR scoping (repo=\"$repo/${BUNKER_QA_SUBDIR%/}\"; PROJ=basename) plus subdir refusal with product-mismatch message + FAIL evidence cell \u2014 live test `bunker-qa.sh launch /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is a SUBDIRECTORY of git repo /home/kara ... grade the wrong product' and wrote a FAIL cell. run() (lines 2275-2397) was NOT modified: `grep -c BUNKER_QA_SUBDIR` in run() = 0 (launch() = 5); its repo check at 2296-2304 still emits only the OLD 'is not a git repo' message with no product-mismatch and no subdir scoping. Live test `bunker-qa.sh run /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is not a git repo (git resolves toplevel: /home/kara)' (old message), and with BUNKER_QA_SUBDIR=fleet-monitoring set it STILL refused with the same old message and never scoped. run() is a documented first-class entry point ('SYNCHRONOUS compat mode', usage line 16) and does not call launch() \u2014 it has its own inline check, and no shared subdir helper exists (grep for subdir_scope/check_repo_scope/refuse_subdir = 0 hits). bash -n .hermes/scripts/bunker-qa.sh -> exit 0 (PASS). Commit 08a085e91 reachable from origin/main: `git merge-base --is-ancestor 08a085e91 origin/main` exit 0 and it appears in `git log origin/main` (PASS). Note: the commit message cites evidence=/tmp/qa-scope-ev.jsonl but that file is 0 bytes (empty)."
+              }
+            ],
+            "summary": "launch() correctly refuses subdir targets with a product-mismatch FAIL cell and honors BUNKER_QA_SUBDIR, bash -n is clean and the commit is on origin/main, but the criterion's 'launch/run' requirement is unmet because run() was left untouched and still emits the old 'not a git repo' message while ignoring BUNKER_QA_SUBDIR."
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: QA-HARNESS-SCOPE-20261004\n\nStage tier1: FAIL\n  WARNING: coverage is secrets+lint+tests \u2014 secrets did not run (skipped at runtime \u2014 secrets: timed out after 120s (step budget)); run `gitreins guard` for the full gate\n    \u2717 tests: scanners: nice=nice -n 10\n  \u2717 lint: scanners: nice=nice -n 10\n  ~ secrets: Command timed out after 120s (step budget)\n\nStage tier2: FAIL\n  INCOMPLETE\n  \u2717 bunker-qa.sh launch/run refuses a repo dir whose git toplevel differs from the dir with a product-mismatch error + FAIL evidence cell, unless BUNKER_QA_SUBDIR names the real product subdir, in which case sync is scoped to it; bash -n clean; commit reachable from origin main: The criterion requires BOTH launch and run to refuse. Only launch() was fixed. launch() (lines 2398-2545) has the fix at 2437-2449: BUNKER_QA_SUBDIR scoping (repo=\"$repo/${BUNKER_QA_SUBDIR%/}\"; PROJ=basename) plus subdir refusal with product-mismatch message + FAIL evidence cell \u2014 live test `bunker-qa.sh launch /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is a SUBDIRECTORY of git repo /home/kara ... grade the wrong product' and wrote a FAIL cell. run() (lines 2275-2397) was NOT modified: `grep -c BUNKER_QA_SUBDIR` in run() = 0 (launch() = 5); its repo check at 2296-2304 still emits only the OLD 'is not a git repo' message with no product-mismatch and no subdir scoping. Live test `bunker-qa.sh run /home/kara/monitoring` printed 'ERROR: /home/kara/monitoring is not a git repo (git resolves toplevel: /home/kara)' (old message), and with BUNKER_QA_SUBDIR=fleet-monitoring set it STILL refused with the same old message and never scoped. run() is a documented first-class entry point ('SYNCHRONOUS compat mode', usage line 16) and does not call launch() \u2014 it has its own inline check, and no shared subdir helper exists (grep for subdir_scope/check_repo_scope/refuse_subdir = 0 hits). bash -n .hermes/scripts/bunker-qa.sh -> exit 0 (PASS). Commit 08a085e91 reachable from origin/main: `git merge-base --is-ancestor 08a085e91 origin/main` exit 0 and it appears in `git log origin/main` (PASS). Note: the commit message cites evidence=/tmp/qa-scope-ev.jsonl but that file is 0 bytes (empty).\nlaunch() correctly refuses subdir targets with a product-mismatch FAIL cell and honors BUNKER_QA_SUBDIR, bash -n is clean and the commit is on origin/main, but the criterion's 'launch/run' requirement is unmet because run() was left untouched and still emits the old 'not a git repo' message while ignoring BUNKER_QA_SUBDIR.\n\nOverall: FAIL \u2717",
+  "evaluated_at": "2026-10-04T18:59:53.736619",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-10-04T18:59:53.864026+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 262176,
+        "truncated": true,
+        "source": "git show 4df04147a4f1"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 262176,
+        "truncated": true,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "QA-HARNESS-SCOPE-20261004"
+  }
+}

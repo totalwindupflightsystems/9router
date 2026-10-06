@@ -1,0 +1,98 @@
+---
+# fleet-monitoring — install/refresh the Alloy agent on every monitored host.
+#
+# Idempotent: re-running replaces the config and restarts only when it changed, so a config
+# fix is a one-line rollout rather than a re-provision.
+#
+#   ansible-playbook -i inventory.yml site.yml --check --diff      # dry run first
+#   ansible-playbook -i inventory.yml site.yml -l dedi-2           # one host
+- name: fleet monitoring agents
+  hosts: monitored
+  become: true
+  gather_facts: true
+
+  vars:
+    alloy_image: "grafana/alloy:v1.20.0"
+    mon_host: "fleet-monitor"
+    environment: "prod"
+    alloy_state_dir: /var/lib/fleet-monitoring
+    alloy_config_dir: /etc/fleet-monitoring
+    # node_exporter textfile dir — the way a host publishes facts about itself
+    textfile_dir: /var/lib/fleet-monitoring/node-exporter-textfile
+
+  tasks:
+    - name: check docker is present
+      ansible.builtin.command: docker --version
+      changed_when: false
+      failed_when: false
+      register: docker_probe
+
+    - name: fail with an actionable message when docker is missing
+      ansible.builtin.fail:
+        msg: >-
+          docker is not installed on {{ inventory_hostname }}. Install it first (the
+          monitoring stack assumes hosts already run containers), then re-run.
+      when: docker_probe.rc != 0
+
+    - name: ensure collector directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ alloy_config_dir }}"
+        - "{{ alloy_state_dir }}"
+        - "{{ textfile_dir }}"
+
+    - name: install the Alloy agent config
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../stack/alloy/config.alloy"
+        dest: "{{ alloy_config_dir }}/config.alloy"
+        mode: "0644"
+      register: alloy_conf
+
+    - name: install the agent systemd unit
+      ansible.builtin.template:
+        src: templates/alloy.service.j2
+        dest: /etc/systemd/system/fleet-alloy.service
+        mode: "0644"
+      register: alloy_unit
+
+    - name: enable and (re)start the agent
+      ansible.builtin.systemd:
+        name: fleet-alloy
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      when: alloy_conf.changed or alloy_unit.changed
+
+    - name: assert the agent is running
+      ansible.builtin.command: systemctl is-active fleet-alloy
+      changed_when: false
+      register: alloy_active
+
+    - name: report
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: alloy is {{ alloy_active.stdout }} (pushing to {{ mon_host }})"
+
+- name: verify telemetry actually arrives
+  hosts: monitoring_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: query prometheus for hosts reporting
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/query"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          query: "count by (host) (node_boot_time_seconds)"
+        return_content: true
+      register: promq
+      failed_when: false
+
+    - name: show the hosts the monitoring host can actually see
+      ansible.builtin.debug:
+        msg: >-
+          {{ promq.json.data.result | map(attribute='metric.host') | list
+             if promq.status == 200 else 'prometheus not answering — is the stack up?' }}

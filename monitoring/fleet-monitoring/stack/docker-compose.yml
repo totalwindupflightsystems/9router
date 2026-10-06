@@ -1,0 +1,262 @@
+# fleet-monitoring — the stack itself.
+# Config is mounted read-only from this repo: no clicking, and a rebuild comes up already correct.
+#
+# Bind policy: only Grafana is bound to loopback (reach it through the tailnet or an SSH tunnel).
+# Ingest ports (9090 prometheus, 3100 loki) listen on all interfaces because fleet agents push to
+# them across the tailnet. The public posture is enforced by the Hetzner firewall
+# (terraform/firewall.tf): no inbound service ports, only UDP 41641 for WireGuard.
+
+name: fleet-monitoring
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-safe: &safe
+  restart: unless-stopped
+  logging: *default-logging
+  security_opt: [no-new-privileges:true]
+
+services:
+  prometheus:
+    <<: *safe
+    image: prom/prometheus:v3.15.0
+    container_name: mon-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROM_RETENTION:-30d}
+      - --storage.tsdb.retention.size=${PROM_RETENTION_SIZE:-8GB}
+      # agents PUSH across the tailnet (they are not scrapeable from here)
+      - --web.enable-remote-write-receiver
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # mount the RULES DIRECTORY itself, not its parent: mounting ../alerts puts the files at
+      # /etc/prometheus/rules/rules/*.yml while rule_files globs /etc/prometheus/rules/*.yml,
+      # so Prometheus starts happily with ZERO rules loaded — no error, no alerts, ever.
+      - ../alerts/rules:/etc/prometheus/rules:ro
+      - prom-data:/prometheus
+    ports:
+      - "${BIND_IP:-0.0.0.0}:9090:9090"
+    networks: [mon]
+
+  cost-exporter:
+    <<: *safe
+    image: python:3.13-slim
+    container_name: mon-cost-exporter
+    command: [python, /app/exporter.py]
+    environment:
+      HERMES_STATE_DB: /state/state.db
+      PORT: "9108"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./cost-exporter:/app:ro
+      - ${HERMES_STATE_DB_PATH:-/home/kara/.hermes/state.db}:/state/state.db:ro
+    read_only: true
+    tmpfs: [/tmp]
+    expose: ["9108"]
+    networks: [mon]
+
+  alertmanager:
+    <<: *safe
+    image: prom/alertmanager:v0.34.1
+    container_name: mon-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://localhost:9093
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # token as a FILE, so it never appears in a process listing or docker inspect
+      - ./alertmanager/router-token:/etc/alertmanager/router-token:ro
+      - am-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks: [mon]
+    depends_on: [alert-router]
+
+  loki:
+    <<: *safe
+    image: grafana/loki:3.7.8
+    container_name: mon-loki
+    # -config.expand-env=true is REQUIRED: the config interpolates ${S3_*}, and without the
+    # flag Loki treats "${S3_ACCESS_KEY}" as a literal string and dies at boot with
+    # "not a valid duration string: ${LOKI_RETENTION:-720h}". The env vars below are what it
+    # expands — Loki does not inherit them from .env on its own.
+    command:
+      - -config.file=/etc/loki/loki-config.yml
+      - -config.expand-env=true
+    environment:
+      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT in .env}
+      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in .env}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
+      S3_REGION: ${S3_REGION:-hel1}
+      LOKI_RETENTION: ${LOKI_RETENTION:-720h}
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "${BIND_IP:-0.0.0.0}:3100:3100"
+    networks: [mon]
+
+  grafana:
+    <<: *safe
+    image: grafana/grafana:13.2.2
+    container_name: mon-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD in .env}
+      # Anonymous VIEWER access, OFF by default and driven from .env.
+      #
+      # Why it exists: Grafana must never receive the admin password typed into a browser — a
+      # credential goes through a vault tool or it does not go at all — so rendering a dashboard
+      # headlessly is otherwise impossible without handling the password. Anonymous viewer is the
+      # clean alternative.
+      #
+      # Blast radius: Grafana binds loopback (GRAFANA_BIND), so this is reachable only through an
+      # SSH tunnel or the tailnet — never the public internet. Set GRAFANA_ANONYMOUS=true only
+      # while capturing, then set it back to false.
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS:-false}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Delegate PNG rendering to the renderer service (see the renderer container below).
+      # The token is MANDATORY: Grafana refuses to start the rendering service while it is the
+      # default value ("Using the default [rendering]renderer_token is not allowed for production
+      # settings") and crash-loops, taking the whole dashboard down rather than just rendering.
+      GF_RENDERING_SERVER_URL: http://renderer:8081/render
+      GF_RENDERING_CALLBACK_URL: http://grafana:3000/
+      GF_RENDERING_RENDERER_TOKEN: ${RENDERER_TOKEN:?set RENDERER_TOKEN in .env}
+      # Dashboard-only kiosk rendering: no menu chrome in captures
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-cost.json
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_SERVER_ROOT_URL: "http://localhost:3000"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ../dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1}:3000:3000"
+    networks: [mon]
+
+  # Alertmanager -> board rows -> the lane that owns the thing that broke.
+  alert-router:
+    <<: *safe
+    build:
+      context: ./alert-router
+    image: fleet-monitoring/alert-router:1
+    container_name: mon-alert-router
+    environment:
+      ALERT_ROUTER_TOKEN: ${ALERT_ROUTER_TOKEN:?set ALERT_ROUTER_TOKEN in .env}
+      ALERT_ROUTER_PORT: "8089"
+      PROM_URL: http://prometheus:9090
+      BOARD_ROOT: ${BOARD_ROOT:-/boards}
+      ALERT_ROUTER_WRITE: ${ALERT_ROUTER_WRITE:-0}
+      ALERT_ROUTER_NOTIFY: ${ALERT_ROUTER_NOTIFY:-0}
+      ALERT_ROUTER_SPOOL: /spool
+    volumes:
+      # lane boards, read for existing ids and appended to when WRITE=1
+      - ${BOARD_ROOT:-/tmp/boards}:${BOARD_ROOT:-/boards}
+      # bind the host spool dir (drained by the fleet side over rsync) - a named
+      # volume here is root-owned and the container runs as uid 10001
+      - /var/lib/fleet-monitoring/spool:/spool
+    ports:
+      - "127.0.0.1:8089:8089"
+    networks: [mon]
+
+  # The monitoring host ships its own metrics+logs like any other host.
+  alloy:
+    <<: *safe
+    image: grafana/alloy:v1.20.0
+    container_name: mon-alloy
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+    # pid: host + the host's /sys are what make prometheus.exporter.unix read the HOST rather
+    # than the container. With neither, it happily reports the container's CPU and memory —
+    # a dashboard that looks right and describes the wrong machine.
+    pid: host
+    environment:
+      HOSTNAME_LABEL: ${MONITORING_HOSTNAME:-fleet-monitor}
+      # In-network service names: this agent is a peer of prometheus/loki, so 127.0.0.1 would
+      # address the alloy container itself. Remote agents set MON_HOST instead.
+      PROM_WRITE_HOST: prometheus
+      LOKI_WRITE_HOST: loki
+      ENVIRONMENT: ${ENVIRONMENT:-prod}
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      # the systemd collector needs the host's dbus; without it every scrape logs
+      # "couldn't get dbus connection" and node_systemd_unit_state never appears
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+      - /run/systemd/private:/run/systemd/private
+      # textfile collector: the way a host publishes facts about itself (backup freshness)
+      - /var/lib/fleet-monitoring/node-exporter-textfile:/var/lib/node_exporter/textfile:ro
+      - alloy-data:/var/lib/alloy/data
+    ports:
+      - "127.0.0.1:12345:12345"
+    networks: [mon]
+
+  # Server-side image renderer. Headless-browser capture of a Grafana page proved unreliable —
+  # the panels issue their queries and get HTTP 200, but the charts never draw in the captured
+  # frame, so the screenshot shows an empty dashboard that looks exactly like "no data".
+  # Grafana's own renderer draws panels from the same datasources and returns real PNGs.
+  #
+  # Bound to loopback: it is a rendering service, never a public surface.
+  renderer:
+    <<: *safe
+    image: grafana/grafana-image-renderer:latest
+    container_name: mon-renderer
+    environment:
+      ENABLE_METRICS: "true"
+      # Must match GF_RENDERING_RENDERER_TOKEN on Grafana. Chromium needs more room than the
+      # default sandbox allows inside a container.
+      AUTH_TOKEN: ${RENDERER_TOKEN:?set RENDERER_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks: [mon]
+
+  cadvisor:
+    <<: *safe
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: mon-cadvisor
+    privileged: true
+    command:
+      - --containerd=/run/containerd/containerd.sock
+      - --containerd-namespace=moby
+      - --housekeeping_interval=30s
+    cgroup: host
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [mon]
+
+networks:
+  mon:
+    driver: bridge
+
+volumes:
+  prom-data:
+  am-data:
+  loki-data:
+  grafana-data:
+  alloy-data:
