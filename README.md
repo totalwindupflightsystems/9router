@@ -1550,13 +1550,13 @@ Or use combo: `premium-coding`
 
 ### Claude Code
 
-Edit `~/.claude/config.json`:
+Claude Code reads its endpoint from env vars (or `~/.claude/settings.json`), not
+`~/.claude/config.json`. Set:
 
-```json
-{
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key"
-}
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+claude
 ```
 
 ### Codex CLI
