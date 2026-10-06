@@ -1883,6 +1883,15 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
       DEADLINE=\$((\$(date +%s) + \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}))
       while [ \$(date +%s) -lt \$DEADLINE ]; do
         HP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:\$p/ 2>/dev/null)
+        # QA-TROUBLE-20 (2026-10-06, trouble evidence): root-path probes 404 on
+        # APIs that only route /health.json etc. Try well-known health endpoints
+        # before declaring the port dead.
+        if [ "\$HP" = "404" ] || [ "\$HP" = "000" ]; then
+          for hp_ in /health.json /health /healthz /api/health; do
+            HP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:\$p\$hp_" 2>/dev/null)
+            [ "\$HP" != "000" ] && [ "\$HP" != "404" ] && break
+          done
+        fi
         [ "\$HP" != "000" ] && break
         sleep 3
       done
