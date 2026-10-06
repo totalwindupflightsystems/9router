@@ -48,7 +48,7 @@ Deploy the SAME 9router system on multiple instances across datacenters/hosts:
 - Auth env: `JWT_SECRET` (session cookie), `INITIAL_PASSWORD`, `API_KEY_SECRET`,
   `MACHINE_ID_SALT` (machine id via `node-machine-id`).
 - Tests: vitest in `tests/` (independent ESM package). Suite is NOT all-green by design
-  (~2762 pass / ~68 fail / ~61 skip baseline, 2891 total — verified 2026-09-19,
+  (~3730 pass / ~48 fail / ~95 skip baseline, 3874 total — verified 2026-10-06,
   `tests/__baseline__/known-fails.txt`). Regression gate:
   `node tests/__baseline__/verify-no-regression.mjs <results.json>`. New federation tests
   must be additive and pass.
