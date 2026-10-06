@@ -1,0 +1,23 @@
+{
+  "tick_id": "monitoring-foreman-2026-10-06-16-03-37",
+  "wave_created": "2026-10-06T16:10:00-05:00",
+  "tasks": [
+    {
+      "id": "MON-GAP-004",
+      "title": "Extend monitoring coverage from 'the monitoring stack itself' to the fleet",
+      "worktree": "wt/monitoring-MON-GAP-004"
+    },
+    {
+      "id": "MON-GAP-012",
+      "title": "Fleet cost & tokens exporter + dashboard",
+      "worktree": "wt/monitoring-MON-GAP-012"
+    },
+    {
+      "id": "MON-GAP-013",
+      "title": "Service exporters: PostgreSQL, Redis and Traefik metrics",
+      "worktree": "wt/monitoring-MON-GAP-013"
+    }
+  ],
+  "finished_at": "2026-10-06T17:52:00-05:00",
+  "outcome": "MON-GAP-012 merged+deployed live (commits 1fa3c6026, b7ccfa470, 280cb88b9 -> origin/master); MON-GAP-004/MON-GAP-013 workers never dispatched (0 workers ran), rows remain pending"
+}
