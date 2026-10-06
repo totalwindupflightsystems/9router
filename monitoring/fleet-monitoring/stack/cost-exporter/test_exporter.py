@@ -13,6 +13,7 @@ spec.loader.exec_module(exporter)
 class ExporterTests(unittest.TestCase):
     def test_lane_inference(self):
         self.assertEqual(exporter.lane_for(None, "Review sync-worker tick #8"), "sync-worker")
+        self.assertEqual(exporter.lane_for(None, "[Scheduler tick: crier-2026-09-19-05-58-19]"), "crier")
         self.assertEqual(exporter.lane_for("/work/monitoring-MON-GAP-012", "Other"), "MON-GAP-012")
         self.assertEqual(exporter.lane_for(None, None), "unattributed")
 

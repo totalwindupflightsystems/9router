@@ -11,9 +11,13 @@ from urllib.parse import quote
 
 DB_PATH = Path(os.environ.get("HERMES_STATE_DB", "/state/state.db"))
 TICK_TITLE = re.compile(r"\b([A-Za-z0-9_.-]+)\s+tick\s*#", re.I)
+SCHEDULER_TITLE = re.compile(r"^\[Scheduler tick:\s*([A-Za-z0-9_.-]+?)-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\]", re.I)
 
 
 def lane_for(cwd, title):
+    match = SCHEDULER_TITLE.search(title or "")
+    if match:
+        return match.group(1)
     match = TICK_TITLE.search(title or "")
     if match:
         return match.group(1)

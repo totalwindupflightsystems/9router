@@ -52,6 +52,7 @@ services:
     environment:
       HERMES_STATE_DB: /state/state.db
       PORT: "9108"
+      PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./cost-exporter:/app:ro
       - ${HERMES_STATE_DB_PATH:-/home/kara/.hermes/state.db}:/state/state.db:ro
