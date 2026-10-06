@@ -44,6 +44,23 @@ services:
       - "${BIND_IP:-0.0.0.0}:9090:9090"
     networks: [mon]
 
+  cost-exporter:
+    <<: *safe
+    image: python:3.13-slim
+    container_name: mon-cost-exporter
+    command: [python, /app/exporter.py]
+    environment:
+      HERMES_STATE_DB: /state/state.db
+      PORT: "9108"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./cost-exporter:/app:ro
+      - ${HERMES_STATE_DB_PATH:-/home/kara/.hermes/state.db}:/state/state.db:ro
+    read_only: true
+    tmpfs: [/tmp]
+    expose: ["9108"]
+    networks: [mon]
+
   alertmanager:
     <<: *safe
     image: prom/alertmanager:v0.34.1
@@ -114,7 +131,7 @@ services:
       GF_RENDERING_CALLBACK_URL: http://grafana:3000/
       GF_RENDERING_RENDERER_TOKEN: ${RENDERER_TOKEN:?set RENDERER_TOKEN in .env}
       # Dashboard-only kiosk rendering: no menu chrome in captures
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-overview.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-cost.json
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -122,7 +139,7 @@ services:
       GF_SERVER_ROOT_URL: "http://localhost:3000"
       GF_INSTALL_PLUGINS: ""
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./provisioning:/etc/grafana/provisioning:ro
       - ../dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
