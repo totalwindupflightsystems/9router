@@ -1157,7 +1157,7 @@ Reality Check:
 
 - **Subscription providers** (Claude Code, Codex): Pay them directly via their websites
 - **Cheap providers** (GLM, MiniMax): Pay them directly, 9Router just routes
-- **FREE providers** (iFlow, Kiro, Qwen): Genuinely free forever, no hidden charges
+- **FREE providers** (Kiro, OpenCode Free, Vertex): Genuinely free within their free-tier limits, no hidden charges
 - **9Router**: Never charges anything, ever
 
 ---
