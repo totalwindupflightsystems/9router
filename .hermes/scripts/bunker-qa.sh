@@ -1897,7 +1897,31 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
       done
       [ -n "\$HP" ] && [ "\$HP" != "000" ] && break
     done
-    case "\$HP" in 200|301|302) cell docker-deploy OK "compose up + probe \$HP" ;; [0-9]*) cell docker-deploy INFO "compose up OK, probe \$HP" ;; *) cell docker-deploy INFO "compose up OK, no HTTP response within \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}s (probe deadline exhausted)" ;; esac
+    # QA-HIVEMIND-WORK-15 (2026-10-07, recurred 3x): an app that is healthy but
+    # only binds a port outside the derived list (or answers only on its
+    # in-container healthcheck target) graded 'no HTTP response ... probe
+    # deadline exhausted' while `docker compose up -d` had actually brought a
+    # verified-good deploy up. Before declaring the probe dead, ask docker
+    # itself: if the compose project reports at least one container with
+    # health=healthy, the deploy is up — grade OK with the healthcheck as the
+    # witness instead of masking it as INFO.
+    if [ -z "\$HP" ] || [ "\$HP" = "000" ]; then
+      # Poll the healthcheck too (QA-HIVEMIND-WORK-15 lesson: a zero/short port
+      # list reaches this branch seconds after start, before any healthcheck
+      # can report healthy — a one-shot check graded a booting deploy INFO).
+      HC=\$(docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null | grep -m1 healthy | awk '{print \$1}')
+      HCD=\$((\$(date +%s) + \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}))
+      while [ -z "\$HC" ] && [ \$(date +%s) -lt \$HCD ]; do
+        sleep 3
+        HC=\$(docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null | grep -m1 healthy | awk '{print \$1}')
+      done
+      if [ -n "\$HC" ]; then
+        cell docker-deploy OK "compose up + container healthcheck healthy (\$HC) — probe ports unreachable but deploy verified good (QA-HIVEMIND-WORK-15)"
+        docker compose down >/dev/null 2>&1
+        HP="HEALTHY"
+      fi
+    fi
+    case "\$HP" in 200|301|302) cell docker-deploy OK "compose up + probe \$HP" ;; [0-9]*) cell docker-deploy INFO "compose up OK, probe \$HP" ;; HEALTHY) : ;; *) cell docker-deploy INFO "compose up OK, no HTTP response within \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}s (probe deadline exhausted; no healthy container reported either)" ;; esac
     docker compose down >/dev/null 2>&1
   else cell docker-deploy FAIL "\$(fail_detail \$dc_rc \$LOGD/dc.log \$DC_CMD)"; fi
 else cell docker-deploy N/A "no compose file"; fi
