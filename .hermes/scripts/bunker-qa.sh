@@ -2118,9 +2118,34 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
   fi
   if [ \$daemon_pre_rc -ne 0 ]; then
     cell chaos-shutdown UNVERIFIED "rootless dockerd DEAD before the cell (socket/daemon unreachable; recovery attempt failed) — compose chain NOT exercised, daemon lifecycle issue not a shutdown defect: \$(tail -1 \$LOGD/daemon-pre.log | cut -c1-200)"
+  elif [ -x .qa/chaos-probes/shutdown.sh ]; then
+    # QA-HEADING-013 (2026-10-06): the repo's own shutdown probe REPLACES the
+    # generic chain (same opt-in contract as corruption.sh/errorpath.sh:
+    # 0=OK, 1=FAIL, 2=INFO env gap, 124=FAIL HANG, other=INFO). The probe
+    # preflights exactly the causes the generic cell could not attribute —
+    # compose config parse, image presence (cold cache), host port 4000/3101
+    # collisions from the battery's own earlier legs — and state-verifies
+    # every stop/kill step instead of trusting verb rc alone.
+    pp_out=\$(timeout 120 .qa/chaos-probes/shutdown.sh 2>&1); pp_rc=\$?
+    pp_first=\$(printf '%s' "\$pp_out" | head -1 | cut -c1-300)
+    pp_more=\$(printf '%s' "\$pp_out" | tail -n +2 | tr '\n' ' ' | cut -c1-500)
+    case "\$pp_rc" in
+      0)   cell chaos-shutdown OK "project probe: \$pp_first \$pp_more" ;;
+      1)   cell chaos-shutdown FAIL "project probe reports shutdown-chain misbehavior: \$pp_first \$pp_more" ;;
+      2)   cell chaos-shutdown INFO "project probe: environment gap, probe skipped (\$pp_first \$pp_more)" ;;
+      124) cell chaos-shutdown FAIL "project probe HANGS (>120s): \$pp_first \$pp_more" ;;
+      *)   cell chaos-shutdown INFO "project probe rc=\$pp_rc: \$pp_first \$pp_more" ;;
+    esac
   else
+  # QA-HEADING-013 (2026-10-06): measured across 4 runs (09-25/09-26/10-05/10-06
+  # evidence), each verb's stderr went to /dev/null INSIDE the group — sd.log
+  # carried only the UP=1|STOP=0|... markers, so a first-verb failure could
+  # never say WHY (port collision from the battery's own docker-deploy stack,
+  # daemon trouble, missing image — all indistinguishable). The up verb's
+  # stderr now lands in up.log and the up branch quotes its first lines.
+  up_err="\$LOGD/up.log"; : >"\$up_err"
   up_rc=0; stop_rc=0; start1_rc=0; kill_rc=0; start2_rc=0; down_rc=0
-  { docker compose up -d >/dev/null 2>&1; up_rc=\$?; echo UP=\$up_rc
+  { docker compose up -d >>"\$up_err" 2>&1; up_rc=\$?; echo UP=\$up_rc
     docker compose stop >/dev/null 2>&1; stop_rc=\$?; echo STOP=\$stop_rc
     [ \$stop_rc -eq 0 ] && sleep 4
     docker compose start >/dev/null 2>&1; start1_rc=\$?; echo RESTART=\$start1_rc
@@ -2135,7 +2160,7 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
   [ "\$sd_rc" -eq 0 ] && sd_rc=\$kill_rc
   [ "\$sd_rc" -eq 0 ] && sd_rc=\$start2_rc
   [ "\$sd_rc" -eq 0 ] && sd_rc=\$down_rc
-  if [ "\$up_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose up failed before the stop/kill chain — \$(fail_detail \$up_rc \$LOGD/sd.log 'docker compose up -d')"
+  if [ "\$up_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose up failed before the stop/kill chain — \$(fail_detail \$up_rc \$LOGD/sd.log 'docker compose up -d'); up stderr: \$(head -3 "\$up_err" 2>/dev/null | tr '\n' '|' | cut -c1-400)"
   elif [ "\$stop_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose stop failed rc=\$stop_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
   elif [ "\$start1_rc" -ne 0 ]; then cell chaos-shutdown FAIL "compose start (post-stop) failed rc=\$start1_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
   elif [ "\$kill_rc" -ne 0 ]; then cell chaos-shutdown INFO "graceful ok, kill step failed rc=\$kill_rc (chain rc=\$sd_rc) — \$(cat \$LOGD/sd.log)"
