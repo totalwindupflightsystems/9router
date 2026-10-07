@@ -43,6 +43,19 @@ set -uo pipefail
 # QA-HERMES-CANOPY-19). bunker-las-02 remains the verified default.
 # Override with BUNKER_QA_SERVER.
 SERVER="${BUNKER_QA_SERVER:-bunker-mvp}"
+# QA-HIVEMIND-WORK-18(a): the agent SSH port is SERVER-SPECIFIC (bunker-mvp
+# answers on 22; las-fleet agents answer on 2223). The old blanket bare-port
+# default made the post-spawn probe fail on mvp and the
+# retry loop DESTROY a healthy fresh agent. Known-server table; an explicit
+# BUNKER_QA_SSH_PORT export still overrides everything.
+server_ssh_port() {
+  local srv="${1:-$SERVER}"
+  [ -n "${BUNKER_QA_SSH_PORT:-}" ] && { echo "$BUNKER_QA_SSH_PORT"; return; }
+  case "$srv" in
+    mvp|bunker-mvp) echo 22 ;;
+    *) echo 2223 ;;
+  esac
+}
 # QA-keyfix 2026-09-30: ~/.ssh/id_ed25519_bunker was clobbered by an ELF binary
 # (2026-09-28), so any ssh carrying it as the ONLY IdentitiesOnly identity fails
 # auth and every preflight graded its server "unreachable". BUNKER_QA_HOST_KEY
@@ -150,11 +163,19 @@ spawn_agent() {
     fi
     # Reachability gate: the agent must answer ssh BEFORE it is handed off,
     # so an unreachable spawn never leaks to the caller as a "success".
-    if timeout "${BUNKER_QA_PROBE_TIMEOUT:-180}" ssh -p "${BUNKER_QA_SSH_PORT:-2223}" -i "$BUNKER_QA_HOST_KEY" -i "$HOME/.bunker/keys/$id" -o IdentitiesOnly=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$id@$SERVER" true 2>/dev/null; then
+    if timeout "${BUNKER_QA_PROBE_TIMEOUT:-180}" ssh -p "$(server_ssh_port "$SERVER")" -i "$BUNKER_QA_HOST_KEY" -i "$HOME/.bunker/keys/$id" -o IdentitiesOnly=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$id@$SERVER" true 2>/dev/null; then
       echo "$id"
       return 0
     fi
-    echo "spawn attempt $attempt produced agent $id but was unusable — destroyed before retry" >&2
+    # QA-HIVEMIND-WORK-18(a): port-22 fallback BEFORE any destroy — the table
+    # may be wrong for a new server, and a healthy fresh agent must never be
+    # destroyed over a wrong port guess. Destroy only when BOTH ports fail.
+    if timeout "${BUNKER_QA_PROBE_TIMEOUT:-180}" ssh -p 22 -i "$BUNKER_QA_HOST_KEY" -i "$HOME/.bunker/keys/$id" -o IdentitiesOnly=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$id@$SERVER" true 2>/dev/null; then
+      echo "  primary agent port $(server_ssh_port "$SERVER") failed but port 22 answered — using 22 (attempt $attempt)" >&2
+      echo "$id"
+      return 0
+    fi
+    echo "spawn attempt $attempt produced agent $id but was unusable on BOTH ports ($(server_ssh_port "$SERVER") and 22) — destroyed before retry" >&2
     # QA-BUNKER-19 b+c: surfaced, not swallowed — stderr only (no evidence file
     # is open inside spawn_agent, and the retry loop needs no extra list
     # round-trip); rc captured so `set -o pipefail` alone can never see it as
@@ -167,7 +188,7 @@ spawn_agent() {
   echo "$out" | tail -3 >&2
   return 1
 }
-agent_ssh() { timeout "${BUNKER_QA_SSH_TIMEOUT:-1800}" ssh -p "${BUNKER_QA_SSH_PORT:-2223}" -i "$BUNKER_QA_HOST_KEY" -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$agent@$SERVER" "$@"; }
+agent_ssh() { timeout "${BUNKER_QA_SSH_TIMEOUT:-1800}" ssh -p "$(server_ssh_port "$SERVER")" -i "$BUNKER_QA_HOST_KEY" -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes "bunker-$agent@$SERVER" "$@"; }
 
 status() {
   echo "BUNKER QA — $(date -u +%Y-%m-%dT%H:%M:%SZ) — server $SERVER"
@@ -1669,7 +1690,7 @@ ACT_WF_COUNT=\$(ls -1 \$ACT_WF_DIR 2>/dev/null | wc -l)
 QA_CI_CMD="$ci_cmd"
 if [ "\$ACT_WF_COUNT" -gt 0 ]; then QA_CI_CMD="\$QA_CI_CMD -W \$ACT_WF_DIR"; fi
 if [ "\$ACT_WF_COUNT" -gt 0 ]; then
-( timeout \${BUNKER_QA_ACT_TIMEOUT:-2400} bash -c "\$QA_CI_CMD" ) >\$LOGD/ci.log 2>&1; ci_rc=\$?
+( timeout -k 30 \${BUNKER_QA_ACT_TIMEOUT:-2400} bash -c "\$QA_CI_CMD" ) >\$LOGD/ci.log 2>&1; ci_rc=\$?
 else
 : > \$LOGD/ci.log
 ci_rc=skip   # no triggerable workflow: act never ran, so it has no verdict
@@ -1682,7 +1703,10 @@ if [ "\$ci_rc" = "0" ]; then
   cell ci-pass OK "act: \$(grep -cE 'Job succeeded|✅ Success' \$LOGD/ci.log || true) jobs green — rc=0 (\$ACT_WF_COUNT triggerable workflow(s))"
 else
   suite_start=\$(date +%s)
-  ( $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
+  # QA-HIVEMIND-WORK-18(c): the native leg previously had NO timeout at all —
+  # a hung go/cargo/npm suite ran until the agent TTL. term+kill enforcement:
+  # TERM at BUNKER_QA_NATIVE_TEST_TIMEOUT (default 5400s), KILL 30s later.
+  ( timeout -k 30 \${BUNKER_QA_NATIVE_TEST_TIMEOUT:-5400} $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
   suite_end=\$(date +%s)
   suite_dur=\$(( suite_end - suite_start ))
   if [ \$nat_rc -eq 0 ]; then
@@ -2440,7 +2464,7 @@ run() {
     # QA-CHIMERA-V2-40: an unreachable agent SSH port is the reachability
     # gate failing, not a docker fault — name it so interpreters see the
     # root cause (and the port-22 escape hatch) directly in the FAIL cell.
-    local qaprobe="${BUNKER_QA_SSH_PORT:-2223}"
+    local qaprobe; qaprobe=$(server_ssh_port "$SERVER")
     if ! timeout 10 ssh -p "$qaprobe" -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
       if timeout 10 ssh -p 22 -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
         err_detail="$err_detail [root cause: agent ssh port $qaprobe unreachable on $SERVER but port 22 answers - set BUNKER_QA_SSH_PORT=22]"
@@ -2584,7 +2608,7 @@ launch() {
     # QA-CHIMERA-V2-40: an unreachable agent SSH port is the reachability
     # gate failing, not a docker fault — name it so interpreters see the
     # root cause (and the port-22 escape hatch) directly in the FAIL cell.
-    local qaprobe="${BUNKER_QA_SSH_PORT:-2223}"
+    local qaprobe; qaprobe=$(server_ssh_port "$SERVER")
     if ! timeout 10 ssh -p "$qaprobe" -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
       if timeout 10 ssh -p 22 -o ConnectTimeout=8 -o BatchMode=yes -o StrictHostKeyChecking=no "bunker-probe-qa40@$SERVER" true 2>/dev/null; then
         err_detail="$err_detail [root cause: agent ssh port $qaprobe unreachable on $SERVER but port 22 answers - set BUNKER_QA_SSH_PORT=22]"
@@ -2652,7 +2676,21 @@ launch() {
     exit 1
   fi
 
-  local launched meta script_bytes
+  # QA-DF-CHIMERA-V2-51 (2026-10-07): a LAUNCHED marker over a 0-byte
+  # ~/qa-run.sh is the silent-battery-death failure mode from dogfood run 14 —
+  # generation aborted mid-heredoc, the agent ran an empty file, produced no
+  # evidence, and collect misreported the death as pull-failed. Refuse to
+  # declare success when the agent confirms it received an empty script.
+  local launched script_bytes
+  script_bytes=$(printf '%s' "$launch_out" | sed -n 's/^SCRIPT_BYTES=//p' | tail -1)
+  if [ -n "$script_bytes" ] && [ "$script_bytes" -eq 0 ] 2>/dev/null; then
+    echo "ERROR: battery shipped EMPTY (~/qa-run.sh 0 bytes) on agent=$agent ($SERVER) — script generation failed; NOT launching (a 'LAUNCHED' over a dead battery misleads collect)" >&2
+    printf '{"cell":"run_battery","status":"FAIL","detail":"battery script empty (0 bytes) on agent=%s (%s) — qa-run.sh generation failed on the host; launch refused instead of shipping a dead battery","ts":"%s"}\n' \
+      "$agent" "$SERVER" "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 1
+  fi
+
+  local launched meta
   launched=$(date -u +%FT%TZ)
   script_bytes=$(printf '%s' "$launch_out" | sed -n 's/^SCRIPT_BYTES=//p' | tail -1)
   write_meta "$agent" "$SERVER" "$launched" "$keep" "$PROJ"
@@ -2803,6 +2841,18 @@ PY
     exit 0
   fi
   rm -f "$errf"
+
+  # QA-DF-CHIMERA-V2-51 (2026-10-07): a SUCCESSFUL pull of a ZERO-ROW
+  # qa-evidence.jsonl is the "battery never ran" signature (empty/aborted
+  # ~/qa-run.sh — dogfood run 14), NOT a healthy collect. Every real battery
+  # writes cells from its first lines; zero rows must not merge silently and
+  # print COLLECTED over a dead battery.
+  if [ ! -s "$tmp" ]; then
+    append_collect_row FAIL "battery produced ZERO evidence rows on agent=$agent ($SERVER) — qa-run.sh never ran (empty or aborted generation), NOT a pull failure. Recover: re-launch with bunker-qa.sh launch (launch now refuses to ship a 0-byte script)"
+    rm -f "$tmp"
+    echo "COLLECT-FAIL battery-empty"
+    exit 0
+  fi
 
   # Merge-dedupe on the row "ts" field: re-calling collect after a successful
   # pull adds nothing. The merge is atomic (temp file + os.replace) so a crash
