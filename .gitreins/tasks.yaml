@@ -1482,3 +1482,14 @@ tasks:
   status: complete
   created_at: '2026-10-07T03:24:44.313764+00:00'
   completed_at: '2026-10-07T03:24:50.431833+00:00'
+- id: FLAKE-9ROUTER-003
+  title: Fix qa-harness-cell-detection test dependency on broken bunker-qa.sh
+  criteria:
+  - 'The test tests/federation/qa-harness-cell-detection.test.js must either (a) not
+    depend on the broken ~/.hermes/scripts/bunker-qa.sh __gen-remote function, or
+    (b) gracefully handle its failure and document the dependency. Acceptance: the
+    17 failures in that test file are resolved or properly marked as expected-fail
+    with a clear reason.'
+  status: complete
+  created_at: '2026-10-07T07:23:55.160758+00:00'
+  completed_at: '2026-10-07T07:30:22.658248+00:00'
