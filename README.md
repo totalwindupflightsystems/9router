@@ -1962,7 +1962,7 @@ Thanks to all contributors who helped make 9Router better!
 
 ## 📊 Star Chart
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![GitHub stars](https://img.shields.io/github/stars/decolua/9router?style=social)](https://github.com/decolua/9router)
 
 ## 🔀 Forks
 
