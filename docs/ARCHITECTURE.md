@@ -522,6 +522,29 @@ slowly; individual requests can also override it per call.
   separate `TRUST_PROXY=true` toggle, not a peer token. The `x-9r-peer-token` header is
   redacted by the request-details sanitizer before storage.
 
+### Security environment variables
+
+Operator-facing auth/security variables, consolidated (each source file is cited):
+
+| Variable | Required | Default | Security effect |
+|---|---|---|---|
+| `JWT_SECRET` | **Yes** (real deploy) | `change-me-to-a-long-random-secret` | Signs/verifies dashboard session JWT cookies; rotation invalidates all sessions. `src/lib/auth/dashboardSession.js` |
+| `INITIAL_PASSWORD` | **Yes** (real deploy) | `change-me` (in-box fallback `123456` only when the var is completely unset) | First-login dashboard password; enabled deployments disable the fallback. Rotation: set a new value. `src/app/api/auth/login/route.js` |
+| `API_KEY_SECRET` | Recommended | `endpoint-proxy-api-key-secret` | HMAC secret for generated local API keys; rotation invalidates existing keys. `src/shared/utils/apiKey.js` |
+| `MACHINE_ID_SALT` | Recommended | `endpoint-proxy-salt` | Salt for stable machine-id hashing (CLI token `x-9r-cli-token`). `src/shared/utils/machineId.js` |
+| `REQUIRE_API_KEY` | Optional | `false` (stored setting default `true`) | API-key enforcement on the public LLM API — see the README env table. `src/lib/db/repos/settingsRepo.js` |
+| `AUTH_COOKIE_SECURE` | Optional | `false` | Force `Secure` auth cookie — set `true` behind HTTPS. `src/lib/auth/dashboardSession.js` |
+| `NINEROUTER_PEER_TOKEN` | **No — internal** | generated per process | Wrapper-stamped peer proof, never operator-facing (see above). `custom-server.js`, `src/lib/auth/trustedPeer.js` |
+| `SHUTDOWN_SECRET` | Optional | unset | Bearer token for `POST /api/shutdown` in non-production (`401` if unset/mismatched; the route is `403` in production). `src/app/api/shutdown/route.js` |
+| `ROUTER_API_KEY` | Optional | unset | API key the MITM proxy (`src/mitm/`) sends to the local router when a key is required. `src/mitm/handlers/base.js` |
+| `TRUST_PROXY` | Optional | unset | `true` only behind a reverse proxy that overwrites `X-Forwarded-For` with the real client IP — enables XFF trust for login rate-limiting (never enable on direct exposure). `src/lib/auth/loginLimiter.js` |
+| `KIMI_OAUTH_CLIENT_ID` | Optional | registry value | Kimi OAuth client-id override (forks). `src/lib/oauth/constants/oauth.js` |
+| `KIMI_CODING_OAUTH_CLIENT_ID` | Optional | registry value | Kimi Code OAuth client-id override; takes precedence over `KIMI_OAUTH_CLIENT_ID`. Same file |
+
+Rotation notes: `JWT_SECRET` rotation logs out every dashboard session; `API_KEY_SECRET`
+and `MACHINE_ID_SALT` rotation invalidates existing generated keys / CLI tokens —
+regenerate downstream credentials after rotating. Secrets stay in `.env`, never committed.
+
 ## Operator Control Surfaces: pxpipe, Headroom, Tunnel, Shutdown
 
 These control routes drive host-level operations — package installs, managed child
