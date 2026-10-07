@@ -1,0 +1,21 @@
+{
+  "tick": "monitoring-foreman-2026-10-07-06-50-27",
+  "created_at": "2026-10-07T07:05:00Z",
+  "budget": 8,
+  "tasks": [
+    {
+      "id": "MON-GAP-006",
+      "worker": "worktree",
+      "worktree": "n/a for host work; worker worktree below",
+      "branch": "wt/mon-gap006-fleet-runbook",
+      "scope": "documentation only: monitoring/fleet-side-runbook.md in lane workdir"
+    },
+    {
+      "id": "MON-GAP-004",
+      "worker": "foreman-direct",
+      "worktree": "n/a (live-host verification, no file edits on host)",
+      "scope": "verify fleet-target coverage evidence live on fleet-monitor; progress/close note"
+    }
+  ],
+  "independence": "doc worker touches only monitoring/fleet-side-runbook.md; foreman touches only board JSONL via verified flips - no shared file writes"
+}
