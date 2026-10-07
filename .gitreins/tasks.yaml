@@ -1463,3 +1463,14 @@ tasks:
   status: complete
   created_at: '2026-10-04T17:39:16.868607+00:00'
   completed_at: '2026-10-04T17:41:31.082137+00:00'
+- id: README-11
+  title: Fix wrong .env.example line range pointer in README
+  criteria:
+  - "README.md references '.env.example, lines 53\u201370' for FEDERATION_* vars but\
+    \ they are at lines 82\u201395. Fix: update the pointer to 'lines 82\u201395'\
+    \ or drop line numbers and say 'see the Federation block in .env.example (search\
+    \ FEDERATION_)'. PASS: grep -n 'lines 53' README.md returns 0 AND grep -n 'Federation\
+    \ block' README.md >= 1 OR grep -n 'lines 82' README.md >= 1"
+  status: complete
+  created_at: '2026-10-07T00:54:10.382452+00:00'
+  completed_at: '2026-10-07T00:59:26.535062+00:00'
