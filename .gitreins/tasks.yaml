@@ -1474,12 +1474,11 @@ tasks:
   status: complete
   created_at: '2026-10-07T00:54:10.382452+00:00'
   completed_at: '2026-10-07T00:59:26.535062+00:00'
-- id: README-17
-  title: Fix README fallback-password contradiction (123456 vs change-me)
+- id: README-16
+  title: Fix README pricing table markdown (3 FREE rows leading space)
   criteria:
-  - 'PASS: README.md troubleshooting section no longer tells fresh-install users the
-    fallback password is 123456 without noting it differs from .env.example INITIAL_PASSWORD=change-me;
-    either aligns the values or explains the contradiction inline'
+  - README.md contains zero lines matching leading-space table rows and the FREE-tier
+    pricing table renders as one continuous markdown table
   status: complete
-  created_at: '2026-10-07T02:08:07.755809+00:00'
-  completed_at: '2026-10-07T02:09:52.076616+00:00'
+  created_at: '2026-10-07T03:24:44.313764+00:00'
+  completed_at: '2026-10-07T03:24:50.431833+00:00'
