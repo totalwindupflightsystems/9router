@@ -110,6 +110,9 @@ npm install -g 9router
 
 🎉 Dashboard opens at `http://localhost:20128`
 
+> First boot takes 10–30s (Next.js standalone server startup). If the browser
+> shows "connection refused" right after launch, wait a few seconds and retry.
+
 **2. Connect a FREE provider (no signup needed):**
 
 Dashboard → Providers → Connect **Kiro AI** (~50 credits/month free: Claude 4.5 + GLM-5 + MiniMax) or **OpenCode Free** (no auth) → Done!
@@ -221,10 +224,6 @@ sudo fallocate -l 2G /swapfile_temp
 sudo chmod 600 /swapfile_temp
 sudo mkswap /swapfile_temp
 sudo swapon /swapfile_temp
-
-export MAKEFLAGS="-j1"
-export DLIB_NO_GUI_SUPPORT=1
-export CFLAGS="-mno-avx"
 
 npm run build
 
@@ -1025,7 +1024,7 @@ Create combos with automatic fallback:
 Combo: "my-coding-stack"
   1. cc/claude-opus-5          (your subscription)
   2. glm/glm-4.7               (cheap backup, $0.6/1M)
-  3. if/kimi-k2               (free fallback)
+  3. if/kimi-k2               (free fallback — the only kimi model iflow.js ships)
 
 → Auto switches when quota runs out or errors occur
 ```
