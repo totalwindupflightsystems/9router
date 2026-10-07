@@ -639,6 +639,39 @@ probing and stays on ordinary dashboard auth.
   header (`401` when the variable is unset or mismatched, `route.js:9-14`). On success
   the Node process exits about 500 ms after the response is sent (`route.js:18-20`).
 
+### Updater / self-host lifecycle variables
+
+Used by the in-app self-update flow (`src/lib/appUpdater.js` → detached updater process
+`src/lib/updater/updater.js`). The Next server spawns the updater, exits, the updater runs
+`npm i -g <pkg>@latest` and can relaunch the app. Most `UPDATER_*` values are **injected by
+`appUpdater.js` from `UPDATER_CONFIG`** (`src/shared/constants/config.js`); the env vars are
+override points for self-host/packaged deployments, not usually hand-set.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `UPDATER_PKG_NAME` | `9router` | npm package the updater installs (`npm i -g <pkg>@latest --prefer-online`). |
+| `UPDATER_PORT` | `20129` | Loopback-only status HTTP port the updater serves `/update/status` on (browser polls it while the Next server is down). |
+| `UPDATER_APP_PORT` | `20128` | App port the updater probes to detect when the old server has exited (before install) and the new one is up (before reopening the dashboard). |
+| `UPDATER_TAIL_LINES` | `8` | How many npm output lines are kept in the status `logTail` (and written to `<DATA_DIR>/update/install.log`). |
+| `UPDATER_RETRIES` | `3` | Install attempts before the updater reports failure. |
+| `UPDATER_RETRY_DELAY_MS` | `5000` | Delay between failed install attempts. |
+| `UPDATER_LINGER_MS` | `30000` | How long the updater stays alive after finishing so the browser can read the final status. |
+| `UPDATER_WAIT_MIN_MS` | `5000` | Minimum wait before install (OS file-handle release; matters on Windows). |
+| `UPDATER_WAIT_MAX_MS` | `20000` | Max wait for the app port to go free before proceeding anyway. |
+| `UPDATER_WAIT_CHECK_MS` | `500` | App-port poll interval during the wait phase. |
+| `UPDATER_SCRIPT_PATH` | *(resolved)* | Explicit path to `updater.js` when auto-resolution (cwd, `cwd/../src/lib/updater/`) fails. |
+| `UPDATER_RELAUNCH` | *(set by spawner)* | `"1"` enables relaunching the app after a successful install. Inert when unset. |
+| `UPDATER_RELAUNCH_CMD` | `npx` | Command used for the relaunch (resolved to `npx.cmd` on Windows). |
+| `UPDATER_RELAUNCH_ARGS` | `["9router", "--skip-update"]` | JSON-array relaunch args; tray mode appends `--tray`. Cleared in the child env to prevent relaunch loops. |
+
+Related (same lifecycle surface, read directly from the environment):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `TRAY_MODE` | *(unset)* | `"1"` marks the app as tray-launched; the updater relaunches with `--tray --skip-update` so tray stays tray. Set by the tray wrapper. |
+| `LOG_LEVEL` | `INFO` | SSE/cloud logger verbosity (`src/sse/utils/logger.js`): `DEBUG`, `INFO`, `WARN`, `ERROR` (case-insensitive; invalid values fall back to `INFO`). Errors always print regardless of level. |
+| `DISABLE_BACKGROUND_TOKEN_REFRESH` | *(unset)* | Any truthy value disables the background provider-token refresh loop (`src/sse/services/backgroundTokenRefresh.js`) — useful in CI, tests, or single-shot runs. |
+
 ## Environment and Runtime Matrix
 
 Environment variables actively used by code:
@@ -646,7 +679,7 @@ Environment variables actively used by code:
 - App/auth: `JWT_SECRET`, `INITIAL_PASSWORD`
 - Storage: `DATA_DIR`
 - Security hashing: `API_KEY_SECRET`, `MACHINE_ID_SALT`
-- Logging: `ENABLE_REQUEST_LOGS`
+- Logging: `ENABLE_REQUEST_LOGS`, `LOG_LEVEL` (SSE/cloud logger verbosity)
 - Observability bounds: `OBSERVABILITY_MAX_RECORDS`, `OBSERVABILITY_BATCH_SIZE`,
   `OBSERVABILITY_FLUSH_INTERVAL_MS`, `OBSERVABILITY_MAX_JSON_SIZE` (request-details
   store; dashboard settings override — see the Observability section above)
