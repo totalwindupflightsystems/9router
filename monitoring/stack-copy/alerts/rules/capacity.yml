@@ -68,7 +68,7 @@ groups:
       - alert: BackupFreshnessStale
         # the textfile collector drops this; absence of the metric itself is the failure mode
         expr: |
-          (time() - monitoring_backup_last_success_timestamp_seconds) > 172800
+          (time() - monitoring_backup_last_success_timestamp_seconds{exported_job!~".+"}) > 172800
         for: 30m
         labels:
           severity: critical
