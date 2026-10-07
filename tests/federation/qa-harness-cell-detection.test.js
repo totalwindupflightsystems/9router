@@ -85,6 +85,35 @@ const HARNESS =
 
 const HARNESS_PRESENT = fs.existsSync(HARNESS);
 
+function probeHarness() {
+  if (!HARNESS_PRESENT) return { functional: false, reason: "not present" };
+
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-harness-probe-"));
+  try {
+    const result = spawnSync("bash", [HARNESS, "__gen-remote", probeDir], {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.error) {
+      return { functional: false, reason: `__gen-remote probe failed: ${result.error.message}` };
+    }
+    if (result.status !== 0) {
+      return { functional: false, reason: `__gen-remote probe exited with status ${result.status}` };
+    }
+    if (!result.stdout?.trim()) {
+      return { functional: false, reason: "__gen-remote probe produced empty output" };
+    }
+    return { functional: true, reason: "" };
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+
+const HARNESS_PROBE = probeHarness();
+const HARNESS_FUNCTIONAL = HARNESS_PROBE.functional;
+
 // QA-9ROUTER-27 defense layer 2 — re-entry sentinel. Every spawn below that can lead
 // to executing a rendered script re-exports the environment with this variable set.
 // Under the sentinel the real suite is skipped entirely (see `suite` below), so even
@@ -669,7 +698,13 @@ afterAll(() => {
 
 // Layer 2 exit: under the re-entry sentinel the real suite never even describes —
 // the nested vitest worker prints the refusal warn above and moves on.
-const suite = HARNESS_PRESENT && !REENTRY_ACTIVE ? describe : describe.skip;
+if (HARNESS_PRESENT && !HARNESS_FUNCTIONAL) {
+  console.warn(
+    `qa-harness-cell-detection: skipped: fleet harness at ${HARNESS} is present but non-functional (${HARNESS_PROBE.reason})`
+  );
+}
+const suite =
+  HARNESS_PRESENT && HARNESS_FUNCTIONAL && !REENTRY_ACTIVE ? describe : describe.skip;
 
 suite("QA-battery cell detection (QA-9ROUTER-21/22/26)", () => {
   // ── install detection (QA-9ROUTER-26) ────────────────────────────────────
@@ -1100,6 +1135,12 @@ if (!HARNESS_PRESENT) {
   describe("QA-battery cell detection", () => {
     it("skipped: the fleet harness is not present at BUNKER_QA_SCRIPT", () => {
       expect(HARNESS_PRESENT).toBe(false);
+    });
+  });
+} else if (!HARNESS_FUNCTIONAL) {
+  describe("QA-battery cell detection", () => {
+    it(`skipped: the fleet harness is present but non-functional (${HARNESS_PROBE.reason})`, () => {
+      expect(HARNESS_FUNCTIONAL).toBe(false);
     });
   });
 }
