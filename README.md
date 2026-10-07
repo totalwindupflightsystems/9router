@@ -38,9 +38,10 @@ multiple instances across datacenters/hosts and keep them in sync.
 - **Standalone stays the default** — all federation behavior is inert unless
   `FEDERATION_MODE` is set (zero behavior change out of the box).
 
-Enable it with the `FEDERATION_*` environment variables (see `.env.example`, lines
-53–70): set `FEDERATION_MODE=central` on the central instance, and
-`FEDERATION_MODE=edge` with `FEDERATION_CENTRAL_URL` + `FEDERATION_TOKEN` on edges.
+Enable it with the `FEDERATION_*` environment variables (see the Federation block
+in `.env.example`, search `FEDERATION_`): set `FEDERATION_MODE=central` on the
+central instance, and `FEDERATION_MODE=edge` with `FEDERATION_CENTRAL_URL` +
+`FEDERATION_TOKEN` on edges.
 
 Full design & config reference: [docs/federation-spec.md](docs/federation-spec.md).
 
