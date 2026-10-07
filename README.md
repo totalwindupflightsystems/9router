@@ -1879,8 +1879,11 @@ The list is synced from the provider registry (`open-sse/providers/registry/curs
 
 **First login not working**
 
-- Check `INITIAL_PASSWORD` in `.env`
-- If unset, fallback password is `123456`
+- Check `INITIAL_PASSWORD` in `.env`. If it is set (the `.env.example` default is
+  `change-me`), that value is the password — not the built-in fallback.
+- Only when `INITIAL_PASSWORD` is completely unset does the built-in fallback
+  `123456` apply (loopback sessions only). See "Headless / Docker first login"
+  above for why a copied `.env.example` rejects `123456`.
 
 **No request logs under `logs/`**
 
