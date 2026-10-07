@@ -1,0 +1,31 @@
+groups:
+  - name: uptime-probes
+    interval: 30s
+    rules:
+      - alert: ProbeFailed
+        expr: probe_success{job="blackbox-probes", probe_module!="tcp_connect"} == 0
+        for: 0m
+        labels:
+          severity: critical
+          lane: monitoring
+        annotations:
+          summary: "Probe failed for {{ $labels.instance }}"
+          description: "The configured blackbox probe has failed; inspect module={{ $labels.probe_module }} and target reachability."
+      - alert: TargetUnreachable
+        expr: probe_success{job="blackbox-probes", probe_module="tcp_connect"} == 0
+        for: 0m
+        labels:
+          severity: critical
+          lane: monitoring
+        annotations:
+          summary: "{{ $labels.host }} service port {{ $labels.service_port }} is unreachable"
+          description: "TCP connect probe failed for {{ $labels.instance }}. This is distinct from HostNotReporting, which indicates stale pushed metrics."
+      - alert: CertificateExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-probes"} - time()) < 14 * 24 * 60 * 60
+        for: 5m
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} expires within 14 days"
+          description: "Renew the certificate before expiry; the probe reports the earliest certificate expiry in the chain."

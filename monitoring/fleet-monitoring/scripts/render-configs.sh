@@ -53,6 +53,7 @@ umask 077
 # `>` truncation on a 0400 file fails "Permission denied" — remove first so a re-render is
 # always writable. The directory is the repo's, so this never touches anything unexpected.
 rm -f stack/alertmanager/router-token
+mkdir -p stack/alertmanager
 printf '%s' "$ALERT_ROUTER_TOKEN" > stack/alertmanager/router-token
 chmod 600 stack/alertmanager/router-token
 echo "wrote stack/alertmanager/router-token (mode 600)"

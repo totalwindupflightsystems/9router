@@ -1,0 +1,51 @@
+# fleet-monitoring — Alertmanager
+#
+# One receiver: the alert-router, which turns alerts into board rows for the owning lane.
+# Routing is by the `lane` label so an alert lands in the queue the foreman already reads.
+#
+# `repeat_interval` is deliberately long: an alert that is still firing should not
+# re-page every hour. The router dedupes per alert+day anyway — the two together mean one
+# board row per problem per day, not one per evaluation.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: alert-router
+  group_by: [alertname, lane, host]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+
+  routes:
+    # critical: short group_wait so it reaches the queue fast
+    - matchers: [severity = "critical"]
+      receiver: alert-router
+      group_wait: 10s
+      repeat_interval: 4h
+
+    # anything with no lane still lands, on a catch-all lane, rather than being dropped
+    - matchers: [lane = ""]
+      receiver: alert-router
+      continue: false
+
+receivers:
+  - name: alert-router
+    webhook_configs:
+      - url: http://alert-router:8089/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/router-token
+        max_alerts: 0
+
+inhibit_rules:
+  # a host being down makes its disk/CPU alerts noise
+  - source_matchers: [alertname = "HostDown"]
+    target_matchers: [severity = "~warning|info"]
+    equal: [host]
+  # do not page on a predicted disk fill while the box is already known critical on space
+  - source_matchers: [alertname = "DiskFull"]
+    target_matchers: [alertname = "DiskWillFillIn24h"]
+    equal: [host, mountpoint]

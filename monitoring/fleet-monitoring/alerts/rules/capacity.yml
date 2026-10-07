@@ -1,0 +1,129 @@
+# fleet-monitoring — capacity rules.
+#
+# The point of these is lead time: an alert that fires when the disk is full is a post-mortem,
+# an alert that fires 24 hours before is a task you can schedule.
+
+groups:
+  - name: capacity
+    interval: 60s
+    rules:
+      - alert: DiskFull
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|overlay"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|overlay"}) < 0.05
+        for: 5m
+        labels:
+          severity: critical
+          lane: monitoring
+        annotations:
+          summary: "{{ $labels.host }} {{ $labels.mountpoint }} is {{ $value | humanizePercentage }} free"
+          description: |
+            Under 5% free on {{ $labels.mountpoint }}. Docker prunes reclaim images, not volumes:
+            check `docker system df` and the largest volumes before deleting anything.
+          runbook: docs/runbook.md#disk-full
+
+      - alert: DiskWillFillIn24h
+        expr: |
+          predict_linear(
+            node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|overlay"}[6h], 86400) < 0
+          and
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|overlay"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|overlay"}) < 0.25
+        for: 30m
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "{{ $labels.host }} {{ $labels.mountpoint }} fills within 24h"
+          description: |
+            At the current rate {{ $labels.mountpoint }} on {{ $labels.host }} runs out inside a
+            day. This is an intentional early warning — act before it becomes DiskFull.
+
+      - alert: InodeExhaustionImminent
+        expr: |
+          (node_filesystem_files_free{fstype!~"tmpfs|ramfs|overlay"}
+            / node_filesystem_files{fstype!~"tmpfs|ramfs|overlay"}) < 0.10
+        for: 15m
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "{{ $labels.host }} {{ $labels.mountpoint }} inodes {{ $value | humanizePercentage }} free"
+          description: "Inodes exhaust before bytes — usually millions of tiny files (logs, cache, sessions)."
+
+      - alert: MemoryFleetOvercommitted
+        # fleet-wide view: total committed vs total available, catches steady creep that no
+        # single host triggers
+        expr: |
+          (sum(node_memory_MemTotal_bytes) - sum(node_memory_MemAvailable_bytes))
+            / sum(node_memory_MemTotal_bytes) > 0.85
+        for: 30m
+        labels:
+          severity: info
+          lane: monitoring
+        annotations:
+          summary: "fleet memory {{ $value | humanizePercentage }} committed"
+          description: "Fleet-wide memory use is above 85%. Capacity planning signal, not an incident."
+
+      - alert: BackupFreshnessStale
+        # the textfile collector drops this; absence of the metric itself is the failure mode
+        expr: |
+          (time() - monitoring_backup_last_success_timestamp_seconds{exported_job!~".+"}) > 172800
+        for: 30m
+        labels:
+          severity: critical
+          lane: monitoring
+        annotations:
+          summary: "no successful monitoring backup in 48h"
+          description: |
+            The monitoring stack's own backup has not succeeded for two days. An observability
+            stack that cannot be restored is a dashboard, not a backup.
+          runbook: docs/runbook.md#backup-stale
+      - alert: BackupFreshnessStaleWeekly
+        # MON-GAP-018: per-job freshness for the weekly host backups published by the
+        # lane box (backup-freshness-stamp.sh -> node-exporter-textfile/backup-freshness.prom).
+        # 1.5x the weekly schedule = 10.5d. job=cube-agent with value 0 = no complete
+        # MANIFEST ever found in its S3 prefix (also the failure mode).
+        expr: |
+          (time() - monitoring_backup_last_success_timestamp_seconds{exported_job=~"kara-hermes|cube-agent"}) > 907200
+        for: 30m
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "weekly backup job {{ $labels.job }} has no successful upload in 10.5d"
+          description: |
+            The weekly host backup job {{ $labels.job }} (s3://dexdat-backups) has not
+            completed a verified upload (MANIFEST present) for over 10.5 days.
+            value 0 means no manifest was ever found for that job.
+          runbook: docs/runbook.md#backup-stale
+      - alert: InventorySweepStale
+        # textfile-collector metric: if the sweep stops publishing, the metric goes
+        # absent — absence is the failure mode, same pattern as BackupFreshnessStale.
+        expr: |
+          (time() - fleet_inventory_last_success_timestamp_seconds) > 604800
+        for: 1h
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "fleet software inventory sweep has not run for 7d"
+          description: |
+            The scheduled fleet inventory sweep (MON-GAP-007) has not published a fresh
+            inventory for over a week. Drift (new containers, dead agents, unreachable
+            hosts) is no longer being observed.
+
+      - alert: InventoryHostsNotReporting
+        # reachable host whose agent does not report to Prometheus
+        expr: |
+          fleet_inventory_hosts_not_reporting > 7
+        for: 6h
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "{{ $value }} reachable hosts are not reporting to monitoring"
+          description: |
+            More hosts than the current known baseline (7) are reachable but their
+            monitoring agent is not reporting. Investigate the new non-reporter(s)
+            via the latest coverage.json snapshot on fleet-monitor.
