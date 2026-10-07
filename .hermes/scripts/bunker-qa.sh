@@ -2071,11 +2071,18 @@ else cell ui-probe N/A "no web UI detected"; fi
 # window is APPLIED to the timeout invocation below — not merely named.
 disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 [ "\$disc_window" -lt \${BUNKER_QA_DISCONNECT_TIMEOUT:-240} ] && disc_window=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}
-# QA-HERMES-DAGGER-13: GOPROXY=off makes module fetch fail fast instead of
-# blocking on the dead proxy; with the warm cache from the native run the
-# build succeeds offline, so the disconnect cut is exercised against a real
-# build. GOTOOLCHAIN=local prevents a toolchain download attempt. These env
-# vars are harmless for non-Go native_cmd values (npm/pytest/cargo ignore them).
+# QA-HERMES-DAGGER-13: hermes-dagger has NO vendor/ dir and GOPROXY defaults to
+# the module proxy — when the network is cut every `go build`/`go test` in the
+# suite blocks on the proxy handshake until some layer's 120s timeout fires, so
+# the 240s+ window always burned out and graded HANG even for a fixable cause.
+# Hardening (both):
+#  - GOPROXY=off + GOFLAGS=-mod=mod: with the warm module cache from the native
+#    run the build succeeds offline; a truly missing dep fails IMMEDIATELY
+#    ("module lookup disabled") instead of blocking on the dead proxy.
+#  - `timeout $disc_window`: hard backstop so the cell can never hang past the
+#    window no matter what the suite does (toolchain probes, plugins, etc.).
+# GOTOOLCHAIN=local prevents a toolchain download attempt. These env vars are
+# harmless for non-Go native_cmd values (npm/pytest/cargo ignore them).
 ( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
 if [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
