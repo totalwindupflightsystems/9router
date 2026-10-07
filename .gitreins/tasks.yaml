@@ -1493,3 +1493,14 @@ tasks:
   status: complete
   created_at: '2026-10-07T07:23:55.160758+00:00'
   completed_at: '2026-10-07T07:30:22.658248+00:00'
+- id: DOC-8
+  title: Document 12 auth/security env keys (JWT_SECRET..KIMI_CODING_OAUTH_CLIENT_ID)
+    in .env.example Security block + ARCHITECTURE.md
+  criteria:
+  - All 12 keys from the DOC-8 row appear in .env.example with required/optional +
+    default + effect; docs/ARCHITECTURE.md security section names all 12 with security
+    effect and rotation where applicable; grep counts per key >=1 in .env.example
+    and >=1 in docs/ARCHITECTURE.md
+  status: complete
+  created_at: '2026-10-07T08:24:40.705101+00:00'
+  completed_at: '2026-10-07T08:28:30.303831+00:00'
