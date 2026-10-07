@@ -2094,6 +2094,31 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
   # FAIL "rc=1" with no attribution. Run EVERY verb unconditionally, echo each
   # step's rc, and derive sd_rc as the FIRST failing step — the trace names
   # the failing verb; grading below still keys on the STOP=/KILLRECOVER= markers.
+  # QA-HEADING-017 (2026-09-26 attribution): rootless dockerd can DIE between
+  # cells (socket file gone, daemon journal silent) — compose up then rc=1 with
+  # no diagnostics and the cell graded FAIL blaming shutdown logic. Probe the
+  # daemon BEFORE the chain, attempt one recovery (systemctl --user start
+  # docker; proven to revive it on dedi-2 2026-09-26, state lost), and re-probe
+  # AFTER the chain so a mid-cell daemon death is attributed to the DAEMON, not
+  # to a compose verb.
+  docker version --format '{{.Server.Version}}' >\$LOGD/daemon-pre.log 2>&1
+  daemon_pre_rc=\$?
+  if [ \$daemon_pre_rc -eq 0 ]; then
+    echo "DAEMON_PRE=up" >>\$LOGD/sd.log
+  else
+    echo "DAEMON_PRE=down \$(tr '\n' ' ' < \$LOGD/daemon-pre.log | cut -c1-160)" >>\$LOGD/sd.log
+    systemctl --user start docker >/dev/null 2>&1 || true
+    for i in \$(seq 1 10); do docker version >/dev/null 2>&1 && break; sleep 2; done
+    if docker version --format '{{.Server.Version}}' >>\$LOGD/daemon-pre.log 2>&1; then
+      echo "DAEMON_RECOVERED=yes" >>\$LOGD/sd.log
+      daemon_pre_rc=0
+    else
+      echo "DAEMON_RECOVERED=no" >>\$LOGD/sd.log
+    fi
+  fi
+  if [ \$daemon_pre_rc -ne 0 ]; then
+    cell chaos-shutdown UNVERIFIED "rootless dockerd DEAD before the cell (socket/daemon unreachable; recovery attempt failed) — compose chain NOT exercised, daemon lifecycle issue not a shutdown defect: \$(tail -1 \$LOGD/daemon-pre.log | cut -c1-200)"
+  else
   up_rc=0; stop_rc=0; start1_rc=0; kill_rc=0; start2_rc=0; down_rc=0
   { docker compose up -d >/dev/null 2>&1; up_rc=\$?; echo UP=\$up_rc
     docker compose stop >/dev/null 2>&1; stop_rc=\$?; echo STOP=\$stop_rc
@@ -2118,7 +2143,20 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
   elif [ "\$down_rc" -ne 0 ]; then cell chaos-shutdown OK "SIGTERM + SIGKILL recovery clean (down rc=\$down_rc ignored)"
   elif grep -qE 'STOP=0' \$LOGD/sd.log && grep -qE 'KILLRECOVER=0' \$LOGD/sd.log; then cell chaos-shutdown OK "SIGTERM + SIGKILL recovery clean"
   elif grep -qE 'STOP=0' \$LOGD/sd.log; then cell chaos-shutdown INFO "graceful ok, kill-recovery issue: \$(cat \$LOGD/sd.log)"
-  else cell chaos-shutdown FAIL "\$(fail_detail \$sd_rc \$LOGD/sd.log 'docker compose up -d; stop; start; kill; start; down')"; fi
+  else
+    # QA-HEADING-017: before grading FAIL on a dead verb, check whether the
+    # daemon died MID-CELL (post-chain probe) — that is daemon lifecycle, not
+    # shutdown logic.
+    daemon_post_rc=0
+    docker version --format '{{.Server.Version}}' >\$LOGD/daemon-post.log 2>&1 || daemon_post_rc=\$?
+    if [ \$daemon_post_rc -ne 0 ]; then
+      echo "DAEMON_POST=down \$(tr '\n' ' ' < \$LOGD/daemon-post.log | cut -c1-160)" >>\$LOGD/sd.log
+      cell chaos-shutdown UNVERIFIED "rootless dockerd DIED during/after the compose chain (post-chain daemon probe failed, chain rc vector: \$(grep -E '^(UP|STOP|RESTART|KILL|KILLRECOVER|DOWN)=' \$LOGD/sd.log | tr '\n' ' ')) — daemon lifecycle issue, not a shutdown defect: \$(tail -1 \$LOGD/daemon-post.log | cut -c1-200)"
+    else
+      cell chaos-shutdown FAIL "\$(fail_detail \$sd_rc \$LOGD/sd.log 'docker compose up -d; stop; start; kill; start; down')"
+    fi
+  fi
+  fi
 else cell chaos-shutdown N/A "no compose file"; fi
 
 # 8 · chaos-corruption — truncate a state file, OBSERVE the next start, restore
