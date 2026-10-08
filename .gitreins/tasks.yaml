@@ -1504,3 +1504,11 @@ tasks:
   status: complete
   created_at: '2026-10-07T08:24:40.705101+00:00'
   completed_at: '2026-10-07T08:28:30.303831+00:00'
+- id: INT-9ROUTER-002
+  title: reconcile qa-harness-cell-detection with bunker-qa.sh d941b7c4a/b4d567a98
+  criteria:
+  - 34/34 tests in tests/federation/qa-harness-cell-detection.test.js pass against
+    the current fleet bunker-qa.sh render
+  status: complete
+  created_at: '2026-10-08T01:46:06.894256+00:00'
+  completed_at: '2026-10-08T01:48:41.260658+00:00'
