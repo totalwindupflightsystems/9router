@@ -13,3 +13,18 @@
 		/usr/lib/rsyslog/rsyslog-rotate
 	endscript
 }
+
+TICK 2026-10-08 08:5x follow-up (this lane): the earlier fix was INERT.
+logrotate.conf includes /etc/logrotate.d/* and three files claimed /var/log/auth.log
+(authlog-cap, authlog-snoopy, rsyslog); logrotate errors on duplicates and SKIPS the
+losing files entirely, so neither the rotate-4 cap nor any forced run took effect
+(auth.log regrew to 1.7G by 03:47Z). Fixed live on karaHermes 2026-10-08 08:5xZ:
+- dedupe: authlog-snoopy + syslog-cap drop-ins REMOVED (authlog-cap is the single
+  /var/log/auth.log claimant); /var/log/auth.log line removed from the rsyslog
+  multi-log stanza (now syslog/mail/kern/user/cron, su syslog adm added)
+- syslog-cap lacked su -> rotation died on group-writable /var/log; su added to
+  rsyslog stanza; stale 3.2G syslog.1 archived+gzipped (158M); .old.gz debris removed
+- full logrotate run RC=0 (failing since 09-19); logrotate.service reset-failed.
+  auth.log 140M fresh, syslog 2M fresh. Disk 85%->84% (282G free).
+- one-shot rotation verified live; nightly logrotate.timer healthy on its own.
+ch:trace row=MON-MONITORING-EE32DFF5-20261008-PROGRESS evidence=etc-logrotate-fix/ + logrotate RC=0 witness=live:local /var/log before/after sizes

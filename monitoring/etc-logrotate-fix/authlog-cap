@@ -1,0 +1,17 @@
+# /etc/logrotate.d/authlog-snoopy — cap snoopy command log growth
+/var/log/auth.log {
+	su syslog adm
+	rotate 4
+	daily
+	maxsize 1G
+	missingok
+	notifempty
+	compress
+	delaycompress
+	sharedscripts
+	postrotate
+		if [ -x /usr/lib/rsyslog/rsyslog-rotate ]; then
+			/usr/lib/rsyslog/rsyslog-rotate
+		fi
+	endscript
+}
