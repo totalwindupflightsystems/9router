@@ -2,6 +2,8 @@
 import { getAdapter } from "./driver.js";
 import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
 import { stampInsert, stampUpsertConflict } from "../federation/stamp.js";
+import { keyAccessFromColumns, keyAccessToColumns, validateKeyAccessInput } from "@/shared/utils/keyAccess.js";
+import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
 // Settings
 export {
@@ -31,7 +33,7 @@ export {
 
 // API keys
 export {
-  getApiKeys, getApiKeyById, createApiKey, updateApiKey, deleteApiKey, validateApiKey,
+  getApiKeys, getApiKeyById, getApiKeyByKey, createApiKey, updateApiKey, deleteApiKey, validateApiKey,
 } from "./repos/apiKeysRepo.js";
 
 // Combos
@@ -79,7 +81,7 @@ export async function exportDb() {
     providerConnections: db.all(`SELECT * FROM providerConnections WHERE (deleted = 0 OR deleted IS NULL)`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, provider: r.provider, authType: r.authType, name: r.name, email: r.email, priority: r.priority, isActive: r.isActive === 1, createdAt: r.createdAt, updatedAt: r.updatedAt, federation_version: r.federation_version ?? 0, updated_at: r.updated_at ?? null, deleted: r.deleted ?? 0 })),
     providerNodes: db.all(`SELECT * FROM providerNodes WHERE (deleted = 0 OR deleted IS NULL)`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, type: r.type, name: r.name, createdAt: r.createdAt, updatedAt: r.updatedAt, federation_version: r.federation_version ?? 0, updated_at: r.updated_at ?? null, deleted: r.deleted ?? 0 })),
     proxyPools: db.all(`SELECT * FROM proxyPools WHERE (deleted = 0 OR deleted IS NULL)`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, isActive: r.isActive === 1, testStatus: r.testStatus, createdAt: r.createdAt, updatedAt: r.updatedAt, federation_version: r.federation_version ?? 0, updated_at: r.updated_at ?? null, deleted: r.deleted ?? 0 })),
-    apiKeys: db.all(`SELECT * FROM apiKeys WHERE (deleted = 0 OR deleted IS NULL)`).map((r) => ({ id: r.id, key: r.key, name: r.name, machineId: r.machineId, isActive: r.isActive === 1, createdAt: r.createdAt, federation_version: r.federation_version ?? 0, updated_at: r.updated_at ?? null, deleted: r.deleted ?? 0 })),
+    apiKeys: db.all(`SELECT * FROM apiKeys WHERE (deleted = 0 OR deleted IS NULL)`).map((r) => ({ id: r.id, key: r.key, name: r.name, machineId: r.machineId, isActive: r.isActive === 1, createdAt: r.createdAt, federation_version: r.federation_version ?? 0, updated_at: r.updated_at ?? null, deleted: r.deleted ?? 0, access: keyAccessFromColumns(r.accessRestricted, r.accessAllow) })),
     combos: db.all(`SELECT * FROM combos WHERE (deleted = 0 OR deleted IS NULL)`).map((r) => ({ id: r.id, name: r.name, kind: r.kind, models: parseJson(r.models, []), createdAt: r.createdAt, updatedAt: r.updatedAt, federation_version: r.federation_version ?? 0, updated_at: r.updated_at ?? null, deleted: r.deleted ?? 0 })),
     modelAliases: {},
     customModels: [],
@@ -144,9 +146,18 @@ export async function importDb(payload) {
       );
     }
     for (const k of payload.apiKeys || []) {
+      // Per-key access: a backup without `access` (older version) restores
+      // unrestricted, exactly as before; a malformed `access` is refused.
+      let access = KEY_ACCESS_UNRESTRICTED;
+      if (k.access !== undefined) {
+        const checked = validateKeyAccessInput(k.access);
+        if (!checked.ok) throw new Error(`apiKeys ${k.id}: ${checked.error}`);
+        access = checked.value;
+      }
+      const cols = keyAccessToColumns(access);
       db.run(
-        `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-        [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+        `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+        [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString(), cols.accessRestricted, cols.accessAllow]
       );
     }
     for (const c of payload.combos || []) {

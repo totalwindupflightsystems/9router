@@ -61,21 +61,18 @@ export function extractUsageFromResponse(responseBody) {
     };
   }
 
-  // Ollama native. A non-streaming /api/chat answer carries no `usage` object at
-  // all — its counts ride on the TOP LEVEL (`done:true`, `prompt_eval_count`,
-  // `eval_count`) next to `message`; /api/generate answers `response` instead of
-  // `message` but with the same top-level counts. Guarded exactly like the
-  // streaming extractor (extractUsage() in utils/usageTracking.js): done === true
-  // AND a numeric count. Without this branch the request recorded nothing at all
-  // and /api/usage/stats stayed at zero for a successful completion
-  // (DF-9ROUTER-26).
-  if (responseBody.done === true && typeof responseBody.prompt_eval_count === "number") {
-    const promptTokens = responseBody.prompt_eval_count || 0;
-    const completionTokens = typeof responseBody.eval_count === "number" ? responseBody.eval_count : 0;
+  // Ollama format: prompt_eval_count/eval_count at top level (not nested under usage).
+  // prompt_eval_cached_count is a cache-read subset of prompt_eval_count (cache-INCLUSIVE).
+  if (responseBody.done === true &&
+      (responseBody.prompt_eval_count !== undefined || responseBody.eval_count !== undefined)) {
+    const prompt = responseBody.prompt_eval_count || 0;
+    const completion = responseBody.eval_count || 0;
+    const cached = responseBody.prompt_eval_cached_count || 0;
     return {
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: promptTokens + completionTokens
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+      total_tokens: prompt + completion,
+      cached_tokens: cached
     };
   }
 
