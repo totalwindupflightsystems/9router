@@ -1512,3 +1512,11 @@ tasks:
   status: complete
   created_at: '2026-10-08T01:46:06.894256+00:00'
   completed_at: '2026-10-08T01:48:41.260658+00:00'
+- id: DF-9ROUTER-51
+  title: fresh-machine dogfood leg on bunker-las-02
+  criteria:
+  - bunker-qa.sh run on a JIT agent completes fresh-install + docker-deploy cells
+    OK (or honest FAIL evidence), enabling DF-9ROUTER-51 closure
+  status: complete
+  created_at: '2026-10-08T02:27:28.636683+00:00'
+  completed_at: '2026-10-08T02:39:00.771938+00:00'
