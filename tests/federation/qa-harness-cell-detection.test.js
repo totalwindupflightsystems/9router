@@ -76,7 +76,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const HARNESS =
   process.env.BUNKER_QA_SCRIPT ||
@@ -124,6 +124,15 @@ const REENTRY_ACTIVE = Boolean(process.env.QA_HARNESS_CELL_DETECTION_ACTIVE);
 // Merged over process.env by every spawn that can reach a rendered script or a fixture
 // package script.
 const GUARD_ENV = { ...process.env, QA_HARNESS_CELL_DETECTION_ACTIVE: "1" };
+
+// INT-9ROUTER-002 (2026-10-07): the fleet harness grew past 2900 lines (d941b7c4a
+// + b4d567a98 — SSH port tables, act/native-leg timeout enforcement) and a single
+// `__gen-remote` render now legitimately runs 0.3s–11.2s on this host under fleet
+// load (measured), while vitest's default per-test budget is 5s. Measure, don't
+// hope: every test in this file gets a 120s budget, and the belowAll/afterAll
+// lifecycle hooks (fixture git-inits + port teardown) get 180s — matched to the
+// same explicit budget the longest live assertions in this file already carry.
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 180_000 });
 
 if (REENTRY_ACTIVE) {
   console.warn(
@@ -179,14 +188,31 @@ function runHarness(args, { env } = {}) {
   const cmd = `bash ${JSON.stringify(HARNESS)} ${args
     .map((a) => JSON.stringify(a))
     .join(" ")} > ${JSON.stringify(outFile)} 2>/dev/null`;
-  spawnSync("bash", ["-c", cmd], {
-    stdio: ["ignore", "ignore", "ignore"],
-    timeout: 120_000,
-    detached: true,
-    // Layer 2: always re-export the re-entry sentinel (explicit per-call env wins).
-    env: { ...GUARD_ENV, ...(env || {}) },
-  });
-  return fs.existsSync(outFile) ? fs.readFileSync(outFile, "utf8") : "";
+  // INT-9ROUTER-002 (2026-10-07): an externally TERM'd spawn leaves the output
+  // file absent/empty and runHarness returned "", which every caller then read
+  // as a CONTRACT failure ("'' to contain 'BIN='", "expected -1 to be greater
+  // than -1"). That is an INFRA failure, not evidence about the harness. Measured
+  // on this host: ~1 in 15 detached spawns gets reaped early (status 143). Retry
+  // the render a bounded number of times and FAIL LOUD (never silently hand an
+  // empty render to a contract assertion) if it never lands.
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    spawnSync("bash", ["-c", cmd], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 120_000,
+      detached: true,
+      // Layer 2: always re-export the re-entry sentinel (explicit per-call env wins).
+      env: { ...GUARD_ENV, ...(env || {}) },
+    });
+    if (fs.existsSync(outFile) && fs.readFileSync(outFile, "utf8").length > 0) break;
+    if (attempt < 4) console.warn(`qa-harness-cell-detection: runHarness(${args[0]}) produced no output (attempt ${attempt}/4) — retrying`);
+  }
+  const out = fs.existsSync(outFile) ? fs.readFileSync(outFile, "utf8") : "";
+  if (!out) {
+    throw new Error(
+      `runHarness(${JSON.stringify(args[0])}) produced NO output after 4 attempts — the detached fleet-script spawn is being reaped by the host (INFRA failure, not a harness contract result)`
+    );
+  }
+  return out;
 }
 
 function detect(dir, { branch } = {}) {
@@ -250,6 +276,20 @@ function renderCiHelpers(rendered) {
     sliceFunction(rendered, n)
   );
   const pred = sliceFunction(rendered, "ci_only_failure");
+  // INT-9ROUTER-002: every helper the ci-pass chain calls must be extractable.
+  // A slice that comes back empty would make the driven chain die with a bash
+  // "command not found" instead of a verdict - fail loud, naming the slot by
+  // position (index-aligned with the extraction map above, so this check
+  // cannot drift from what was actually extracted).
+  const emptySlots = [
+    ...(reLine ? [] : ["regex"]),
+    ...fns.map((s, i) => (s ? null : `helper#${i}`)).filter(Boolean),
+    ...(pred ? [] : ["predicate"]),
+  ];
+  expect(
+    emptySlots.length === 0,
+    `ci-pass helper extraction returned EMPTY slices for: ${emptySlots.join(", ")} - the fleet harness renamed/removed a helper the chain depends on (INT-9ROUTER-002)`
+  ).toBe(true);
   return [reLine, ...fns, pred].filter(Boolean).join("\n");
 }
 
@@ -258,7 +298,22 @@ function renderCiHelpers(rendered) {
 // timed spawn from a file, with the file-wide sentinel + fixture cwd invariants.
 function runCiPassChain(rendered, { ciLog = "", ciRc = 0, nativeProbe = "true", note = "" } = {}) {
   const chain = extractCiPassChain(rendered);
-  if (!chain) return null;
+  if (!chain) {
+    // INT-9ROUTER-002: a missing #QA-CELL:ci-pass marker pair is a CONTRACT
+    // violation by the harness (the markers are the fleet-side guarantee that
+    // the chain is extractable and independently testable) — fail LOUD with
+    // evidence instead of returning null and destructure-crashing with a
+    // TypeError that hides which render and which markers were involved.
+    const startSeen = rendered.includes("#QA-CELL:ci-pass:start");
+    const endSeen = rendered.includes("#QA-CELL:ci-pass:end");
+    console.error(
+      `qa-harness-cell-detection: #QA-CELL:ci-pass markers missing from render (start=${startSeen} end=${endSeen}, ${rendered.length} bytes) — extraction impossible`
+    );
+    expect(
+      startSeen && endSeen,
+      "#QA-CELL:ci-pass start/end markers absent from the rendered bunker-qa.sh — the fleet harness dropped the extraction contract (INT-9ROUTER-002)"
+    ).toBe(true);
+  }
   // build_remote_script expands $native_cmd at RENDER time, so the chain carries
   // the literal suite command; rewrite that ONE site to a probe we control.
   const patched = chain.replace(
@@ -322,6 +377,20 @@ function extractUiProbeChain(rendered) {
 // Run an extracted chain with the harness's own cell() contract replaced by a collector.
 function runChain(chain, dir, { bin = "" } = {}) {
   const logDir = path.join(dir, ".qa-chain-logs");
+
+  // INT-9ROUTER-002 port hygiene: the chains in this block bind :3111 in turn.
+  // The predecessor test's server dies via killProbePort() in its own finally,
+  // but the kill is asynchronous — a TIME_WAIT straggler holding the port makes
+  // THIS chain's fixture bind fail (http=000) and the negative control then
+  // grades an unreachable app instead of its 500. Quiesce the port before the
+  // chain runs, and defensively after it (a crashed chain must not leak the
+  // listener into the next test or the TEARDOWN assertion). Lifecycle only:
+  // no assertion or contract in this file changes.
+  spawnSync("bash", ["-c", `fuser -k ${PROBE_PORT}/tcp >/dev/null 2>&1; sleep 0.4`], {
+    stdio: ["ignore", "ignore", "ignore"],
+    timeout: 10_000,
+    env: GUARD_ENV,
+  });
   const cellsFile = path.join(logDir, "cells.txt");
   fs.mkdirSync(logDir, { recursive: true });
   fs.writeFileSync(cellsFile, "");
@@ -392,6 +461,16 @@ function runChain(chain, dir, { bin = "" } = {}) {
   } else if (chainRc !== "0") {
     console.warn(`qa-harness-cell-detection: chain exited rc=${chainRc}`);
   }
+
+  // INT-9ROUTER-002 port hygiene (tail): if this chain crashed before its own
+  // finally could run killProbePort(), reap any straggler on the probe port so
+  // the next test starts from a clean port. Defensive only — the TEARDOWN
+  // test still asserts the port is free.
+  spawnSync("bash", ["-c", `fuser -k ${PROBE_PORT}/tcp >/dev/null 2>&1`], {
+    stdio: ["ignore", "ignore", "ignore"],
+    timeout: 10_000,
+    env: GUARD_ENV,
+  });
   const cells = fs.existsSync(cellsFile)
     ? fs.readFileSync(cellsFile, "utf8").trim()
     : "";
