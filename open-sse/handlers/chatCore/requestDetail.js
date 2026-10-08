@@ -63,10 +63,13 @@ export function extractUsageFromResponse(responseBody) {
 
   // Ollama format: prompt_eval_count/eval_count at top level (not nested under usage).
   // prompt_eval_cached_count is a cache-read subset of prompt_eval_count (cache-INCLUSIVE).
-  if (responseBody.done === true &&
-      (responseBody.prompt_eval_count !== undefined || responseBody.eval_count !== undefined)) {
-    const prompt = responseBody.prompt_eval_count || 0;
-    const completion = responseBody.eval_count || 0;
+  // Guarded exactly like the streaming extractor (extractUsage() in
+  // utils/usageTracking.js): done === true AND a NUMERIC prompt_eval_count —
+  // a string count ("11") must fall through to null, not be summed
+  // (DF-9ROUTER-26). eval_count may be absent on /api/generate-style bodies.
+  if (responseBody.done === true && typeof responseBody.prompt_eval_count === "number") {
+    const prompt = responseBody.prompt_eval_count;
+    const completion = typeof responseBody.eval_count === "number" ? responseBody.eval_count : 0;
     const cached = responseBody.prompt_eval_cached_count || 0;
     return {
       prompt_tokens: prompt,
