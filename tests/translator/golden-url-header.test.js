@@ -42,6 +42,14 @@ function sanitize(headers) {
       out[k] = "<APP-VER>";
       continue;
     }
+    // MiniMax Code (mcode) mints a fresh X-Mavis-Session-Id per call
+    // (open-sse/executors/default.js randomUUID) — per-run identity, not
+    // contract. Same rationale as X-Msh-* above (upstream v0.5.99 added the
+    // provider; the sanitizer normalization must cover it).
+    if (typeof v === "string" && k === "X-Mavis-Session-Id") {
+      out[k] = "<MAVIS-SESSION>";
+      continue;
+    }
     out[k] = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")

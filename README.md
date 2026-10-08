@@ -38,9 +38,10 @@ multiple instances across datacenters/hosts and keep them in sync.
 - **Standalone stays the default** — all federation behavior is inert unless
   `FEDERATION_MODE` is set (zero behavior change out of the box).
 
-Enable it with the `FEDERATION_*` environment variables (see `.env.example`, lines
-53–70): set `FEDERATION_MODE=central` on the central instance, and
-`FEDERATION_MODE=edge` with `FEDERATION_CENTRAL_URL` + `FEDERATION_TOKEN` on edges.
+Enable it with the `FEDERATION_*` environment variables (see the Federation block
+in `.env.example`, search `FEDERATION_`): set `FEDERATION_MODE=central` on the
+central instance, and `FEDERATION_MODE=edge` with `FEDERATION_CENTRAL_URL` +
+`FEDERATION_TOKEN` on edges.
 
 Full design & config reference: [docs/federation-spec.md](docs/federation-spec.md).
 
@@ -108,6 +109,9 @@ npm install -g 9router
 > source (this fork)** below.
 
 🎉 Dashboard opens at `http://localhost:20128`
+
+> First boot takes 10–30s (Next.js standalone server startup). If the browser
+> shows "connection refused" right after launch, wait a few seconds and retry.
 
 **2. Connect a FREE provider (no signup needed):**
 
@@ -220,10 +224,6 @@ sudo fallocate -l 2G /swapfile_temp
 sudo chmod 600 /swapfile_temp
 sudo mkswap /swapfile_temp
 sudo swapon /swapfile_temp
-
-export MAKEFLAGS="-j1"
-export DLIB_NO_GUI_SUPPORT=1
-export CFLAGS="-mno-avx"
 
 npm run build
 
@@ -494,7 +494,7 @@ A per-provider entry set from a provider page wins over the global toggle
 ## 🧪 Testing
 
 **The suite is NOT all-green by design** — don't chase a red run as a regression.
-The baseline is ~2762 pass / ~68 fail / ~61 skip (2891 total, verified 2026-09-19), with every
+The baseline is ~3730 pass / ~48 fail / ~95 skip (3874 total, verified 2026-10-06), with every
 known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
 Live-network tests (`real/*.real.test.js`, `unit/mimo-free.live.test.js`) are **opt-in** via
 `RUN_REAL=1` — a default run skips them, and they are deliberately **not** part of the baseline
@@ -1024,7 +1024,7 @@ Create combos with automatic fallback:
 Combo: "my-coding-stack"
   1. cc/claude-opus-5          (your subscription)
   2. glm/glm-4.7               (cheap backup, $0.6/1M)
-  3. if/kimi-k2-thinking       (free fallback)
+  3. if/kimi-k2               (free fallback — the only kimi model iflow.js ships)
 
 → Auto switches when quota runs out or errors occur
 ```
@@ -1116,9 +1116,9 @@ Seamless translation between formats:
 | **💰 CHEAP**        | GLM-5.1 / GLM-4.7     | $0.6/1M      | Daily 10AM       | Budget backup                           |
 |                     | MiniMax M2.7          | $0.2/1M      | 5-hour rolling   | Cheapest option                         |
 |                     | Kimi K2.5             | $9/mo flat   | 10M tokens/mo    | Predictable cost                        |
- | **🆓 FREE**         | Kiro AI               | $0           | 50 credits/mo    | Claude 4.5 + GLM-5 + MiniMax free (paid tiers above) |
- |                     | OpenCode Free         | $0           | Varies*          | No auth, auto-fetch models (list changes over time) |
- |                     | Vertex AI             | $300 credits | New GCP accounts | Gemini 3 Pro + DeepSeek + GLM-5 (use Vertex AI Studio endpoint for free credits) |
+| **🆓 FREE**         | Kiro AI               | $0           | 50 credits/mo    | Claude 4.5 + GLM-5 + MiniMax free (paid tiers above) |
+|                     | OpenCode Free         | $0           | Varies*          | No auth, auto-fetch models (list changes over time) |
+|                     | Vertex AI             | $300 credits | New GCP accounts | Gemini 3 Pro + DeepSeek + GLM-5 (use Vertex AI Studio endpoint for free credits) |
 
 **💡 Pro Tip:** RTK + Kiro AI + OpenCode Free combo = **$0 cost + 20-40% token savings**!
 
@@ -1156,7 +1156,7 @@ Reality Check:
 
 - **Subscription providers** (Claude Code, Codex): Pay them directly via their websites
 - **Cheap providers** (GLM, MiniMax): Pay them directly, 9Router just routes
-- **FREE providers** (iFlow, Kiro, Qwen): Genuinely free forever, no hidden charges
+- **FREE providers** (Kiro, OpenCode Free, Vertex): Genuinely free within their free-tier limits, no hidden charges
 - **9Router**: Never charges anything, ever
 
 ---
@@ -1452,7 +1452,7 @@ Models:
 ```bash
 Dashboard → Connect Kiro
 → AWS Builder ID, AWS IAM Identity Center, Google, or GitHub
-→ Unlimited usage
+→ ~50 credits/month free (paid tiers above)
 
 Models:
   kr/claude-sonnet-4.5
@@ -1463,7 +1463,7 @@ Models:
   kr/deepseek-3.2
 ```
 
-**Pro Tip:** Best free option for Claude. No API key, no payment, fully unlimited.
+**Pro Tip:** Best free option for Claude. No API key, no payment; free tier ~50 credits/mo.
 
 ### OpenCode Free (No auth, auto-fetch models)
 
@@ -1550,13 +1550,13 @@ Or use combo: `premium-coding`
 
 ### Claude Code
 
-Edit `~/.claude/config.json`:
+Claude Code reads its endpoint from env vars (or `~/.claude/settings.json`), not
+`~/.claude/config.json`. Set:
 
-```json
-{
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key"
-}
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+claude
 ```
 
 ### Codex CLI
@@ -1878,8 +1878,11 @@ The list is synced from the provider registry (`open-sse/providers/registry/curs
 
 **First login not working**
 
-- Check `INITIAL_PASSWORD` in `.env`
-- If unset, fallback password is `123456`
+- Check `INITIAL_PASSWORD` in `.env`. If it is set (the `.env.example` default is
+  `change-me`), that value is the password — not the built-in fallback.
+- Only when `INITIAL_PASSWORD` is completely unset does the built-in fallback
+  `123456` apply (loopback sessions only). See "Headless / Docker first login"
+  above for why a copied `.env.example` rejects `123456`.
 
 **No request logs under `logs/`**
 
@@ -1958,7 +1961,7 @@ Thanks to all contributors who helped make 9Router better!
 
 ## 📊 Star Chart
 
-[![Star Chart](https://starchart.cc/decolua/9router.svg?variant=adaptive)](https://starchart.cc/decolua/9router)
+[![GitHub stars](https://img.shields.io/github/stars/decolua/9router?style=social)](https://github.com/decolua/9router)
 
 ## 🔀 Forks
 

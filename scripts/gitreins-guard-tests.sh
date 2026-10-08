@@ -6,8 +6,18 @@
 # - CI context (GITHUB_ACTIONS=true): missing deps OR missing/empty results means the
 #   suite never ran -> exit 1 so the workflow step fails instead of a false green
 #   (NR-GAP-022, 2026-08-13).
+#
+# QA/battery lane: call `bash scripts/gitreins-guard-tests.sh --self-run` to get the
+# same gate OUTSIDE gitreins guard execution. --self-run is identical to the guard
+# path except it skips the board-only staged-diff early-exit (meaningless off-guard);
+# it prints the gate verdict lines and exits 0/1 exactly as the guard does.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+SELF_RUN=false
+if [ "${1:-}" = "--self-run" ]; then
+  SELF_RUN=true
+fi
 
 # Board-only commits skip the suite. The foreman's JSONL board chores
 # (.coding-hermes/{tasks,events,board}.jsonl) cannot change product code, yet
@@ -17,7 +27,7 @@ cd "$(dirname "$0")/.."
 # guard log .gitreins/logs/guard-20260210T...: "Tests timed out after 180s").
 # Scope is exact: ONLY when every staged path is under .coding-hermes/.
 # Set GITREINS_FORCE_TESTS=1 to override, and CI (no staged diff) is unaffected.
-if [ "${GITREINS_FORCE_TESTS:-}" != "1" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
+if [ "$SELF_RUN" != "true" ] && [ "${GITREINS_FORCE_TESTS:-}" != "1" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
   staged_board_only=$(git diff --cached --name-only --diff-filter=ACMR)
   if [ -n "$staged_board_only" ] && ! printf '%s\n' "$staged_board_only" | grep -qv '^\.coding-hermes/'; then
     echo "SKIP: board-only change (every staged path is under .coding-hermes/) — no suite run."

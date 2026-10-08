@@ -31,7 +31,17 @@ export function nowIso() {
 export function nextFederationVersion(db) {
   let max = 0;
   for (const table of REPLICATE_TABLES_PHYSICAL) {
-    const row = db.get(`SELECT MAX(federation_version) AS m FROM ${table}`);
+    // A table created before the federation migration (or by a partial legacy
+    // fixture) may lack the stamp column entirely; it has no stamped rows, so
+    // it contributes 0 to the watermark. Treating that as an error would break
+    // every write on any DB that predated FED-001 — the delta query already
+    // excludes rows with NULL/absent versions, so 0 is the honest reading.
+    let row = null;
+    try {
+      row = db.get(`SELECT MAX(federation_version) AS m FROM ${table}`);
+    } catch {
+      continue;
+    }
     const v = row?.m ?? 0;
     if (v > max) max = v;
   }
