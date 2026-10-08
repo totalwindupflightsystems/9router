@@ -8,6 +8,7 @@ import {
 } from "@/shared/constants/providers";
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -831,7 +832,14 @@ export async function buildModelsListForRequest(request, kindFilter) {
  */
 export async function GET(request) {
   try {
-    const data = await buildModelsListForRequest(request, [LLM_KIND]);
+    // Federation recursion guard: origin header supersedes the legacy internal
+    // marker (buildModelsListForRequest resolves both + chain-return detection).
+    // Per-key access filtering (upstream) is applied on top — a key restricted
+    // to selected combos/models must not see the full list.
+    const data = await filterModelsListForKey(
+      await getKeyAccessContext(request),
+      await buildModelsListForRequest(request, [LLM_KIND])
+    );
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
