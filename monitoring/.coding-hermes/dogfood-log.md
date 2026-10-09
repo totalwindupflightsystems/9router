@@ -89,3 +89,14 @@
 - foreman woken: no (lane cooldown-pinned 259200 by api; rows wait on a live lane).
 - verdict: FAILED-product / PASS-run — independent re-derivation of the P0; two new rows
   (018/019) + perf census (020).
+
+## 2026-10-09 (run 7) | monitoring | SHIPPABLE (chain verified live) + fresh-install defects
+- angle: verify run-6 P0 remediation on LIVE production evidence + BackupFreshness fix holding + fresh-install leg (new angle: full documented make path incl. `make up`)
+- promise: alerts become board rows end-to-end; backup freshness gauge truthful; a fresh machine can install per docs
+- reality: chain GREEN live on fleet-monitor (scraped counters: received 144, errors 0, rows_spooled 92, 52 resolved; spool uid 10001 owned, fresh RESOLVED twins landing 20:41Z); drain healthy (timer every 15m, manual run appended=0 skipped=121, rows present on board incl. FA5F538B-20261009 twins); backup freshness: cube-agent 5.6h, fleet-monitor 17.9h, kara-hermes 76.1h; only TargetUnreachable cx53-01 (known owner row) + benign OOMKillsLowPressure firing. Install leg EXECUTED on bunker-las-02 (bunker3 down; first spawn failed slice-limits transient, retry OK): make env/check-env/config PASS (73s), but `make up` FAILS fresh for 2 real defects (missing Dockerfile in build context; /var/lib bind-mount sources uncreatable rootless) — core 6 services proven up + router healthy (200/401) only after throwaway Dockerfile + ~/spool rebind, both uncommitted.
+- perf: drain 14.5s warm (121 dedup id-checks), prom query 16ms, AM alerts 13ms, config 73s cold — nothing user-noticeable; no PERF rows.
+- install: EXECUTED — smoke partial: documented path green through config, `make up` fails at the 2 filed defects; router itself proven healthy after compensations on the throwaway copy.
+- top findings: MON-DOGFOOD-021, MON-DOGFOOD-022, MON-DOGFOOD-023, MON-DOGFOOD-024
+- left behind: rows (this commit), this log entry
+- foreman woken: no (read-only dogfood lane)
+- verdict: SHIPPABLE for its production promise (the alert->row chain finally verified delivering live); install-from-docs still fails at `make up` for a fresh user.
