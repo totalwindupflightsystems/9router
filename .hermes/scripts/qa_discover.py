@@ -12,7 +12,7 @@ Selection (weighted, deterministic-ish):
 
 Ledger: ~/.hermes/qa/ledger.jsonl  {ts, project, status, cells, server}
 """
-import json, os, random, sqlite3, subprocess, sys, datetime
+import argparse, json, os, random, sqlite3, subprocess, datetime
 
 SCHED_DB = '/home/kara/.hermes/scheduler.db'
 QA_LEDGER = '/home/kara/.hermes/qa/ledger.jsonl'
@@ -60,8 +60,39 @@ def load_ledger():
                 pass
     return last
 
-def main():
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+def positive_int(value):
+    """argparse type: reject N < 1 before any fleet scan can run."""
+    try:
+        iv = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError('%r is not an integer' % (value,))
+    if iv < 1:
+        raise argparse.ArgumentTypeError(
+            'N must be a positive integer (got %d)' % iv)
+    return iv
+
+
+class _Parser(argparse.ArgumentParser):
+    """One-line errors: stock argparse prints the usage block above every
+    error, which buries the actual message. Keep usage for --help only."""
+
+    def error(self, message):
+        self.exit(2, '%s: error: %s\n' % (self.prog, message))
+
+
+def parse_args(argv=None):
+    """Parse argv WITHOUT touching the scheduler DB or the ledger."""
+    parser = _Parser(
+        prog='qa_discover.py',
+        description='QA foreman discovery: pick N projects that need a full CI pass.')
+    parser.add_argument('n', nargs='?', type=positive_int, default=2,
+                        metavar='N',
+                        help='number of projects to pick (default: 2, must be >= 1)')
+    return parser.parse_args(argv)
+
+
+def pick_projects(n):
+    """Return (out_dict, picks) for the N best candidates. Pure DB/ledger read."""
     random.seed()  # hint of chaos: non-reproducible tiebreak on purpose
     con = sqlite3.connect(SCHED_DB)
     enabled = [r[0] for r in con.execute("SELECT name FROM projects WHERE enabled = 1")]
@@ -123,7 +154,13 @@ def main():
     out = {'count': n, 'as_of': now.isoformat(timespec='seconds'), 'picks': picks,
            'excluded': len(excluded), 'skipped': excluded,
            'note': 'QA foreman discovery — fresh-system CI pass candidates'}
-    print(json.dumps(out, indent=1))
+    return out
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    print(json.dumps(pick_projects(args.n), indent=1))
+
 
 if __name__ == '__main__':
     main()
