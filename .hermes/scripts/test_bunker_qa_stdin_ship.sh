@@ -228,6 +228,17 @@ G_SCRIPT="$TD/gen.sh"
 # expands $PATH (toolchain-failure comment) and $0 (an awk self-exclusion guard)
 # at render time — so the fixture is rendered through the SAME extracted bodies
 # with `bash -c ... "$0"` carrying the test's own $0 into the child.
+QA_HEAD_SHA=$(git -C "$TD/repo" rev-parse HEAD 2>/dev/null || echo unknown)
+QA_HEAD_PULL=not-attempted
+if [ "$QA_HEAD_SHA" != "unknown" ]; then
+  if pull_out=$(git -C "$TD/repo" pull --ff-only 2>&1); then
+    QA_HEAD_PULL="ff-only ok"
+    QA_HEAD_SHA=$(git -C "$TD/repo" rev-parse HEAD)
+  else
+    QA_HEAD_PULL="pull failed (non-clean/diverged clone; testing recorded sha): $(printf '%s' "$pull_out" | tr '\n' ' ' | tail -1 | cut -c1-200)"
+  fi
+fi
+export QA_HEAD_SHA QA_HEAD_PULL
 TD="$TD" PATH="$TD/shim:$PATH" BUNKER_QA_SERVER=qa64-shim.invalid \
 BUNKER_QA_HOST_KEY="$TD/home/dummy-hostkey" BUNKER_QA_EVIDENCE="$TD/gen.ev.jsonl" \
 bash -c '
@@ -238,6 +249,10 @@ bash -c '
   cd "$TD"
   agent=aaa11111
   detect_cmds repo aaa11111
+  # QA-BUNKER-65: launch() computes the real HEAD sha + pull status BEFORE
+  # rendering; the fixture must carry the same values or the byte-compare
+  # fails. The values are computed in the PARENT (single-quote-safe) and
+  # exported; the child only consumes them.
   build_remote_script repo "$DETECT_INSTALL" "$DETECT_CI" "$DETECT_NATIVE"
 ' "$0" > "$G_SCRIPT"
 check "generated fixture script non-empty" yes "$( [ -s "$G_SCRIPT" ] && echo yes || echo no)"

@@ -1943,7 +1943,7 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
     # healthy deploy still graded 'no HTTP response'. Allocate the FULL window
     # PER PORT (reset inside the loop); the OK path finds a live port in
     # seconds, the worst case is bounded at 3x the window.
-    for p in \$( { grep -hoE '"[0-9]+:[0-9]+"' docker-compose*.yml compose*.yml 2>/dev/null; grep -hoE '[[:space:]][0-9]+:[0-9]+' docker-compose*.yml compose*.yml 2>/dev/null; } | grep -oE '[0-9]+:[0-9]+' | awk '!seen[$0]++' | head -3 | cut -d: -f1 ); do
+    for p in \$( { grep -hoE '"[0-9]+:[0-9]+"' docker-compose*.yml compose*.yml 2>/dev/null; grep -hoE '[[:space:]][0-9]+:[0-9]+' docker-compose*.yml compose*.yml 2>/dev/null; } | grep -oE '[0-9]+:[0-9]+' | awk '!seen[\$0]++' | head -3 | cut -d: -f1 ); do
       DEADLINE=\$((\$(date +%s) + \${BUNKER_QA_DEPLOY_PROBE_TIMEOUT:-60}))
       while [ \$(date +%s) -lt \$DEADLINE ]; do
         HP=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:\$p/ 2>/dev/null)
