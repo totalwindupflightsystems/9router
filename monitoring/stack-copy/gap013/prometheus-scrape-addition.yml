@@ -1,0 +1,15 @@
+# scrape jobs added to /root/fleet-monitoring/prometheus/prometheus.yml (the LIVE config —
+# NOTE: /root/fleet-monitoring/stack/prometheus/prometheus.yml is a STALE COPY; the compose
+# run dir is /root/fleet-monitoring/ and this copy was briefly edited then reverted).
+# Backup made before edit: /root/fleet-monitoring/prometheus/prometheus.yml.bak-gap013-20261010
+# Reload: `docker exec mon-prometheus kill -HUP 1` (config reload, no restart, no scrape gap).
+# Append block:
+# --- MON-GAP-013 (2026-10-10): service-level exporters for the master001 coolify stack.
+  - job_name: services-postgres
+    static_configs:
+      - targets: ["100.99.183.108:9187"]
+        labels: { host: master001, role: services }
+  - job_name: services-redis
+    static_configs:
+      - targets: ["100.99.183.108:9121"]
+        labels: { host: master001, role: services }
