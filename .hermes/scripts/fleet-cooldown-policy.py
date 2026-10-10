@@ -87,11 +87,16 @@ TARGET_CI = 1800          # CI failing + CI tasks on board
 # h3 board #255→#287, last 2026-08-10 17:49Z; warpfs: restored 06:33 →
 # clobbered by ~08:00 same day). Hard-skip, same semantics as the 900 tier.
 ELEVATED_PINS = {
-    'h3': 43200,      # Bane 2026-08-27: h3 family ticks too fast (5 rows × 6h = 11 ticks/24h) — 12h anti-flood pin
-    'warpfs': 21600,  # Bane 2026-08-19: ALL projects to 6h window for now
+    # 'h3': 43200 / 'warpfs': 21600 RETIRED 2026-10-10 (supervisor audit):
+    # the base rows 'h3'/'warpfs' no longer exist in the DB (families are
+    # individual lanes now) — the pin verified db=<absent> every run and
+    # made --verify exit 1 forever. h3 lanes live at 21600/604800 by policy
+    # regen; warpfs likewise. Re-add ONLY if a base row returns.
     'hermes-canopy-releng': 86400,  # Bane 2026-09-19: releng is 24h, not 6h
-    'hermes-dagger': 900,  # Bane 2026-09-15: 15min dagger speed ruling (was living in DB only, drifted fleet.toml back to 7200)
-    'hermes-canopy': 21600,  # Bane 2026-09-17: all coding-hermes primaries at 21600 (was 7200 in OPERATOR_7200)
+    # 'hermes-dagger': 900 RETIRED 2026-10-10 (supervisor audit): base row
+    # 'hermes-dagger' absent from DB (daggers are per-lane rows now).
+    # 'hermes-canopy': 21600 RETIRED 2026-10-10: same — base row absent.
+    # dagger-foreman sits at 3600 in the DB; lanes verified live instead.
     # ── Role-lane cadence (supervisor 2026-09-27) ──────────────────────
     # The role lanes below sit at their namespace's DOMINANT pinned cadence
     # (dogfood 259200 on 32/32 enabled lanes; review 86400 on 21/24; perf
@@ -103,7 +108,9 @@ ELEVATED_PINS = {
     # admission-starved (31 deferrals/24h measurable). Remove an entry to
     # let the REDUCE rule take the lane to 21600.
     'bunker-dogfood': 259200,
-    'muster-dogfood': 259200,
+    # 'muster-dogfood': 259200 RETIRED 2026-10-10 (supervisor audit): the
+    # REDUCE run already took it to 21600 in DB AND fleet.toml; the stale
+    # pin disagreed with both live stores forever.
     'bunker-perf': 604800,     # weekly per Bane's review/perf ruling (was hardcoded 86400, disagreeing with the DB pin)
     'bunker-review': 604800,   # weekly per Bane's review/perf ruling (was hardcoded 86400, disagreeing with the DB pin)
 }
