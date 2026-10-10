@@ -1,0 +1,6 @@
+# Lane allowlist for alert rules. Each alert rule's `lane:` label names the fleet
+# board the alert-row drain appends to (~/<lane>/.coding-hermes/board/). A lane
+# here must have a board on the fleet host running scripts/drain-board-rows.sh,
+# otherwise the alert fires and never becomes executed work.
+# lint-configs.sh fails any rule whose lane: label is missing from this list.
+monitoring

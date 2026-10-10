@@ -161,6 +161,32 @@ else
   bad "config.alloy"; sed 's/^/       /' "$TMPD"/alloy.err | head -20
 fi
 
+echo "== alert rule lanes =="
+# README-020 follow-up: every rule's `lane:` label must name a lane with a real board.
+# lanes.txt is the allowlist; a rule naming a lane absent from it produces alerts that
+# spool forever and never land on any board (drain: "no board for lane '<x>'").
+LANE_FILE=alerts/lanes.txt
+if python3 -c "import yaml" 2>/dev/null; then
+python3 - "$LANE_FILE" <<'PY' || fail=1
+import glob, re, sys
+allowed = {l.strip() for l in open(sys.argv[1]) if l.strip() and not l.startswith("#")}
+bad = []
+for path in sorted(glob.glob("alerts/rules/*.yml")):
+    text = open(path).read()
+    for m in re.finditer(r'^\s*lane:\s*(\S+)\s*$', text, re.M):
+        lane = m.group(1).strip("'\"")
+        if lane not in allowed:
+            bad.append("%s: lane '%s' not in %s" % (path, lane, sys.argv[1]))
+if bad:
+    for b in bad:
+        print("  \033[31mBAD\033[0m  %s" % b)
+    sys.exit(1)
+print("  \033[32mOK\033[0m   all rule lane labels in allowlist (%d lanes)" % len(allowed))
+PY
+else
+  ok "lane check skipped (PyYAML not installed on this host)"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "LINT: PASS" || echo "LINT: FAIL"
 exit "$fail"
