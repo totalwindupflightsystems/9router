@@ -18,10 +18,10 @@ blackout_windows = [
 [[namespaces]]
 id = "auger"
 weight = 10
-reserved = 3
+reserved = 0
 hard_cap = 6
-max_concurrent = 0
-enabled = false
+max_concurrent = 1
+enabled = true
 admission_mode = "cooldown"
 description = "auger project family - primary + 5 satellites, isolated so fleet-wide contention stops gating them"
 
@@ -40,7 +40,7 @@ id = "backup"
 weight = 5
 reserved = 0
 hard_cap = 10
-max_concurrent = 0
+max_concurrent = 1
 enabled = true
 admission_mode = "cooldown"
 description = "Nightly backups, git mirror sync"
@@ -48,7 +48,7 @@ description = "Nightly backups, git mirror sync"
 [[namespaces]]
 id = "coding-hermes"
 weight = 100
-reserved = 45
+reserved = 8
 hard_cap = 100
 max_concurrent = 8
 enabled = true
@@ -61,7 +61,7 @@ id = "data-cleanup"
 weight = 10
 reserved = 0
 hard_cap = 15
-max_concurrent = 0
+max_concurrent = 1
 enabled = true
 admission_mode = "cooldown"
 description = "Data retention, compaction, tombstone cleanup"
@@ -69,7 +69,7 @@ description = "Data retention, compaction, tombstone cleanup"
 [[namespaces]]
 id = "doc-writer"
 weight = 3
-reserved = 1
+reserved = 0
 hard_cap = 10
 max_concurrent = 1
 enabled = true
@@ -80,17 +80,87 @@ default_prompt = '''You are the weekly doc-writer tick. Today: note UTC date. Fo
 [[namespaces]]
 id = "docs"
 weight = 10
-reserved = 6
+reserved = 0
 hard_cap = 10
 max_concurrent = 3
 enabled = true
 admission_mode = "cooldown"
 description = "Weekly README + documentation audits (one project per tick)"
+default_prompt = '''---------------------------------------------------------------------------
+TRACEABILITY (ch:trace) -- the fleet's link graph. Load the skill
+`coding-hermes-traceability` before you file a row, write a test, commit or claim anything.
+Contract: docs/traceability-doctrine.md in the repo that owns the work.
+One recursive grep must find every marker.
+
+MARKER (one line, wherever the claim lives -- board row, code header, test, commit footer, report):
+  ch:trace row=<ID> spec=<path#anchor> wave=<manifest#step> test=<path::test> doc=<path> \
+           prompt=<path> evidence=<artifact-you-produced> witness=<locator-we-cannot-write> \
+           verdict=<id> commit=<sha> memory=<key>
+
+HARD RULES (each one comes from a measured failure, not from taste):
+ 1. row= is MANDATORY. Trace without a work unit is just a comment.
+ 2. NOTHING CLOSES BY REFERENCE. evidence= is an artifact you produced (report, film, log) or a
+    witness the world produced. A marker citing another row, verdict, report or marker is refused:
+    nesting claims is how 222 rows read "complete" with nothing behind them.
+ 3. No witness? Write witness=none:<reason>. A stated reason is acceptable; silence is not.
+ 4. memory= (DuckBrain) never carries a claim alone -- it accompanies a repo-local reference, and
+    only keys that resolve may be cited.
+ 5. verdict= counts only when bound to a commit= reachable from the published tip. A verdict on an
+    unmerged tree is not evidence about shipped code.
+ 6. The checker is never the author. An out-of-band reading outranks anything we wrote.
+
+Rule of thumb: state -> row=, promise -> spec=, claim -> witness=, judgement -> verdict=, history -> memory=.
+Accepted witness forms: tag:<v>@origin | release:<v> | http:<code>+sha256:<digest> |
+path@origin:<path> | ledger:<predicate> | provider:<usage-page> | live:<endpoint>.
+Commit footer: one ch:trace line per row closed, repeated for multi-row work.
+
+BEFORE YOU CLAIM COMPLETION: every claim carries row=; every claim names witness= or
+witness=none:<reason>; nothing closed by reference; any verdict bound to a commit on the published tip.
+---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------
+EVIDENCE FLOOR -- what counts as proof, and how far you have to go.
+A claim is only as strong as the layer it was verified at; higher tiers subsume
+the ones below them.
+
+ T0  artifact exists   a file / doc / row was written                  NOT proof
+ T1  compiles, imports go build ./... , python -c "import x"           NOT proof
+ T2  unit / help text  go test ./pkg/... , <cli> --help                NOT proof
+ T3  runs for real     YOU invoked the thing: CLI run, binary executed,
+                       server started, migration applied          <- MINIMUM for "done"
+ T4  live boundary     the real service/DB/mount/file was touched: curl the
+                       running server, query the real store, read the artifact
+                       BACK from where it landed, not from where you wrote it
+ T5  end to end        the user-visible path, entry point through to stored effect
+
+FLOOR: nothing closes below T3 on any path the change touches. T0-T2 alone is this
+fleet's number-one false "done" (import-only / unit-only testing). If you can only
+reach T2, write STATUS: PARTIAL and name the tier you could not reach -- do not close.
+
+Reach T4/T5 whenever the change touches the live path. "Tests pass" is not evidence
+that the RUNNING system changed: name the process, endpoint or store you exercised in
+the same sentence as the claim.
+
+ANTI-PATTERNS (each one measured in this fleet, not hypothetical):
+ - "tests pass" with no command line and no output quoted
+ - reading a stored digest/hash back as proof instead of re-running the command
+ - component-green masking outcome-red (CI green while ~1% of traffic was delivered)
+ - a criterion authored by the same agent that completes it
+ - grepping your own log for a success string instead of probing the effect
+ - closure by reference: naming another row / verdict / report as the evidence
+
+CLOSE-OUT FOOTER (last three lines, exactly this shape -- it is parsed, not read):
+  STATUS: PASS | PARTIAL | FAIL
+  TIER: T<n> -- what you actually ran or touched
+  EVIDENCE: the command, or the artifact path you produced
+STATUS: PASS requires TIER >= T3. PARTIAL names the tier you could not reach.
+---------------------------------------------------------------------------
+'''
 
 [[namespaces]]
 id = "dogfood"
 weight = 10
-reserved = 4
+reserved = 0
 hard_cap = 15
 max_concurrent = 9
 enabled = true
@@ -120,7 +190,7 @@ id = "duckbrain-infra"
 weight = 10
 reserved = 0
 hard_cap = 15
-max_concurrent = 0
+max_concurrent = 1
 enabled = true
 admission_mode = "cooldown"
 description = "DuckBrain sync, compaction, namespace maintenance"
@@ -128,7 +198,7 @@ description = "DuckBrain sync, compaction, namespace maintenance"
 [[namespaces]]
 id = "duckbrain-sync"
 weight = 5
-reserved = 10
+reserved = 0
 hard_cap = 100
 max_concurrent = 12
 enabled = true
@@ -182,7 +252,7 @@ YOUR JOB, one tick:
 [[namespaces]]
 id = "perf"
 weight = 10
-reserved = 2
+reserved = 0
 hard_cap = 15
 max_concurrent = 1
 enabled = true
@@ -205,7 +275,7 @@ command and no numbers is not a finding and must not be filed.'''
 [[namespaces]]
 id = "pm"
 weight = 10
-reserved = 4
+reserved = 0
 hard_cap = 15
 max_concurrent = 9
 enabled = true
@@ -230,7 +300,7 @@ TARGET RESOLUTION - which board you read and write. Your workdir is a stand-in p
 [[namespaces]]
 id = "python-audit"
 weight = 10
-reserved = 2
+reserved = 0
 hard_cap = 15
 max_concurrent = 1
 enabled = true
@@ -251,7 +321,7 @@ re-detected finding, and a refusal is the system working, not a failure to work 
 [[namespaces]]
 id = "qa"
 weight = 10
-reserved = 4
+reserved = 0
 hard_cap = 15
 max_concurrent = 9
 enabled = true
@@ -274,7 +344,7 @@ Report terse: first line PASS / FINDINGS / FAILED, then the per-cell results, ea
 [[namespaces]]
 id = "releases"
 weight = 5
-reserved = 3
+reserved = 0
 hard_cap = 40
 max_concurrent = 9
 enabled = true
@@ -285,7 +355,7 @@ default_prompt = '''Load the releases skill at start and follow it. Identify the
 [[namespaces]]
 id = "review"
 weight = 10
-reserved = 4
+reserved = 0
 hard_cap = 15
 max_concurrent = 2
 enabled = true
@@ -347,12 +417,82 @@ then the report path and the send result, then what remains UNVERIFIED.'''
 [[namespaces]]
 id = "tatara"
 weight = 20
-reserved = 4
+reserved = 0
 hard_cap = 8
 max_concurrent = 2
-enabled = true
+enabled = false
 admission_mode = "cooldown"
 description = "tatara project family - agent CI/build/distribution, isolated so fleet-wide contention stops gating it"
+default_prompt = '''---------------------------------------------------------------------------
+TRACEABILITY (ch:trace) -- the fleet's link graph. Load the skill
+`coding-hermes-traceability` before you file a row, write a test, commit or claim anything.
+Contract: docs/traceability-doctrine.md in the repo that owns the work.
+One recursive grep must find every marker.
+
+MARKER (one line, wherever the claim lives -- board row, code header, test, commit footer, report):
+  ch:trace row=<ID> spec=<path#anchor> wave=<manifest#step> test=<path::test> doc=<path> \
+           prompt=<path> evidence=<artifact-you-produced> witness=<locator-we-cannot-write> \
+           verdict=<id> commit=<sha> memory=<key>
+
+HARD RULES (each one comes from a measured failure, not from taste):
+ 1. row= is MANDATORY. Trace without a work unit is just a comment.
+ 2. NOTHING CLOSES BY REFERENCE. evidence= is an artifact you produced (report, film, log) or a
+    witness the world produced. A marker citing another row, verdict, report or marker is refused:
+    nesting claims is how 222 rows read "complete" with nothing behind them.
+ 3. No witness? Write witness=none:<reason>. A stated reason is acceptable; silence is not.
+ 4. memory= (DuckBrain) never carries a claim alone -- it accompanies a repo-local reference, and
+    only keys that resolve may be cited.
+ 5. verdict= counts only when bound to a commit= reachable from the published tip. A verdict on an
+    unmerged tree is not evidence about shipped code.
+ 6. The checker is never the author. An out-of-band reading outranks anything we wrote.
+
+Rule of thumb: state -> row=, promise -> spec=, claim -> witness=, judgement -> verdict=, history -> memory=.
+Accepted witness forms: tag:<v>@origin | release:<v> | http:<code>+sha256:<digest> |
+path@origin:<path> | ledger:<predicate> | provider:<usage-page> | live:<endpoint>.
+Commit footer: one ch:trace line per row closed, repeated for multi-row work.
+
+BEFORE YOU CLAIM COMPLETION: every claim carries row=; every claim names witness= or
+witness=none:<reason>; nothing closed by reference; any verdict bound to a commit on the published tip.
+---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------
+EVIDENCE FLOOR -- what counts as proof, and how far you have to go.
+A claim is only as strong as the layer it was verified at; higher tiers subsume
+the ones below them.
+
+ T0  artifact exists   a file / doc / row was written                  NOT proof
+ T1  compiles, imports go build ./... , python -c "import x"           NOT proof
+ T2  unit / help text  go test ./pkg/... , <cli> --help                NOT proof
+ T3  runs for real     YOU invoked the thing: CLI run, binary executed,
+                       server started, migration applied          <- MINIMUM for "done"
+ T4  live boundary     the real service/DB/mount/file was touched: curl the
+                       running server, query the real store, read the artifact
+                       BACK from where it landed, not from where you wrote it
+ T5  end to end        the user-visible path, entry point through to stored effect
+
+FLOOR: nothing closes below T3 on any path the change touches. T0-T2 alone is this
+fleet's number-one false "done" (import-only / unit-only testing). If you can only
+reach T2, write STATUS: PARTIAL and name the tier you could not reach -- do not close.
+
+Reach T4/T5 whenever the change touches the live path. "Tests pass" is not evidence
+that the RUNNING system changed: name the process, endpoint or store you exercised in
+the same sentence as the claim.
+
+ANTI-PATTERNS (each one measured in this fleet, not hypothetical):
+ - "tests pass" with no command line and no output quoted
+ - reading a stored digest/hash back as proof instead of re-running the command
+ - component-green masking outcome-red (CI green while ~1% of traffic was delivered)
+ - a criterion authored by the same agent that completes it
+ - grepping your own log for a success string instead of probing the effect
+ - closure by reference: naming another row / verdict / report as the evidence
+
+CLOSE-OUT FOOTER (last three lines, exactly this shape -- it is parsed, not read):
+  STATUS: PASS | PARTIAL | FAIL
+  TIER: T<n> -- what you actually ran or touched
+  EVIDENCE: the command, or the artifact path you produced
+STATUS: PASS requires TIER >= T3. PARTIAL names the tier you could not reach.
+---------------------------------------------------------------------------
+'''
 
 [[namespaces]]
 id = "update-and-patch"
@@ -363,17 +503,6 @@ max_concurrent = 1
 enabled = true
 admission_mode = "cooldown"
 description = "Weekly update & patch board-injection lane (deterministic cron, no dagger) — UPD-* board rows"
-
-[[projects]]
-name = "9router"
-repo_url = "local:/home/kara/9router"
-workdir = "/home/kara/9router"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
 
 [[projects]]
 name = "9router-docs"
@@ -394,6 +523,17 @@ weight = 3
 priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "9router-foreman"
+repo_url = "local:/home/kara/9router"
+workdir = "/home/kara/9router"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:118900"
 enabled = true
 
@@ -448,8 +588,6 @@ workdir = "/home/kara/.hermes/stand-in/review/9router"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:118900"
 enabled = true
@@ -488,17 +626,6 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
-name = "ai-plays-poke"
-repo_url = "local:/home/kara/ai_plays_poke"
-workdir = "/home/kara/ai_plays_poke"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:64867"
-enabled = true
-
-[[projects]]
 name = "ai-plays-poke-docs"
 repo_url = "local:/home/kara/ai_plays_poke"
 workdir = "/home/kara/.hermes/stand-in/docs/ai-plays-poke"
@@ -517,6 +644,17 @@ weight = 3
 priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:64867"
+enabled = true
+
+[[projects]]
+name = "ai-plays-poke-foreman"
+repo_url = "local:/home/kara/ai_plays_poke"
+workdir = "/home/kara/ai_plays_poke"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:64867"
 enabled = true
 
@@ -582,8 +720,6 @@ workdir = "/home/kara/.hermes/stand-in/review/ai-plays-poke"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:64867"
 enabled = true
@@ -600,14 +736,102 @@ deliver = "telegram:-1003310984808:64867"
 enabled = true
 
 [[projects]]
-name = "auger"
-repo_url = "https://github.com/coding-hermes/auger"
-workdir = "/home/kara/auger"
-weight = 10
+name = "asce-docs"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/.hermes/stand-in/docs/asce"
+weight = 3
 priority = 5
+cooldown_s = 604800
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:1"
+enabled = true
+
+[[projects]]
+name = "asce-dogfood"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/.hermes/stand-in/dogfood/asce"
+weight = 3
+priority = 5
+cooldown_s = 259200
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:12"
+enabled = true
+
+[[projects]]
+name = "asce-foreman"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/asce"
+weight = 15
+priority = 10
 cooldown_s = 21600
 namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:83996"
+deliver = "telegram:-1003310984808:12"
+enabled = true
+
+[[projects]]
+name = "asce-pm"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/asce"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/asce"
+weight = 3
+priority = 3
+cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:12"
+enabled = true
+
+[[projects]]
+name = "asce-qa"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/.hermes/stand-in/pm/asce"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:12"
+enabled = true
+
+[[projects]]
+name = "asce-readme"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/.hermes/stand-in/readme/asce"
+weight = 3
+priority = 5
+cooldown_s = 604800
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:1"
+enabled = true
+
+[[projects]]
+name = "asce-releng"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/asce"
+weight = 2
+priority = 3
+cooldown_s = 86400
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:12"
+enabled = true
+
+[[projects]]
+name = "asce-review"
+repo_url = "local:/home/kara/asce"
+workdir = "/home/kara/.hermes/stand-in/review/asce"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:12"
+enabled = true
+
+[[projects]]
+name = "asce-sync"
+repo_url = "https://example.com/asce-sync"
+workdir = "/home/kara/.hermes/sync-workdirs/asce-sync"
+weight = 1
+priority = 5
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "telegram:-1003310984808:12"
 enabled = true
 
 [[projects]]
@@ -630,6 +854,17 @@ priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:72503"
+enabled = true
+
+[[projects]]
+name = "auger-foreman"
+repo_url = "https://github.com/coding-hermes/auger"
+workdir = "/home/kara/auger"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
@@ -683,8 +918,6 @@ workdir = "/home/kara/.hermes/stand-in/review/auger"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
@@ -708,7 +941,6 @@ weight = 1
 priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "local"
 enabled = true
 
 [[projects]]
@@ -717,20 +949,8 @@ repo_url = "https://github.com/totalwindupflightsystems/blog.git"
 workdir = "/home/kara/.hermes/sync-workdirs/blog-sync"
 weight = 1
 priority = 5
-cooldown_s = 43200
-namespace_id = "duckbrain-sync"
-deliver = "local"
-enabled = true
-
-[[projects]]
-name = "boardctl"
-repo_url = "local:/home/kara/coding-hermes-boardctl"
-workdir = "/home/kara/coding-hermes-boardctl"
-weight = 3
-priority = 5
 cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:83996"
+namespace_id = "duckbrain-sync"
 enabled = true
 
 [[projects]]
@@ -756,6 +976,17 @@ deliver = "telegram:-1003310984808:60183"
 enabled = true
 
 [[projects]]
+name = "boardctl-foreman"
+repo_url = "local:/home/kara/coding-hermes-boardctl"
+workdir = "/home/kara/coding-hermes-boardctl"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:83996"
+enabled = true
+
+[[projects]]
 name = "boardctl-pm"
 repo_url = "local:/home/kara/coding-hermes-boardctl"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/boardctl"
@@ -774,7 +1005,7 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
+deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
@@ -806,8 +1037,6 @@ workdir = "/home/kara/.hermes/stand-in/review/boardctl"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
@@ -824,19 +1053,8 @@ deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
-name = "bunker"
-repo_url = "local:/home/kara/bunker"
-workdir = "/home/kara/bunker"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:70902"
-enabled = true
-
-[[projects]]
 name = "bunker-docs"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/docs/bunker"
 weight = 3
 priority = 5
@@ -847,7 +1065,7 @@ enabled = true
 
 [[projects]]
 name = "bunker-dogfood"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/dogfood/bunker"
 weight = 3
 priority = 5
@@ -857,8 +1075,19 @@ deliver = "telegram:-1003310984808:70902"
 enabled = true
 
 [[projects]]
+name = "bunker-foreman"
+repo_url = "local:/home/kara/deployBunker/bunker"
+workdir = "/home/kara/deployBunker/bunker"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:70902"
+enabled = true
+
+[[projects]]
 name = "bunker-perf"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/perf/bunker"
 weight = 3
 priority = 5
@@ -880,7 +1109,7 @@ enabled = true
 
 [[projects]]
 name = "bunker-qa"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/pm/bunker"
 weight = 4
 priority = 4
@@ -891,7 +1120,7 @@ enabled = true
 
 [[projects]]
 name = "bunker-readme"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/readme/bunker"
 weight = 3
 priority = 5
@@ -902,7 +1131,7 @@ enabled = true
 
 [[projects]]
 name = "bunker-releng"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/bunker"
 weight = 2
 priority = 3
@@ -913,13 +1142,11 @@ enabled = true
 
 [[projects]]
 name = "bunker-review"
-repo_url = "local:/home/kara/bunker"
+repo_url = "local:/home/kara/deployBunker/bunker"
 workdir = "/home/kara/.hermes/stand-in/review/bunker"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:70902"
 enabled = true
@@ -933,17 +1160,6 @@ priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:70902"
-enabled = true
-
-[[projects]]
-name = "chimera-v2"
-repo_url = "local:/home/kara/chimera-v2"
-workdir = "/home/kara/chimera-v2"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:50404"
 enabled = true
 
 [[projects]]
@@ -965,6 +1181,17 @@ weight = 3
 priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:50404"
+enabled = true
+
+[[projects]]
+name = "chimera-v2-foreman"
+repo_url = "local:/home/kara/chimera-v2"
+workdir = "/home/kara/chimera-v2"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:50404"
 enabled = true
 
@@ -1019,8 +1246,6 @@ workdir = "/home/kara/.hermes/stand-in/review/chimera-v2"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:50404"
 enabled = true
@@ -1034,17 +1259,6 @@ priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:50404"
-enabled = true
-
-[[projects]]
-name = "coding-hermes-scheduler"
-repo_url = "https://github.com/coding-hermes/scheduler"
-workdir = "/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
@@ -1067,6 +1281,17 @@ priority = 4
 cooldown_s = 259200
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-scheduler-foreman"
+repo_url = "https://github.com/coding-hermes/scheduler"
+workdir = "/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
@@ -1099,7 +1324,7 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
+deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
@@ -1131,8 +1356,6 @@ workdir = "/home/kara/.hermes/stand-in/review/coding-hermes-scheduler"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
@@ -1165,19 +1388,8 @@ repo_url = "https://example.com/coding-hermes-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/coding-hermes-sync"
 weight = 1
 priority = 5
-cooldown_s = 43200
+cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:83996"
-enabled = true
-
-[[projects]]
-name = "coding-hermes-tools"
-repo_url = "local:/home/kara/coding-hermes-tools"
-workdir = "/home/kara/coding-hermes-tools"
-weight = 3
-priority = 6
-cooldown_s = 3600
-namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
 
@@ -1201,6 +1413,17 @@ priority = 4
 cooldown_s = 259200
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "coding-hermes-tools-foreman"
+repo_url = "local:/home/kara/coding-hermes-tools"
+workdir = "/home/kara/coding-hermes-tools"
+weight = 3
+priority = 6
+cooldown_s = 3600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
@@ -1254,8 +1477,6 @@ workdir = "/home/kara/.hermes/stand-in/review/coding-hermes-tools"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
@@ -1272,19 +1493,8 @@ deliver = "telegram:-1003310984808:83996"
 enabled = true
 
 [[projects]]
-name = "consensus"
-repo_url = "local:/home/kara/consensus"
-workdir = "/home/kara/consensus"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:4314"
-enabled = true
-
-[[projects]]
 name = "consensus-docs"
-repo_url = "local:/home/kara/consensus"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
 workdir = "/home/kara/.hermes/stand-in/docs/consensus"
 weight = 3
 priority = 5
@@ -1295,7 +1505,7 @@ enabled = true
 
 [[projects]]
 name = "consensus-dogfood"
-repo_url = "local:/home/kara/consensus"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
 workdir = "/home/kara/.hermes/stand-in/dogfood/consensus"
 weight = 3
 priority = 5
@@ -1305,19 +1515,30 @@ deliver = "telegram:-1003310984808:4314"
 enabled = true
 
 [[projects]]
+name = "consensus-foreman"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
+workdir = "/home/kara/totalwindupflightsystems/consensus"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:4314"
+enabled = true
+
+[[projects]]
 name = "consensus-pm"
-repo_url = "local:/home/kara/consensus"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/consensus"
 weight = 3
 priority = 3
-cooldown_s = 21600
+cooldown_s = 86400
 namespace_id = "pm"
 deliver = "telegram:-1003310984808:4314"
 enabled = true
 
 [[projects]]
 name = "consensus-qa"
-repo_url = "local:/home/kara/consensus"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
 workdir = "/home/kara/.hermes/stand-in/pm/consensus"
 weight = 4
 priority = 4
@@ -1328,7 +1549,7 @@ enabled = true
 
 [[projects]]
 name = "consensus-readme"
-repo_url = "local:/home/kara/consensus"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
 workdir = "/home/kara/.hermes/stand-in/readme/consensus"
 weight = 3
 priority = 5
@@ -1339,13 +1560,24 @@ enabled = true
 
 [[projects]]
 name = "consensus-releng"
-repo_url = "local:/home/kara/consensus"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/consensus"
 weight = 4
 priority = 4
-cooldown_s = 21600
+cooldown_s = 86400
 namespace_id = "releases"
 deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "consensus-review"
+repo_url = "local:/home/kara/totalwindupflightsystems/consensus"
+workdir = "/home/kara/.hermes/stand-in/review/consensus"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
 enabled = true
 
 [[projects]]
@@ -1357,17 +1589,6 @@ priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:4314"
-enabled = true
-
-[[projects]]
-name = "crier"
-repo_url = "local:/home/kara/crier"
-workdir = "/home/kara/crier"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:83399"
 enabled = true
 
 [[projects]]
@@ -1389,6 +1610,17 @@ weight = 3
 priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
+name = "crier-foreman"
+repo_url = "local:/home/kara/crier"
+workdir = "/home/kara/crier"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:83399"
 enabled = true
 
@@ -1443,8 +1675,6 @@ workdir = "/home/kara/.hermes/stand-in/review/crier"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:83399"
 enabled = true
@@ -1488,25 +1718,14 @@ repo_url = "https://example.com/deepseek-payg-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/deepseek-payg-sync"
 weight = 1
 priority = 5
-cooldown_s = 43200
+cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:68481"
 enabled = true
 
 [[projects]]
-name = "dexdat-core"
-repo_url = "local:/home/kara/dexdat-core"
-workdir = "/home/kara/dexdat-core"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:62373"
-enabled = true
-
-[[projects]]
 name = "dexdat-core-docs"
-repo_url = "local:/home/kara/dexdat-core"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
 workdir = "/home/kara/.hermes/stand-in/docs/dexdat-core"
 weight = 3
 priority = 5
@@ -1517,7 +1736,7 @@ enabled = true
 
 [[projects]]
 name = "dexdat-core-dogfood"
-repo_url = "local:/home/kara/dexdat-core"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
 workdir = "/home/kara/.hermes/stand-in/dogfood/dexdat-core"
 weight = 3
 priority = 5
@@ -1527,8 +1746,19 @@ deliver = "telegram:-1003310984808:62373"
 enabled = true
 
 [[projects]]
+name = "dexdat-core-foreman"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
+workdir = "/home/kara/dexdat/dexdat-core"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:62373"
+enabled = true
+
+[[projects]]
 name = "dexdat-core-pm"
-repo_url = "local:/home/kara/dexdat-core"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/dexdat-core"
 weight = 3
 priority = 3
@@ -1539,7 +1769,7 @@ enabled = true
 
 [[projects]]
 name = "dexdat-core-qa"
-repo_url = "local:/home/kara/dexdat-core"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
 workdir = "/home/kara/.hermes/stand-in/pm/dexdat-core"
 weight = 4
 priority = 4
@@ -1550,7 +1780,7 @@ enabled = true
 
 [[projects]]
 name = "dexdat-core-readme"
-repo_url = "local:/home/kara/dexdat-core"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
 workdir = "/home/kara/.hermes/stand-in/readme/dexdat-core"
 weight = 3
 priority = 5
@@ -1561,13 +1791,24 @@ enabled = true
 
 [[projects]]
 name = "dexdat-core-releng"
-repo_url = "local:/home/kara/dexdat-core"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/dexdat-core"
 weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "releases"
 deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "dexdat-core-review"
+repo_url = "local:/home/kara/dexdat/dexdat-core"
+workdir = "/home/kara/.hermes/stand-in/review/dexdat-core"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
 enabled = true
 
 [[projects]]
@@ -1579,17 +1820,6 @@ priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:62373"
-enabled = true
-
-[[projects]]
-name = "dexdat-memory"
-repo_url = "local:/home/kara/dexdat-memory"
-workdir = "/home/kara/dexdat-memory"
-weight = 10
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:4259"
 enabled = true
 
 [[projects]]
@@ -1611,6 +1841,17 @@ weight = 3
 priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:4259"
+enabled = true
+
+[[projects]]
+name = "dexdat-memory-foreman"
+repo_url = "local:/home/kara/dexdat-memory"
+workdir = "/home/kara/dexdat-memory"
+weight = 10
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:4259"
 enabled = true
 
@@ -1659,6 +1900,17 @@ deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
+name = "dexdat-memory-review"
+repo_url = "local:/home/kara/dexdat-memory"
+workdir = "/home/kara/.hermes/stand-in/review/dexdat-memory"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
 name = "dexdat-memory-sync"
 repo_url = "https://example.com/dexdat-memory-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/dexdat-memory-sync"
@@ -1670,19 +1922,8 @@ deliver = "telegram:-1003310984808:4259"
 enabled = true
 
 [[projects]]
-name = "digest"
-repo_url = "https://github.com/get-h3/digest"
-workdir = "/home/kara/digest"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
 name = "digest-docs"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/stand-in/docs/digest"
 weight = 3
 priority = 5
@@ -1693,7 +1934,7 @@ enabled = true
 
 [[projects]]
 name = "digest-dogfood"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/stand-in/dogfood/digest"
 weight = 3
 priority = 5
@@ -1703,8 +1944,30 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "digest-foreman"
+repo_url = "https://github.com/get-h3/digest"
+workdir = "/home/kara/get-h3/digest"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "digest-perf"
+repo_url = "local:/home/kara/get-h3/digest"
+workdir = "/home/kara/.hermes/stand-in/perf/digest"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "perf"
+deliver = "telegram:-1003310984808:1"
+enabled = true
+
+[[projects]]
 name = "digest-pm"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/digest"
 weight = 4
 priority = 4
@@ -1715,7 +1978,7 @@ enabled = true
 
 [[projects]]
 name = "digest-qa"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/stand-in/pm/digest"
 weight = 4
 priority = 4
@@ -1726,7 +1989,7 @@ enabled = true
 
 [[projects]]
 name = "digest-readme"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/stand-in/readme/digest"
 weight = 3
 priority = 5
@@ -1737,7 +2000,7 @@ enabled = true
 
 [[projects]]
 name = "digest-releng"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/digest"
 weight = 4
 priority = 4
@@ -1747,25 +2010,25 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "digest-review"
+repo_url = "local:/home/kara/get-h3/digest"
+workdir = "/home/kara/.hermes/stand-in/review/digest"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
 name = "digest-sync"
-repo_url = "local:/home/kara/digest"
+repo_url = "local:/home/kara/get-h3/digest"
 workdir = "/home/kara/.hermes/sync-workdirs/digest-sync"
 weight = 1
 priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
-name = "duckbrain"
-repo_url = "local:/home/kara/duckbrain"
-workdir = "/home/kara/duckbrain"
-weight = 10
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:2065"
 enabled = true
 
 [[projects]]
@@ -1788,6 +2051,17 @@ priority = 4
 cooldown_s = 259200
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "duckbrain-foreman"
+repo_url = "local:/home/kara/duckbrain"
+workdir = "/home/kara/duckbrain"
+weight = 10
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:2065"
 enabled = true
 
 [[projects]]
@@ -1851,8 +2125,6 @@ workdir = "/home/kara/.hermes/stand-in/review/duckbrain"
 weight = 3
 priority = 4
 cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
 namespace_id = "review"
 deliver = "telegram:-1003310984808:2065"
 enabled = true
@@ -1874,9 +2146,8 @@ repo_url = "https://example.com/eduos-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/eduos-sync"
 weight = 1
 priority = 5
-cooldown_s = 43200
+cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "local"
 enabled = true
 
 [[projects]]
@@ -1918,20 +2189,8 @@ repo_url = "https://example.com/frontiers-ghost-sync"
 workdir = "/home/kara/.hermes/sync-workdirs/frontiers-ghost-sync"
 weight = 1
 priority = 5
-cooldown_s = 43200
-namespace_id = "duckbrain-sync"
-deliver = "local"
-enabled = true
-
-[[projects]]
-name = "gitreins"
-repo_url = "https://github.com/totalwindupflightsystems/gitreins"
-workdir = "/home/kara/gitreins"
-weight = 25
-priority = 8
 cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:3254"
+namespace_id = "duckbrain-sync"
 enabled = true
 
 [[projects]]
@@ -1951,8 +2210,19 @@ repo_url = "local:/home/kara/gitreins"
 workdir = "/home/kara/.hermes/stand-in/dogfood/gitreins"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:3254"
+enabled = true
+
+[[projects]]
+name = "gitreins-foreman"
+repo_url = "https://github.com/totalwindupflightsystems/gitreins"
+workdir = "/home/kara/gitreins"
+weight = 25
+priority = 8
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:3254"
 enabled = true
 
@@ -1973,7 +2243,7 @@ repo_url = "local:/home/kara/gitreins"
 workdir = "/home/kara/.hermes/stand-in/pm/gitreins"
 weight = 4
 priority = 4
-cooldown_s = 86400
+cooldown_s = 21600
 namespace_id = "qa"
 deliver = "telegram:-1003310984808:3254"
 enabled = true
@@ -2006,9 +2276,7 @@ repo_url = "local:/home/kara/gitreins"
 workdir = "/home/kara/.hermes/stand-in/review/gitreins"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:3254"
 enabled = true
@@ -2021,18 +2289,105 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "local"
 enabled = true
 
 [[projects]]
-name = "h3"
-repo_url = "https://github.com/get-h3/h3"
-workdir = "/home/kara/get-h3/h3"
-weight = 15
+name = "guard-docs"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/docs/guard"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-dogfood"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/dogfood/guard"
+weight = 3
+priority = 4
+cooldown_s = 21600
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-foreman"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/trouble-agent/guard"
+weight = 10
 priority = 10
-cooldown_s = 43200
+cooldown_s = 21600
 namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:84802"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-pm"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/guard"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-qa"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/pm/guard"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-readme"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/readme/guard"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-releng"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/guard"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-review"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/stand-in/review/guard"
+weight = 3
+priority = 4
+cooldown_s = 21600
+namespace_id = "review"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "guard-sync"
+repo_url = "local:/home/kara/trouble-agent/guard"
+workdir = "/home/kara/.hermes/sync-workdirs/guard-sync"
+weight = 1
+priority = 5
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "telegram:-1003310984808:168443"
 enabled = true
 
 [[projects]]
@@ -2052,9 +2407,31 @@ repo_url = "local:/home/kara/get-h3/h3"
 workdir = "/home/kara/.hermes/stand-in/dogfood/h3"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-foreman"
+repo_url = "https://github.com/get-h3/h3"
+workdir = "/home/kara/get-h3/h3"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "h3-perf"
+repo_url = "local:/home/kara/get-h3/h3"
+workdir = "/home/kara/.hermes/stand-in/perf/h3"
+weight = 3
+priority = 4
+cooldown_s = 21600
+namespace_id = "perf"
+deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
@@ -2107,9 +2484,7 @@ repo_url = "local:/home/kara/get-h3/h3"
 workdir = "/home/kara/.hermes/stand-in/review/h3"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
@@ -2123,17 +2498,6 @@ priority = 4
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
-name = "heading"
-repo_url = "local:/home/kara/heading"
-workdir = "/home/kara/heading"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:87734"
 enabled = true
 
 [[projects]]
@@ -2153,8 +2517,19 @@ repo_url = "local:/home/kara/heading"
 workdir = "/home/kara/.hermes/stand-in/dogfood/heading"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:87734"
+enabled = true
+
+[[projects]]
+name = "heading-foreman"
+repo_url = "local:/home/kara/heading"
+workdir = "/home/kara/heading"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:87734"
 enabled = true
 
@@ -2208,9 +2583,7 @@ repo_url = "local:/home/kara/heading"
 workdir = "/home/kara/.hermes/stand-in/review/heading"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:87734"
 enabled = true
@@ -2278,18 +2651,6 @@ weight = 1
 priority = 5
 cooldown_s = 43200
 namespace_id = "duckbrain-sync"
-deliver = "local"
-enabled = true
-
-[[projects]]
-name = "hermes-canopy"
-repo_url = "https://github.com/coding-hermes/hermes-canopy"
-workdir = "/home/kara/hermes-canopy"
-weight = 10
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:92776"
 enabled = true
 
 [[projects]]
@@ -2309,8 +2670,19 @@ repo_url = "local:/home/kara/hermes-canopy"
 workdir = "/home/kara/.hermes/stand-in/dogfood/hermes-canopy"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:92776"
+enabled = true
+
+[[projects]]
+name = "hermes-canopy-foreman"
+repo_url = "https://github.com/coding-hermes/hermes-canopy"
+workdir = "/home/kara/hermes-canopy"
+weight = 10
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:92776"
 enabled = true
 
@@ -2364,9 +2736,7 @@ repo_url = "local:/home/kara/hermes-canopy"
 workdir = "/home/kara/.hermes/stand-in/review/hermes-canopy"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:92776"
 enabled = true
@@ -2383,19 +2753,8 @@ deliver = "telegram:-1003310984808:92776"
 enabled = true
 
 [[projects]]
-name = "hermes-dagger"
-repo_url = "https://github.com/Hermes-DAGger/hermes-dagger.git"
-workdir = "/home/kara/hermes-dagger"
-weight = 10
-priority = 10
-cooldown_s = 900
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:87792"
-enabled = true
-
-[[projects]]
 name = "hermes-dagger-docs"
-repo_url = "local:/home/kara/hermes-dagger"
+repo_url = "local:/home/kara/Hermes-DAGger/hermes-dagger"
 workdir = "/home/kara/.hermes/stand-in/docs/hermes-dagger"
 weight = 3
 priority = 5
@@ -2406,12 +2765,23 @@ enabled = true
 
 [[projects]]
 name = "hermes-dagger-dogfood"
-repo_url = "local:/home/kara/hermes-dagger"
+repo_url = "local:/home/kara/Hermes-DAGger/hermes-dagger"
 workdir = "/home/kara/.hermes/stand-in/dogfood/hermes-dagger"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "hermes-dagger-foreman"
+repo_url = "https://github.com/Hermes-DAGger/hermes-dagger.git"
+workdir = "/home/kara/Hermes-DAGger/hermes-dagger"
+weight = 10
+priority = 10
+cooldown_s = 3600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:87792"
 enabled = true
 
@@ -2428,7 +2798,7 @@ enabled = true
 
 [[projects]]
 name = "hermes-dagger-qa"
-repo_url = "local:/home/kara/hermes-dagger"
+repo_url = "local:/home/kara/Hermes-DAGger/hermes-dagger"
 workdir = "/home/kara/.hermes/stand-in/pm/hermes-dagger"
 weight = 4
 priority = 4
@@ -2439,7 +2809,7 @@ enabled = true
 
 [[projects]]
 name = "hermes-dagger-readme"
-repo_url = "local:/home/kara/hermes-dagger"
+repo_url = "local:/home/kara/Hermes-DAGger/hermes-dagger"
 workdir = "/home/kara/.hermes/stand-in/readme/hermes-dagger"
 weight = 3
 priority = 5
@@ -2450,7 +2820,7 @@ enabled = true
 
 [[projects]]
 name = "hermes-dagger-releng"
-repo_url = "local:/home/kara/hermes-dagger"
+repo_url = "local:/home/kara/Hermes-DAGger/hermes-dagger"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/hermes-dagger"
 weight = 2
 priority = 3
@@ -2461,13 +2831,11 @@ enabled = true
 
 [[projects]]
 name = "hermes-dagger-review"
-repo_url = "local:/home/kara/hermes-dagger"
+repo_url = "local:/home/kara/Hermes-DAGger/hermes-dagger"
 workdir = "/home/kara/.hermes/stand-in/review/hermes-dagger"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:87792"
 enabled = true
@@ -2480,7 +2848,6 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "local"
 enabled = true
 
 [[projects]]
@@ -2506,19 +2873,8 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
-name = "hivemind-work"
-repo_url = "local:/home/kara/hivemind-work"
-workdir = "/home/kara/hivemind-work"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:59430"
-enabled = true
-
-[[projects]]
 name = "hivemind-work-docs"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/stand-in/docs/hivemind-work"
 weight = 3
 priority = 5
@@ -2529,18 +2885,29 @@ enabled = true
 
 [[projects]]
 name = "hivemind-work-dogfood"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/stand-in/dogfood/hivemind-work"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:59430"
 enabled = true
 
 [[projects]]
+name = "hivemind-work-foreman"
+repo_url = "local:/home/kara/dexdat/hivemind"
+workdir = "/home/kara/dexdat/hivemind"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:59430"
+enabled = true
+
+[[projects]]
 name = "hivemind-work-pm"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/hivemind-work"
 weight = 3
 priority = 3
@@ -2551,7 +2918,7 @@ enabled = true
 
 [[projects]]
 name = "hivemind-work-qa"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/stand-in/pm/hivemind-work"
 weight = 4
 priority = 4
@@ -2562,7 +2929,7 @@ enabled = true
 
 [[projects]]
 name = "hivemind-work-readme"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/stand-in/readme/hivemind-work"
 weight = 3
 priority = 5
@@ -2573,7 +2940,7 @@ enabled = true
 
 [[projects]]
 name = "hivemind-work-releng"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/hivemind-work"
 weight = 4
 priority = 4
@@ -2583,8 +2950,19 @@ deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
+name = "hivemind-work-review"
+repo_url = "local:/home/kara/dexdat/hivemind"
+workdir = "/home/kara/.hermes/stand-in/review/hivemind-work"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
 name = "hivemind-work-sync"
-repo_url = "local:/home/kara/hivemind-work"
+repo_url = "local:/home/kara/dexdat/hivemind"
 workdir = "/home/kara/.hermes/sync-workdirs/hivemind-work-sync"
 weight = 3
 priority = 5
@@ -2638,19 +3016,8 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
-name = "logsey"
-repo_url = "https://github.com/get-h3/logsey"
-workdir = "/home/kara/logsey"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
 name = "logsey-docs"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/stand-in/docs/logsey"
 weight = 3
 priority = 5
@@ -2661,18 +3028,40 @@ enabled = true
 
 [[projects]]
 name = "logsey-dogfood"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/stand-in/dogfood/logsey"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "logsey-foreman"
+repo_url = "https://github.com/get-h3/logsey"
+workdir = "/home/kara/get-h3/logsey"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "logsey-perf"
+repo_url = "local:/home/kara/get-h3/logsey"
+workdir = "/home/kara/.hermes/stand-in/perf/logsey"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "perf"
+deliver = "telegram:-1003310984808:1"
+enabled = true
+
+[[projects]]
 name = "logsey-pm"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/logsey"
 weight = 4
 priority = 4
@@ -2683,7 +3072,7 @@ enabled = true
 
 [[projects]]
 name = "logsey-qa"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/stand-in/pm/logsey"
 weight = 4
 priority = 4
@@ -2694,7 +3083,7 @@ enabled = true
 
 [[projects]]
 name = "logsey-readme"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/stand-in/readme/logsey"
 weight = 3
 priority = 5
@@ -2705,7 +3094,7 @@ enabled = true
 
 [[projects]]
 name = "logsey-releng"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/logsey"
 weight = 4
 priority = 4
@@ -2715,8 +3104,19 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "logsey-review"
+repo_url = "local:/home/kara/get-h3/logsey"
+workdir = "/home/kara/.hermes/stand-in/review/logsey"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
 name = "logsey-sync"
-repo_url = "local:/home/kara/logsey"
+repo_url = "local:/home/kara/get-h3/logsey"
 workdir = "/home/kara/.hermes/sync-workdirs/logsey-sync"
 weight = 1
 priority = 5
@@ -2726,19 +3126,8 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
-name = "lore"
-repo_url = "https://github.com/get-h3/lore"
-workdir = "/home/kara/lore"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
 name = "lore-docs"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/stand-in/docs/lore"
 weight = 3
 priority = 5
@@ -2749,18 +3138,40 @@ enabled = true
 
 [[projects]]
 name = "lore-dogfood"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/stand-in/dogfood/lore"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "lore-foreman"
+repo_url = "https://github.com/get-h3/lore"
+workdir = "/home/kara/get-h3/lore"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "lore-perf"
+repo_url = "local:/home/kara/get-h3/lore"
+workdir = "/home/kara/.hermes/stand-in/perf/lore"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "perf"
+deliver = "telegram:-1003310984808:1"
+enabled = true
+
+[[projects]]
 name = "lore-pm"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/lore"
 weight = 4
 priority = 4
@@ -2771,7 +3182,7 @@ enabled = true
 
 [[projects]]
 name = "lore-qa"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/stand-in/pm/lore"
 weight = 4
 priority = 4
@@ -2782,7 +3193,7 @@ enabled = true
 
 [[projects]]
 name = "lore-readme"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/stand-in/readme/lore"
 weight = 3
 priority = 5
@@ -2793,7 +3204,7 @@ enabled = true
 
 [[projects]]
 name = "lore-releng"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/lore"
 weight = 4
 priority = 4
@@ -2803,8 +3214,19 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "lore-review"
+repo_url = "local:/home/kara/get-h3/lore"
+workdir = "/home/kara/.hermes/stand-in/review/lore"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
 name = "lore-sync"
-repo_url = "local:/home/kara/lore"
+repo_url = "local:/home/kara/get-h3/lore"
 workdir = "/home/kara/.hermes/sync-workdirs/lore-sync"
 weight = 1
 priority = 5
@@ -2814,19 +3236,8 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
-name = "mafia-ai-benchmark"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
-workdir = "/home/kara/mafia-ai-benchmark"
-weight = 10
-priority = 8
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:4409"
-enabled = true
-
-[[projects]]
 name = "mafia-ai-benchmark-docs"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
 workdir = "/home/kara/.hermes/stand-in/docs/mafia-ai-benchmark"
 weight = 3
 priority = 5
@@ -2837,7 +3248,7 @@ enabled = true
 
 [[projects]]
 name = "mafia-ai-benchmark-dogfood"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
 workdir = "/home/kara/.hermes/stand-in/dogfood/mafia-ai-benchmark"
 weight = 3
 priority = 5
@@ -2847,30 +3258,41 @@ deliver = "telegram:-1003310984808:4409"
 enabled = true
 
 [[projects]]
+name = "mafia-ai-benchmark-foreman"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
+workdir = "/home/kara/wojons/mafia-ai-benchmark"
+weight = 10
+priority = 8
+cooldown_s = 43200
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:4409"
+enabled = true
+
+[[projects]]
 name = "mafia-ai-benchmark-pm"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/mafia-ai-benchmark"
 weight = 3
 priority = 3
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "pm"
 deliver = "telegram:-1003310984808:4409"
 enabled = true
 
 [[projects]]
 name = "mafia-ai-benchmark-qa"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
 workdir = "/home/kara/.hermes/stand-in/pm/mafia-ai-benchmark"
 weight = 4
 priority = 4
-cooldown_s = 21600
+cooldown_s = 43200
 namespace_id = "qa"
 deliver = "telegram:-1003310984808:4409"
 enabled = true
 
 [[projects]]
 name = "mafia-ai-benchmark-readme"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
 workdir = "/home/kara/.hermes/stand-in/readme/mafia-ai-benchmark"
 weight = 3
 priority = 5
@@ -2881,8 +3303,85 @@ enabled = true
 
 [[projects]]
 name = "mafia-ai-benchmark-releng"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/mafia-ai-benchmark"
+weight = 4
+priority = 4
+cooldown_s = 43200
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:118900"
+enabled = true
+
+[[projects]]
+name = "mafia-ai-benchmark-review"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
+workdir = "/home/kara/.hermes/stand-in/review/mafia-ai-benchmark"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
+name = "mafia-ai-benchmark-sync"
+repo_url = "local:/home/kara/wojons/mafia-ai-benchmark"
+workdir = "/home/kara/.hermes/sync-workdirs/mafia-ai-benchmark-sync"
+weight = 3
+priority = 5
+cooldown_s = 43200
+namespace_id = "duckbrain-sync"
+deliver = "telegram:-1003310984808:4409"
+enabled = true
+
+[[projects]]
+name = "mischief-chaos"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/monitoring/mischief"
+weight = 1
+priority = 3
+cooldown_s = 21600
+namespace_id = "monitoring"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-chaos-dogfood"
+repo_url = "local:/home/kara/mischief-chaos"
+workdir = "/home/kara/.hermes/stand-in/dogfood/mischief-chaos"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:4370"
+enabled = true
+
+[[projects]]
+name = "mischief-chaos-pm"
+repo_url = "local:/home/kara/mischief-chaos"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/mischief-chaos"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:64867"
+enabled = true
+
+[[projects]]
+name = "mischief-chaos-qa"
+repo_url = "local:/home/kara/mischief-chaos"
+workdir = "/home/kara/.hermes/stand-in/pm/mischief-chaos"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:4370"
+enabled = true
+
+[[projects]]
+name = "mischief-chaos-releng"
+repo_url = "local:/home/kara/mischief-chaos"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/mischief-chaos"
 weight = 4
 priority = 4
 cooldown_s = 21600
@@ -2891,25 +3390,124 @@ deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
-name = "mafia-ai-benchmark-sync"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
-workdir = "/home/kara/.hermes/sync-workdirs/mafia-ai-benchmark-sync"
+name = "mischief-chaos-sync"
+repo_url = "local:/home/kara/mischief-chaos"
+workdir = "/home/kara/.hermes/sync-workdirs/mischief-chaos-sync"
 weight = 3
 priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:4409"
+deliver = "telegram:-1003310984808:118900"
 enabled = true
 
 [[projects]]
-name = "monitoring"
-repo_url = "local:/home/kara/monitoring"
-workdir = "/home/kara/monitoring"
-weight = 10
+name = "mischief-docs"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/docs/mischief"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-dogfood"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/dogfood/mischief"
+weight = 3
 priority = 4
 cooldown_s = 21600
-namespace_id = "monitoring"
-deliver = "telegram:-1003310984808:1"
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-foreman"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/mischief"
+weight = 10
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-pm"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/mischief"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-qa"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/pm/mischief"
+weight = 4
+priority = 4
+cooldown_s = 21600
+namespace_id = "qa"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-readme"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/readme/mischief"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-releng"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/mischief"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-review"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/stand-in/review/mischief"
+weight = 3
+priority = 4
+cooldown_s = 21600
+namespace_id = "review"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "mischief-sync"
+repo_url = "local:/home/kara/mischief"
+workdir = "/home/kara/.hermes/sync-workdirs/mischief-sync"
+weight = 1
+priority = 5
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "monitoring-docs"
+repo_url = "local:/home/kara/monitoring"
+workdir = "/home/kara/.hermes/stand-in/docs/monitoring"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:199221"
 enabled = true
 
 [[projects]]
@@ -2918,9 +3516,20 @@ repo_url = "local:/home/kara/monitoring"
 workdir = "/home/kara/.hermes/stand-in/dogfood/monitoring"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:60183"
+deliver = "telegram:-1003310984808:199221"
+enabled = true
+
+[[projects]]
+name = "monitoring-foreman"
+repo_url = "local:/home/kara/monitoring"
+workdir = "/home/kara/monitoring"
+weight = 10
+priority = 4
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:199221"
 enabled = true
 
 [[projects]]
@@ -2931,7 +3540,7 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
+deliver = "telegram:-1003310984808:199221"
 enabled = true
 
 [[projects]]
@@ -2942,7 +3551,18 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
+deliver = "telegram:-1003310984808:199221"
+enabled = true
+
+[[projects]]
+name = "monitoring-readme"
+repo_url = "local:/home/kara/monitoring"
+workdir = "/home/kara/.hermes/stand-in/readme/monitoring"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:199221"
 enabled = true
 
 [[projects]]
@@ -2953,7 +3573,18 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "releases"
-deliver = "telegram:-1003310984808:118900"
+deliver = "telegram:-1003310984808:199221"
+enabled = true
+
+[[projects]]
+name = "monitoring-review"
+repo_url = "local:/home/kara/monitoring"
+workdir = "/home/kara/.hermes/stand-in/review/monitoring"
+weight = 3
+priority = 4
+cooldown_s = 21600
+namespace_id = "review"
+deliver = "telegram:-1003310984808:199221"
 enabled = true
 
 [[projects]]
@@ -2964,25 +3595,12 @@ weight = 3
 priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "muster"
-repo_url = "local:/home/kara/muster"
-workdir = "/home/kara/muster"
-weight = 15
-priority = 10
-cooldown_s = 21600
-model = "deepseek-v4-flash"
-provider = "deepseek-foreman"
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:4370"
+deliver = "telegram:-1003310984808:199221"
 enabled = true
 
 [[projects]]
 name = "muster-docs"
-repo_url = "local:/home/kara/muster"
+repo_url = "local:/home/kara/wojons/muster"
 workdir = "/home/kara/.hermes/stand-in/docs/muster"
 weight = 3
 priority = 5
@@ -2993,12 +3611,23 @@ enabled = true
 
 [[projects]]
 name = "muster-dogfood"
-repo_url = "local:/home/kara/muster"
+repo_url = "local:/home/kara/wojons/muster"
 workdir = "/home/kara/.hermes/stand-in/dogfood/muster"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:4370"
+enabled = true
+
+[[projects]]
+name = "muster-foreman"
+repo_url = "local:/home/kara/wojons/muster"
+workdir = "/home/kara/wojons/muster"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:4370"
 enabled = true
 
@@ -3015,7 +3644,7 @@ enabled = true
 
 [[projects]]
 name = "muster-qa"
-repo_url = "local:/home/kara/muster"
+repo_url = "local:/home/kara/wojons/muster"
 workdir = "/home/kara/.hermes/stand-in/pm/muster"
 weight = 4
 priority = 4
@@ -3026,7 +3655,7 @@ enabled = true
 
 [[projects]]
 name = "muster-readme"
-repo_url = "local:/home/kara/muster"
+repo_url = "local:/home/kara/wojons/muster"
 workdir = "/home/kara/.hermes/stand-in/readme/muster"
 weight = 3
 priority = 5
@@ -3037,7 +3666,7 @@ enabled = true
 
 [[projects]]
 name = "muster-releng"
-repo_url = "local:/home/kara/muster"
+repo_url = "local:/home/kara/wojons/muster"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/muster"
 weight = 4
 priority = 4
@@ -3048,11 +3677,11 @@ enabled = true
 
 [[projects]]
 name = "muster-review"
-repo_url = "local:/home/kara/muster"
+repo_url = "local:/home/kara/wojons/muster"
 workdir = "/home/kara/.hermes/stand-in/review/muster"
 weight = 3
 priority = 4
-cooldown_s = 604800
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:83996"
 enabled = true
@@ -3066,39 +3695,6 @@ priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:4370"
-enabled = true
-
-[[projects]]
-name = "musterflow-docs"
-repo_url = "local:/home/kara/musterflow"
-workdir = "/home/kara/.hermes/stand-in/docs/musterflow"
-weight = 3
-priority = 5
-cooldown_s = 604800
-namespace_id = "docs"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "musterflow-readme"
-repo_url = "local:/home/kara/musterflow"
-workdir = "/home/kara/.hermes/stand-in/readme/musterflow"
-weight = 3
-priority = 5
-cooldown_s = 604800
-namespace_id = "docs"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "my-project"
-repo_url = "https://github.com/dexdat/my-project"
-workdir = "/home/kara/my-project"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808"
 enabled = true
 
 [[projects]]
@@ -3118,9 +3714,20 @@ repo_url = "https://github.com/dexdat/my-project"
 workdir = "/home/kara/.hermes/stand-in/dogfood/my-project"
 weight = 4
 priority = 4
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "my-project-foreman"
+repo_url = "https://github.com/dexdat/my-project"
+workdir = "/home/kara/my-project"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808"
 enabled = true
 
 [[projects]]
@@ -3172,9 +3779,7 @@ repo_url = "local:/home/kara/my-project"
 workdir = "/home/kara/.hermes/stand-in/review/my-project"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808"
 enabled = true
@@ -3187,18 +3792,6 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "local"
-enabled = true
-
-[[projects]]
-name = "off-by-one"
-repo_url = "local:/home/kara/off-by-one"
-workdir = "/home/kara/off-by-one"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:72503"
 enabled = true
 
 [[projects]]
@@ -3218,8 +3811,19 @@ repo_url = "local:/home/kara/off-by-one"
 workdir = "/home/kara/.hermes/stand-in/dogfood/off-by-one"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:72503"
+enabled = true
+
+[[projects]]
+name = "off-by-one-foreman"
+repo_url = "local:/home/kara/off-by-one"
+workdir = "/home/kara/off-by-one"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:72503"
 enabled = true
 
@@ -3273,9 +3877,7 @@ repo_url = "local:/home/kara/off-by-one"
 workdir = "/home/kara/.hermes/stand-in/review/off-by-one"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:72503"
 enabled = true
@@ -3292,19 +3894,8 @@ deliver = "telegram:-1003310984808:72503"
 enabled = true
 
 [[projects]]
-name = "pulse"
-repo_url = "https://github.com/get-h3/pulse"
-workdir = "/home/kara/pulse"
-weight = 10
-priority = 5
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
 name = "pulse-docs"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/stand-in/docs/pulse"
 weight = 3
 priority = 5
@@ -3315,18 +3906,40 @@ enabled = true
 
 [[projects]]
 name = "pulse-dogfood"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/stand-in/dogfood/pulse"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "pulse-foreman"
+repo_url = "https://github.com/get-h3/pulse"
+workdir = "/home/kara/get-h3/pulse"
+weight = 10
+priority = 5
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "pulse-perf"
+repo_url = "local:/home/kara/get-h3/pulse"
+workdir = "/home/kara/.hermes/stand-in/perf/pulse"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "perf"
+deliver = "telegram:-1003310984808:1"
+enabled = true
+
+[[projects]]
 name = "pulse-pm"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/stand-in/pm-lane/pulse"
 weight = 4
 priority = 4
@@ -3337,7 +3950,7 @@ enabled = true
 
 [[projects]]
 name = "pulse-qa"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/stand-in/pm/pulse"
 weight = 4
 priority = 4
@@ -3348,7 +3961,7 @@ enabled = true
 
 [[projects]]
 name = "pulse-readme"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/stand-in/readme/pulse"
 weight = 3
 priority = 5
@@ -3359,7 +3972,7 @@ enabled = true
 
 [[projects]]
 name = "pulse-releng"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/stand-in/releng-lane/pulse"
 weight = 4
 priority = 4
@@ -3369,8 +3982,19 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
+name = "pulse-review"
+repo_url = "local:/home/kara/get-h3/pulse"
+workdir = "/home/kara/.hermes/stand-in/review/pulse"
+weight = 3
+priority = 4
+cooldown_s = 604800
+namespace_id = "review"
+deliver = "telegram:-1003310984808:83399"
+enabled = true
+
+[[projects]]
 name = "pulse-sync"
-repo_url = "local:/home/kara/pulse"
+repo_url = "local:/home/kara/get-h3/pulse"
 workdir = "/home/kara/.hermes/sync-workdirs/pulse-sync"
 weight = 1
 priority = 5
@@ -3380,353 +4004,101 @@ deliver = "telegram:-1003310984808:84802"
 enabled = true
 
 [[projects]]
-name = "python-audit-complexity"
-repo_url = "local:/home/kara/coding-hermes-audits"
-workdir = "/home/kara/coding-hermes-audits"
+name = "qa-audit-docs"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/docs/qa-audit"
 weight = 3
 priority = 5
-cooldown_s = 86400
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
-namespace_id = "python-audit"
-deliver = "telegram:-1003310984808:1"
+cooldown_s = 604800
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:87792"
 enabled = true
 
 [[projects]]
-name = "python-audit-complexity-dogfood"
-repo_url = "local:/home/kara/python-audit-complexity"
-workdir = "/home/kara/.hermes/stand-in/dogfood/python-audit-complexity"
-weight = 3
-priority = 5
-cooldown_s = 259200
-namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-complexity-pm"
-repo_url = "local:/home/kara/python-audit-complexity"
-workdir = "/home/kara/.hermes/stand-in/pm-lane/python-audit-complexity"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
-enabled = true
-
-[[projects]]
-name = "python-audit-complexity-qa"
-repo_url = "local:/home/kara/python-audit-complexity"
-workdir = "/home/kara/.hermes/stand-in/pm/python-audit-complexity"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-complexity-releng"
-repo_url = "local:/home/kara/python-audit-complexity"
-workdir = "/home/kara/.hermes/stand-in/releng-lane/python-audit-complexity"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "releases"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-complexity-sync"
-repo_url = "local:/home/kara/python-audit-complexity"
-workdir = "/home/kara/.hermes/sync-workdirs/python-audit-complexity-sync"
-weight = 3
-priority = 5
-cooldown_s = 21600
-namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-deadcode"
-repo_url = "local:/home/kara/coding-hermes-audits"
-workdir = "/home/kara/coding-hermes-audits"
-weight = 3
-priority = 5
-cooldown_s = 86400
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
-namespace_id = "python-audit"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "python-audit-deadcode-dogfood"
-repo_url = "local:/home/kara/python-audit-deadcode"
-workdir = "/home/kara/.hermes/stand-in/dogfood/python-audit-deadcode"
+name = "qa-audit-dogfood"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/dogfood/qa-audit"
 weight = 3
 priority = 5
 cooldown_s = 259200
 namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:60183"
+deliver = "telegram:-1003310984808:87792"
 enabled = true
 
 [[projects]]
-name = "python-audit-deadcode-pm"
-repo_url = "local:/home/kara/python-audit-deadcode"
-workdir = "/home/kara/.hermes/stand-in/pm-lane/python-audit-deadcode"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
-enabled = true
-
-[[projects]]
-name = "python-audit-deadcode-qa"
-repo_url = "local:/home/kara/python-audit-deadcode"
-workdir = "/home/kara/.hermes/stand-in/pm/python-audit-deadcode"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-deadcode-releng"
-repo_url = "local:/home/kara/python-audit-deadcode"
-workdir = "/home/kara/.hermes/stand-in/releng-lane/python-audit-deadcode"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "releases"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-deadcode-sync"
-repo_url = "local:/home/kara/python-audit-deadcode"
-workdir = "/home/kara/.hermes/sync-workdirs/python-audit-deadcode-sync"
-weight = 3
-priority = 5
-cooldown_s = 21600
-namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-lint"
-repo_url = "local:/home/kara/coding-hermes-audits"
-workdir = "/home/kara/coding-hermes-audits"
-weight = 3
-priority = 5
-cooldown_s = 86400
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
-namespace_id = "python-audit"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "python-audit-lint-dogfood"
-repo_url = "local:/home/kara/python-audit-lint"
-workdir = "/home/kara/.hermes/stand-in/dogfood/python-audit-lint"
-weight = 3
-priority = 5
-cooldown_s = 259200
-namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-lint-pm"
-repo_url = "local:/home/kara/python-audit-lint"
-workdir = "/home/kara/.hermes/stand-in/pm-lane/python-audit-lint"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
-enabled = true
-
-[[projects]]
-name = "python-audit-lint-qa"
-repo_url = "local:/home/kara/python-audit-lint"
-workdir = "/home/kara/.hermes/stand-in/pm/python-audit-lint"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-lint-releng"
-repo_url = "local:/home/kara/python-audit-lint"
-workdir = "/home/kara/.hermes/stand-in/releng-lane/python-audit-lint"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "releases"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-lint-sync"
-repo_url = "local:/home/kara/python-audit-lint"
-workdir = "/home/kara/.hermes/sync-workdirs/python-audit-lint-sync"
-weight = 3
-priority = 5
-cooldown_s = 21600
-namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-security"
-repo_url = "local:/home/kara/coding-hermes-audits"
-workdir = "/home/kara/coding-hermes-audits"
-weight = 3
-priority = 5
-cooldown_s = 86400
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
-namespace_id = "python-audit"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "python-audit-security-dogfood"
-repo_url = "local:/home/kara/python-audit-security"
-workdir = "/home/kara/.hermes/stand-in/dogfood/python-audit-security"
-weight = 3
-priority = 5
-cooldown_s = 259200
-namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-security-pm"
-repo_url = "local:/home/kara/python-audit-security"
-workdir = "/home/kara/.hermes/stand-in/pm-lane/python-audit-security"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
-enabled = true
-
-[[projects]]
-name = "python-audit-security-qa"
-repo_url = "local:/home/kara/python-audit-security"
-workdir = "/home/kara/.hermes/stand-in/pm/python-audit-security"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-security-releng"
-repo_url = "local:/home/kara/python-audit-security"
-workdir = "/home/kara/.hermes/stand-in/releng-lane/python-audit-security"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "releases"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-security-sync"
-repo_url = "local:/home/kara/python-audit-security"
-workdir = "/home/kara/.hermes/sync-workdirs/python-audit-security-sync"
-weight = 3
-priority = 5
-cooldown_s = 21600
-namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-typing"
-repo_url = "local:/home/kara/coding-hermes-audits"
-workdir = "/home/kara/coding-hermes-audits"
-weight = 3
-priority = 5
-cooldown_s = 86400
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
-namespace_id = "python-audit"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "python-audit-typing-dogfood"
-repo_url = "local:/home/kara/python-audit-typing"
-workdir = "/home/kara/.hermes/stand-in/dogfood/python-audit-typing"
-weight = 3
-priority = 5
-cooldown_s = 259200
-namespace_id = "dogfood"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-typing-pm"
-repo_url = "local:/home/kara/python-audit-typing"
-workdir = "/home/kara/.hermes/stand-in/pm-lane/python-audit-typing"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
-enabled = true
-
-[[projects]]
-name = "python-audit-typing-qa"
-repo_url = "local:/home/kara/python-audit-typing"
-workdir = "/home/kara/.hermes/stand-in/pm/python-audit-typing"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "qa"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
-name = "python-audit-typing-releng"
-repo_url = "local:/home/kara/python-audit-typing"
-workdir = "/home/kara/.hermes/stand-in/releng-lane/python-audit-typing"
-weight = 4
-priority = 4
-cooldown_s = 21600
-namespace_id = "releases"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "python-audit-typing-sync"
-repo_url = "local:/home/kara/python-audit-typing"
-workdir = "/home/kara/.hermes/sync-workdirs/python-audit-typing-sync"
-weight = 3
-priority = 5
-cooldown_s = 21600
-namespace_id = "duckbrain-sync"
-deliver = "telegram:-1003310984808:118900"
-enabled = true
-
-[[projects]]
-name = "qa-audit"
+name = "qa-audit-foreman"
 repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
 workdir = "/home/kara/.hermes/stand-in/pm/qa"
 weight = 5
 priority = 4
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "qa-audit-pm"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/pm-lane/qa-audit"
+weight = 3
+priority = 3
 cooldown_s = 86400
+namespace_id = "pm"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "qa-audit-qa"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/pm/qa-audit"
+weight = 4
+priority = 4
+cooldown_s = 43200
 namespace_id = "qa"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "qa-audit-readme"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/readme/qa-audit"
+weight = 3
+priority = 5
+cooldown_s = 604800
+namespace_id = "docs"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "qa-audit-releng"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/releng-lane/qa-audit"
+weight = 2
+priority = 3
+cooldown_s = 21600
+namespace_id = "releases"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "qa-audit-review"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/stand-in/review/qa-audit"
+weight = 3
+priority = 4
+cooldown_s = 21600
+namespace_id = "review"
+deliver = "telegram:-1003310984808:87792"
+enabled = true
+
+[[projects]]
+name = "qa-audit-sync"
+repo_url = "local:/home/kara/.hermes/stand-in/pm/qa"
+workdir = "/home/kara/.hermes/sync-workdirs/qa-audit-sync"
+weight = 1
+priority = 5
+cooldown_s = 21600
+namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:87792"
 enabled = true
 
@@ -3755,7 +4127,7 @@ enabled = true
 [[projects]]
 name = "release-engineer"
 repo_url = "local:/home/kara/coding-hermes-scheduler/coding-herms-scheduler"
-workdir = "/home/kara/.hermes/release-engineer/repo"
+workdir = "/home/kara/.hermes/stand-in/release/coding-hermes-scheduler"
 weight = 5
 priority = 3
 cooldown_s = 21600
@@ -3771,7 +4143,6 @@ weight = 1
 priority = 5
 cooldown_s = 21600
 namespace_id = "duckbrain-sync"
-deliver = "local"
 enabled = true
 
 [[projects]]
@@ -3841,17 +4212,6 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
-name = "task-router"
-repo_url = "https://github.com/coding-hermes/task-router"
-workdir = "/home/kara/task-router"
-weight = 10
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:137810"
-enabled = true
-
-[[projects]]
 name = "task-router-docs"
 repo_url = "local:/home/kara/task-router"
 workdir = "/home/kara/.hermes/stand-in/docs/task-router"
@@ -3868,9 +4228,20 @@ repo_url = "https://github.com/coding-hermes/task-router"
 workdir = "/home/kara/.hermes/stand-in/dogfood/task-router"
 weight = 4
 priority = 4
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
 deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "task-router-foreman"
+repo_url = "https://github.com/coding-hermes/task-router"
+workdir = "/home/kara/task-router"
+weight = 10
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:137810"
 enabled = true
 
 [[projects]]
@@ -3923,9 +4294,7 @@ repo_url = "local:/home/kara/task-router"
 workdir = "/home/kara/.hermes/stand-in/review/task-router"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:137810"
 enabled = true
@@ -3942,23 +4311,12 @@ deliver = "telegram:-1003310984808:137810"
 enabled = true
 
 [[projects]]
-name = "tatara"
-repo_url = "https://github.com/coding-hermes/tatara"
-workdir = "/home/kara/tatara"
-weight = 15
-priority = 9
-cooldown_s = 21600
-namespace_id = "tatara"
-deliver = "telegram:-1003310984808:84802"
-enabled = true
-
-[[projects]]
 name = "tatara-docs"
 repo_url = "local:/home/kara/tatara"
 workdir = "/home/kara/.hermes/stand-in/docs/tatara"
 weight = 3
 priority = 8
-cooldown_s = 604800
+cooldown_s = 21600
 namespace_id = "docs"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
@@ -3969,8 +4327,19 @@ repo_url = "local:/home/kara/tatara"
 workdir = "/home/kara/.hermes/stand-in/dogfood/tatara"
 weight = 3
 priority = 9
-cooldown_s = 259200
-namespace_id = "tatara"
+cooldown_s = 21600
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:84802"
+enabled = true
+
+[[projects]]
+name = "tatara-foreman"
+repo_url = "https://github.com/coding-hermes/tatara"
+workdir = "/home/kara/tatara"
+weight = 15
+priority = 9
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
@@ -3981,7 +4350,7 @@ workdir = "/home/kara/.hermes/stand-in/pm-lane/tatara"
 weight = 4
 priority = 9
 cooldown_s = 21600
-namespace_id = "tatara"
+namespace_id = "pm"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
@@ -3992,7 +4361,7 @@ workdir = "/home/kara/.hermes/stand-in/pm/tatara"
 weight = 4
 priority = 9
 cooldown_s = 21600
-namespace_id = "tatara"
+namespace_id = "qa"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
@@ -4002,7 +4371,7 @@ repo_url = "local:/home/kara/tatara"
 workdir = "/home/kara/.hermes/stand-in/readme/tatara"
 weight = 3
 priority = 8
-cooldown_s = 604800
+cooldown_s = 21600
 namespace_id = "docs"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
@@ -4014,7 +4383,7 @@ workdir = "/home/kara/.hermes/stand-in/releng-lane/tatara"
 weight = 4
 priority = 9
 cooldown_s = 21600
-namespace_id = "tatara"
+namespace_id = "releases"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
@@ -4024,7 +4393,7 @@ repo_url = "local:/home/kara/tatara"
 workdir = "/home/kara/.hermes/stand-in/review/tatara"
 weight = 3
 priority = 9
-cooldown_s = 604800
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
@@ -4036,7 +4405,7 @@ workdir = "/home/kara/.hermes/sync-workdirs/tatara-sync"
 weight = 1
 priority = 9
 cooldown_s = 21600
-namespace_id = "tatara"
+namespace_id = "duckbrain-sync"
 deliver = "telegram:-1003310984808:84802"
 enabled = true
 
@@ -4068,20 +4437,8 @@ repo_url = "https://github.com/totalwindupflightsystems/temporal-vector-index.gi
 workdir = "/home/kara/.hermes/sync-workdirs/temporal-vector-index-sync"
 weight = 1
 priority = 5
-cooldown_s = 43200
-namespace_id = "duckbrain-sync"
-deliver = "local"
-enabled = true
-
-[[projects]]
-name = "terminal-jail"
-repo_url = "https://github.com/terminal-jail/terminal-jail"
-workdir = "/home/kara/terminal-jail"
-weight = 15
-priority = 10
 cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:91542"
+namespace_id = "duckbrain-sync"
 enabled = true
 
 [[projects]]
@@ -4101,8 +4458,19 @@ repo_url = "local:/home/kara/terminal-jail"
 workdir = "/home/kara/.hermes/stand-in/dogfood/terminal-jail"
 weight = 3
 priority = 5
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:91542"
+enabled = true
+
+[[projects]]
+name = "terminal-jail-foreman"
+repo_url = "https://github.com/terminal-jail/terminal-jail"
+workdir = "/home/kara/terminal-jail"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:91542"
 enabled = true
 
@@ -4156,9 +4524,7 @@ repo_url = "local:/home/kara/terminal-jail"
 workdir = "/home/kara/.hermes/stand-in/review/terminal-jail"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:91542"
 enabled = true
@@ -4197,17 +4563,6 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
-name = "trouble"
-repo_url = "local:/home/kara/trouble"
-workdir = "/home/kara/trouble"
-weight = 10
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:168443"
-enabled = true
-
-[[projects]]
 name = "trouble-docs"
 repo_url = "local:/home/kara/trouble"
 workdir = "/home/kara/.hermes/stand-in/docs/trouble"
@@ -4224,8 +4579,19 @@ repo_url = "local:/home/kara/trouble"
 workdir = "/home/kara/.hermes/stand-in/dogfood/trouble"
 weight = 3
 priority = 4
-cooldown_s = 259200
+cooldown_s = 21600
 namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:168443"
+enabled = true
+
+[[projects]]
+name = "trouble-foreman"
+repo_url = "local:/home/kara/trouble"
+workdir = "/home/kara/trouble"
+weight = 10
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
 deliver = "telegram:-1003310984808:168443"
 enabled = true
 
@@ -4237,7 +4603,7 @@ weight = 4
 priority = 4
 cooldown_s = 21600
 namespace_id = "pm"
-deliver = "telegram:-1003310984808:83996"
+deliver = "telegram:-1003310984808:168443"
 enabled = true
 
 [[projects]]
@@ -4279,9 +4645,7 @@ repo_url = "local:/home/kara/trouble"
 workdir = "/home/kara/.hermes/stand-in/review/trouble"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:168443"
 enabled = true
@@ -4320,17 +4684,6 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
-name = "warpfs"
-repo_url = "local:/home/kara/warpfs"
-workdir = "/home/kara/warpfs"
-weight = 15
-priority = 10
-cooldown_s = 21600
-namespace_id = "coding-hermes"
-deliver = "telegram:-1003310984808:60183"
-enabled = true
-
-[[projects]]
 name = "warpfs-docs"
 repo_url = "local:/home/kara/warpfs"
 workdir = "/home/kara/.hermes/stand-in/docs/warpfs"
@@ -4342,12 +4695,34 @@ deliver = "telegram:-1003310984808:1"
 enabled = true
 
 [[projects]]
+name = "warpfs-dogfood"
+repo_url = "local:/home/kara/warpfs"
+workdir = "/home/kara/.hermes/stand-in/dogfood/warpfs"
+weight = 3
+priority = 5
+cooldown_s = 21600
+namespace_id = "dogfood"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
+name = "warpfs-foreman"
+repo_url = "local:/home/kara/warpfs"
+workdir = "/home/kara/warpfs"
+weight = 15
+priority = 10
+cooldown_s = 21600
+namespace_id = "coding-hermes"
+deliver = "telegram:-1003310984808:60183"
+enabled = true
+
+[[projects]]
 name = "warpfs-perf"
 repo_url = "local:/home/kara/warpfs"
 workdir = "/home/kara/.hermes/stand-in/perf/warpfs"
 weight = 3
 priority = 5
-cooldown_s = 604800
+cooldown_s = 21600
 namespace_id = "perf"
 deliver = "telegram:-1003310984808:1"
 enabled = true
@@ -4402,9 +4777,7 @@ repo_url = "local:/home/kara/warpfs"
 workdir = "/home/kara/.hermes/stand-in/review/warpfs"
 weight = 3
 priority = 4
-cooldown_s = 604800
-model = "deepseek-v4-pro"
-provider = "deepseek-foreman"
+cooldown_s = 21600
 namespace_id = "review"
 deliver = "telegram:-1003310984808:60183"
 enabled = true
@@ -4439,159 +4812,5 @@ weight = 3
 priority = 5
 cooldown_s = 604800
 namespace_id = "docs"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "digest-review"
-repo_url = "local:/home/kara/digest"
-workdir = "/home/kara/.hermes/stand-in/review/digest"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "logsey-review"
-repo_url = "local:/home/kara/logsey"
-workdir = "/home/kara/.hermes/stand-in/review/logsey"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "lore-review"
-repo_url = "local:/home/kara/lore"
-workdir = "/home/kara/.hermes/stand-in/review/lore"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "pulse-review"
-repo_url = "local:/home/kara/pulse"
-workdir = "/home/kara/.hermes/stand-in/review/pulse"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "consensus-review"
-repo_url = "local:/home/kara/consensus"
-workdir = "/home/kara/.hermes/stand-in/review/consensus"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "dexdat-core-review"
-repo_url = "local:/home/kara/dexdat-core"
-workdir = "/home/kara/.hermes/stand-in/review/dexdat-core"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "dexdat-memory-review"
-repo_url = "local:/home/kara/dexdat-memory"
-workdir = "/home/kara/.hermes/stand-in/review/dexdat-memory"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "hivemind-work-review"
-repo_url = "local:/home/kara/hivemind-work"
-workdir = "/home/kara/.hermes/stand-in/review/hivemind-work"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "mafia-ai-benchmark-review"
-repo_url = "local:/home/kara/mafia-ai-benchmark"
-workdir = "/home/kara/.hermes/stand-in/review/mafia-ai-benchmark"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "review"
-deliver = "telegram:-1003310984808:83399"
-enabled = true
-
-[[projects]]
-name = "digest-perf"
-repo_url = "local:/home/kara/digest"
-workdir = "/home/kara/.hermes/stand-in/perf/digest"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "perf"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "logsey-perf"
-repo_url = "local:/home/kara/logsey"
-workdir = "/home/kara/.hermes/stand-in/perf/logsey"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "perf"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "lore-perf"
-repo_url = "local:/home/kara/lore"
-workdir = "/home/kara/.hermes/stand-in/perf/lore"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "perf"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "pulse-perf"
-repo_url = "local:/home/kara/pulse"
-workdir = "/home/kara/.hermes/stand-in/perf/pulse"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "perf"
-deliver = "telegram:-1003310984808:1"
-enabled = true
-
-[[projects]]
-name = "h3-perf"
-repo_url = "local:/home/kara/get-h3/h3"
-workdir = "/home/kara/.hermes/stand-in/perf/h3"
-weight = 3
-priority = 4
-cooldown_s = 604800
-namespace_id = "perf"
 deliver = "telegram:-1003310984808:1"
 enabled = true
