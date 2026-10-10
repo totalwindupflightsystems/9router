@@ -13,9 +13,14 @@ check() { # <desc> <expected> <actual>
   else echo "  FAIL $1: expected $2 got $3"; fail=$((fail+1)); fi
 }
 
-# ── chaos-disconnect classifier (precedence: rc=0 > 124 > 127 > build > ok) ──
-classify_disconnect() { # <rc> <build_incomplete 0|1>
-  local rc=$1 bi=${2:-0}
+# ── chaos-disconnect classifier (precedence: vacuous > rc=0 > 124 > 127 > build > ok) ──
+# QA-WARPFS-17 (2026-10-10): a 0-byte / never-ran disc.log is VACUOUS evidence.
+# The suite produced NO output, so the network cut was never exercised on it, and
+# it must grade UNVERIFIED at EVERY rc — never INFO "passes with network cut
+# (no network dep)" and never OK "fails fast on disconnect".
+classify_disconnect() { # <rc> <build_incomplete 0|1> <vacuous_log 0|1>
+  local rc=$1 bi=${2:-0} vac=${3:-0}
+  if [ "$vac" = 1 ]; then echo UNVERIFIED; return; fi
   if [ "$rc" -eq 0 ]; then echo INFO; return; fi
   if [ "$rc" -eq 124 ]; then echo FAIL; return; fi
   if [ "$rc" -eq 127 ]; then echo UNVERIFIED; return; fi
@@ -39,6 +44,13 @@ check "rc=127 pytest not found -> never ran" UNVERIFIED "$(classify_disconnect 1
 check "rc=124 hang stays a real FAIL"        FAIL       "$(classify_disconnect 124)"
 check "rc=1  clean fail stays OK"            OK         "$(classify_disconnect 1 0)"
 check "rc=1  with incomplete build"          INFO       "$(classify_disconnect 1 1)"
+# QA-WARPFS-17: a 0-byte (or never-ran) disc.log must NEVER grade INFO/OK.
+check "0-byte log + rc=0 -> UNVERIFIED (was INFO passes)"     UNVERIFIED "$(classify_disconnect 0 0 1)"
+check "0-byte log + rc=1 -> UNVERIFIED (was OK fails-fast)"   UNVERIFIED "$(classify_disconnect 1 0 1)"
+check "0-byte log + rc=101 -> UNVERIFIED (no build result)"   UNVERIFIED "$(classify_disconnect 101 1 1)"
+check "0-byte log + rc=124 -> UNVERIFIED (vacuous precedes)"  UNVERIFIED "$(classify_disconnect 124 0 1)"
+check "real log + rc=0 -> INFO (no regression)"               INFO       "$(classify_disconnect 0 0 0)"
+check "real log + rc=1 -> OK (no regression)"                 OK         "$(classify_disconnect 1 0 0)"
 
 echo
 echo "=== chaos-resource cap evidence (QA-TASK-ROUTER-3)"
@@ -74,6 +86,9 @@ check "res.log cap lines + no-test-path -> vacuous"       vacuous     "$(nv "$TM
 check "empty log -> vacuous"                              vacuous     "$(nv "$TMPD/empty.log")"
 check "res.log cap lines + real output -> not vacuous"    not-vacuous "$(nv "$TMPD/res_real.log")"
 check "missing file -> treated vacuous (fail-closed)"     vacuous     "$(nv "$TMPD/does-not-exist.log")"
+# QA-WARPFS-17: a real 0-byte file must drive UNVERIFIED end-to-end.
+if vacuous_native_suite "$TMPD/empty.log"; then v=1; else v=0; fi
+check "0-byte disc.log (real file) -> vacuous -> UNVERIFIED"  UNVERIFIED "$(classify_disconnect 0 0 $v)"
 
 echo
 echo "=== harness lockstep (the predicates above must exist in the harness)"
@@ -109,6 +124,47 @@ else
 fi
 
 echo
+# QA-WARPFS-17 (2026-10-10): the 0-byte/vacuous disc.log gate must exist in the
+# harness so an empty disc.log grades UNVERIFIED, never "passes with network cut".
+if [ -f "$HARNESS" ]; then
+  grep -qF 'vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED' "$HARNESS" \
+    && check "chaos-disconnect vacuous/0-byte gate present" yes yes \
+    || check "chaos-disconnect vacuous/0-byte gate present" yes no
+  grep -qF 'cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes)' "$HARNESS" \
+    && check "chaos-disconnect 0-byte UNVERIFIED branch present" yes yes \
+    || check "chaos-disconnect 0-byte UNVERIFIED branch present" yes no
+fi
+
+# QA-WARPFS-17 behavioral: extract the REAL chaos-disconnect grading chain from
+# the harness (heredoc-escaped -> runtime form) and drive it with a 0-byte and a
+# populated disc.log, proving the harness BEHAVIOR, not just a mirrored predicate.
+if [ -f "$HARNESS" ]; then
+  _s=$(grep -n '^native_dur=' "$HARNESS" | head -1 | cut -d: -f1)
+  _e=$(grep -n 'else cell chaos-disconnect OK "fails fast on disconnect' "$HARNESS" | head -1 | cut -d: -f1)
+  if [ -n "$_s" ] && [ -n "$_e" ] && [ "$_e" -gt "$_s" ]; then
+    RENDER="$TMPD/disc-chain.sh"
+    {
+      echo 'cell() { printf "%s %s\n" "$1" "$2"; }'
+      echo "LOGD=\"$TMPD\""
+      echo 'build_incomplete() { return 1; }'
+      echo 'go_suite_env_failure() { return 1; }'
+      echo 'suite_deps_missing() { return 1; }'
+      echo 'native_runner_missing() { return 1; }'
+      echo 'vacuous_native_suite() { [ ! -s "$1" ]; }'
+      sed -n "${_s},${_e}p" "$HARNESS" | sed 's/[\\][$]/$/g'
+    } > "$RENDER"
+    bd() { LOGD="$TMPD" disc_rc="$1" bash "$RENDER" 2>/dev/null | head -1 | awk '{print $1" "$2}'; }
+    : > "$TMPD/disc.log"
+    check "behavioral: 0-byte disc.log + rc=0 -> UNVERIFIED" "chaos-disconnect UNVERIFIED" "$(bd 0)"
+    check "behavioral: 0-byte disc.log + rc=1 -> UNVERIFIED" "chaos-disconnect UNVERIFIED" "$(bd 1)"
+    printf 'tests passed: 12 ok\n' > "$TMPD/disc.log"
+    check "behavioral: populated disc.log + rc=0 -> INFO"    "chaos-disconnect INFO"       "$(bd 0)"
+    check "behavioral: populated disc.log + rc=1 -> OK"      "chaos-disconnect OK"         "$(bd 1)"
+  else
+    check "behavioral: could extract the disc chain" yes no
+  fi
+fi
+
 echo "=== upgrade cell Go path (QA-OFF-BY-ONE-22, 2026-09-22)"
 # The upgrade cell reported UNVERIFIED for Go-binary repos with release tags:
 # the synced tree carries no .git history, and only pip/npm had install legs.

@@ -2133,7 +2133,8 @@ disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 # harmless for non-Go native_cmd values (npm/pytest/cargo ignore them).
 ( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
-if [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
+if vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
+elif [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
 elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network is cut (timeout \${disc_window}s, sized from the \${native_dur}s suite: 2x+30s; override floor BUNKER_QA_DISCONNECT_TIMEOUT=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}s) — \$(head -3 \$LOGD/disc.log)"
 elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
 elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
