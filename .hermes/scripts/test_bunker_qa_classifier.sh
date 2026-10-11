@@ -202,6 +202,61 @@ if [ -f "$HARNESS" ]; then
   esac
 fi
 
+echo "=== chaos-errorpath missing-config grading (QA-CHIMERA-V2-42)"
+# The bare console script's no-args run prints a usage banner and exits 0;
+# ep_grade must NEVER grade that as "application started on missing config"
+# (QA-CHIMERA-V2-36 was exactly this misread on chimera-v2), and the pyproject
+# BIN discovery must probe a config-requiring subcommand (serve-family first).
+if [ -f "$HARNESS" ]; then
+  grep -qF 'probe invoked CLI-help arm' "$HARNESS" \
+    && check "usage-banner guard present in ep_grade" yes yes \
+    || check "usage-banner guard present in ep_grade" yes no
+  grep -qF '(serve|server|daemon|start)' "$HARNESS" \
+    && check "discovery prefers long-running commands" yes yes \
+    || check "discovery prefers long-running commands" yes no
+  # behavioral: drive the REAL ep_grade from the GENERATED battery (runtime form).
+  _g="$TMPD/qa42-ep-gen.sh"
+  bash "$HARNESS" __gen-remote epgrade 2>/dev/null | sed -n '/^ep_grade()/,/^}/p' > "$_g"
+  if [ -s "$_g" ]; then
+    source "$_g"
+    _l="$TMPD/ep-arm.log"
+    printf 'Usage: fake [OPTIONS] [COMMAND]...\n\n  fake — a CLI.\n' > "$_l"
+    _o=$(ep_grade 0 "$_l" yes fake)
+    case "$_o" in
+      INFO*"CLI-help arm"*) check "behavioral: rc=0 usage banner -> INFO CLI-help arm" yes yes ;;
+      *) check "behavioral: rc=0 usage banner -> INFO CLI-help arm" yes no ;;
+    esac
+    case "$_o" in
+      *"application started"*) check "behavioral: banner never grades as started" yes no ;;
+      *) check "behavioral: banner never grades as started" yes yes ;;
+    esac
+    printf 'error: No config found.\nUsage: fake serve [OPTIONS]\n' > "$_l"
+    _o=$(ep_grade 2 "$_l" yes "fake serve")
+    case "$_o" in
+      OK*"clean error on missing config (rc=2)"*) check "behavioral: rc=2 clean error -> OK" yes yes ;;
+      *) check "behavioral: rc=2 clean error -> OK" yes no ;;
+    esac
+    printf 'Traceback (most recent call last):\nKeyError: x\n' > "$_l"
+    _o=$(ep_grade 1 "$_l" yes fake)
+    check "behavioral: traceback still FAIL" "FAIL" "$(printf '%s' "$_o" | cut -f1)"
+    printf 'server listening\n' > "$_l"
+    _o=$(ep_grade 0 "$_l" yes "fake serve")
+    case "$_o" in
+      *"application started but exited cleanly"*) check "behavioral: real-start rc=0 keeps legacy INFO" yes yes ;;
+      *) check "behavioral: real-start rc=0 keeps legacy INFO" yes no ;;
+    esac
+  else
+    check "behavioral: could extract ep_grade from generated battery" yes no
+  fi
+  GEN=$(bash "$HARNESS" __gen-remote chimera-probe 2>/dev/null)
+  # NB: grep -q on a pipe + pipefail SIGPIPEs the 115KB producer (see the
+  # upgrade section above) — match on the variable with case instead.
+  case "$GEN" in
+    *'if [ -z "$EP_SUB" ]; then'*) check "generated battery: run is a second-pass fallback" yes yes ;;
+    *) check "generated battery: run is a second-pass fallback" yes no ;;
+  esac
+fi
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

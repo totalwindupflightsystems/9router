@@ -1259,22 +1259,28 @@ corr_grade() { # <rc> <logfile> <state_file> <ref_note> <tracked_yes_no>
 }
 # ep_grade — pure chaos-errorpath decision. probe_started=yes is required for
 # a non-zero exit to be a product result; build/toolchain refusals stay INFO.
-ep_grade() { # <rc> <logfile> <probe_started_yes_no>
-  local rc="\$1" logfile="\$2" probe_started_yes_no="\$3" refusal
+ep_grade() { # <rc> <logfile> <probe_started_yes_no> [probed_bin]
+  local rc="\$1" logfile="\$2" probe_started_yes_no="\$3" ep_bin="\${4:-}" refusal
   if [ "\$probe_started_yes_no" = na ]; then
-    printf '%s\t%s\n' N/A 'no start command was detected'
+    printf '%s\\t%s\\n' N/A 'no start command was detected'
   elif grep -qiE '^.*panic|traceback \\(most recent|segmentation fault|core dumped' "\$logfile"; then
-    printf '%s\t%s\n' FAIL "crash on the missing-config probe: \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped' "\$logfile")"
+    printf '%s\\t%s\\n' FAIL "crash on the missing-config probe: \$(grep -m1 -iE 'panic|traceback|segmentation fault|core dumped' "\$logfile")"
   elif refusal=\$(grep -m1 -iE 'go\\.mod file not found|cannot find main module|no Go files|not a valid module|build constraints exclude|cannot find package|build failed|fatal error' "\$logfile"); [ -n "\$refusal" ]; then
-    printf '%s\t%s\n' INFO "start probe did not run the application (refusal: \$refusal) — missing-config behavior UNVERIFIED"
+    printf '%s\\t%s\\n' INFO "start probe did not run the application (refusal: \$refusal) — missing-config behavior UNVERIFIED"
   elif [ "\$rc" -eq 124 ]; then
-    printf '%s\t%s\n' INFO "missing-config start probe timed out (rc=124) — error-path behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
+    printf '%s\\t%s\\n' INFO "missing-config start probe timed out (rc=124) — error-path behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
   elif [ "\$probe_started_yes_no" != yes ]; then
-    printf '%s\t%s\n' INFO "start probe did not run the application (probe_started=\$probe_started_yes_no) — missing-config behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
+    printf '%s\\t%s\\n' INFO "start probe did not run the application (probe_started=\$probe_started_yes_no) — missing-config behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
   elif [ "\$rc" -gt 0 ]; then
-    printf '%s\t%s\n' OK "clean error on missing config (rc=\$rc)"
+    printf '%s\\t%s\\n' OK "clean error on missing config (rc=\$rc)"
+  elif head -8 "\$logfile" | grep -q '^Usage:'; then
+    # QA-CHIMERA-V2-42 (2026-10-11): an rc=0 whose output is a usage banner is
+    # the CLI-help arm, NOT a missing-config observation — never grade a help
+    # banner as "application started but exited cleanly" (the recurring
+    # QA-CHIMERA-V2-36 INFO was exactly this misread of a bare-script probe).
+    printf '%s\\t%s\\n' INFO "probe invoked CLI-help arm (rc=0, usage banner, argv: \${ep_bin:-unknown}) — not the missing-config path: \$(grep -m1 '^Usage:' "\$logfile")"
   else
-    printf '%s\t%s\n' INFO "unexpected: application started but exited cleanly on missing config (rc=\$rc)"
+    printf '%s\\t%s\\n' INFO "unexpected: application started but exited cleanly on missing config (rc=\$rc)"
   fi
 }
 # ep_probe — run the errorpath probe and report whether the application itself ran.
@@ -1578,6 +1584,25 @@ elif [ -f go.mod ]; then
   fi
 elif [ -f pyproject.toml ]; then
   BIN=\$(grep -A6 '^\[project\.scripts\]' pyproject.toml 2>/dev/null | grep -oE '^[A-Za-z0-9_.-]+[[:space:]]*=' | head -1 | tr -d ' =')
+  # QA-CHIMERA-V2-42 (2026-10-10/11): the FIRST console script is often a bare
+  # multi-command CLI whose no-args run prints the usage banner and exits 0 —
+  # the missing-config probe then graded a HELP banner as 'application started
+  # but exited cleanly'. Discover a config-requiring subcommand from the
+  # binary's own --help and probe THAT, in TWO passes: long-running daemons
+  # first (serve/server/daemon/start), `run` LAST — a bare `run` subcommand is
+  # often argv-hungry (chimera run with no PROMPT prints ITS OWN usage banner
+  # at rc=0: the same misclassification one level deeper; verified live
+  # 2026-10-11), so it is used only when no long-running command exists. Fall
+  # back to the bare script when help lists neither (ep_grade's usage-banner
+  # guard covers that arm honestly).
+  if [ -n "\$BIN" ] && command -v \$BIN >/dev/null 2>&1; then
+    EP_HELP=\$(timeout 10 \$BIN --help 2>/dev/null)
+    EP_SUB=\$(printf '%s\\n' "\$EP_HELP" | grep -oE '^[[:space:]]{2,}(serve|server|daemon|start)[[:space:]]' | awk '{print \$1}' | head -1)
+    if [ -z "\$EP_SUB" ]; then
+      EP_SUB=\$(printf '%s\\n' "\$EP_HELP" | grep -oE '^[[:space:]]{2,}run[[:space:]]' | awk '{print \$1}' | head -1)
+    fi
+    if [ -n "\$EP_SUB" ]; then BIN="\$BIN \$EP_SUB"; fi
+  fi
 fi
 if [ -n "\$BIN" ] && ! command -v \${BIN%% *} >/dev/null 2>&1; then BIN=""; fi
 
