@@ -326,6 +326,34 @@ preflights() {
 }
 
 # ─── detect_cmds <repo> <agent> → DETECT_INSTALL / DETECT_NATIVE / DETECT_CI / DETECT_BIN ───
+# is_pytest_repo <repo> — does this directory declare a pytest suite WITHOUT a
+# heavier manifest (go.mod/package.json/Cargo.toml/pyproject.toml already won
+# earlier arms)? QA-AUGER-1 (2026-10-10): the 09-26 arm covered pytest.ini and
+# root conftest.py only, but pytest suites are equally declared via
+#   setup.cfg / tox.ini  → [pytest] section
+#   pyproject.toml       → [tool.pytest...] / [tool.pytest.ini_options]
+#   tests/conftest.py    → rootdir-adjacent conftest inside the tests dir
+# and any of those shapes falling through to `echo no-test-path` grades the
+# battery's ci-pass cell OK in milliseconds with ZERO tests run — the vacuous
+# pass this predicate exists to kill. Only the [pytest]/[tool.pytest] SECTION
+# counts (a pyproject with no pytest section is not a pytest repo; a setup.cfg
+# without [pytest] neither) — bare filename matching would claim build configs.
+is_pytest_repo() { # <repo> -> 0 when a pytest-suite declaration is present
+  local repo="$1"
+  [ -f "$repo/pytest.ini" ] && return 0
+  [ -f "$repo/conftest.py" ] && return 0
+  [ -f "$repo/setup.cfg" ] && grep -qs '^\[pytest\]' "$repo/setup.cfg" && return 0
+  [ -f "$repo/tox.ini" ] && grep -qs '^\[pytest\]' "$repo/tox.ini" && return 0
+  if [ -f "$repo/pyproject.toml" ]; then
+    grep -qsE '^\[tool\.pytest' "$repo/pyproject.toml" && return 0
+  fi
+  local d
+  for d in tests test; do
+    [ -f "$repo/$d/conftest.py" ] && return 0
+  done
+  return 1
+}
+
 # Extracted verbatim from run() (2026-09-15) so run() and launch() can never
 # drift on the command set they ship to the agent. Globals, because
 # build_remote_script() bakes them (and $agent) into the generated script.
@@ -338,6 +366,7 @@ preflights() {
 detect_cmds() {
   local repo="$1" agent="$2"
   local tpkg="" start_script="" gofirst=""
+  DETECT_PYTEST_REPO=0   # QA-AUGER-1: baked into the render for the pytest venv bootstrap
   # escape hatches when the auto-detect guesses wrong (e.g. suite needs extras)
   DETECT_INSTALL="${BUNKER_QA_INSTALL_CMD:-}"
   if [ -z "$DETECT_INSTALL" ]; then
@@ -424,12 +453,17 @@ detect_cmds() {
     else
       native_cmd="pytest -x -q"
     fi
-  # QA-FOREMAN-2026-09-26 (auger): pytest.ini/conftest.py-only repos matched NO
-  # shape and got the vacuous `echo no-test-path` — the battery graded
-  # ci-pass OK in 57ms with zero tests run while the repo carries 210 tests.
-  # Mirror the pyproject arm; if pytest itself is absent the suite NEVER RAN
-  # and native_runner_missing grades UNVERIFIED (honest), never OK.
-  elif [ -f "$repo/pytest.ini" ] || [ -f "$repo/conftest.py" ]; then native_cmd="python3 -m pytest -q"
+  # QA-AUGER-1 (2026-10-10): pytest-declared repos are now recognized by the
+  # is_pytest_repo predicate (pytest.ini / conftest.py / tox.ini or setup.cfg
+  # [pytest] / pyproject [tool.pytest...] / tests/conftest.py) instead of the
+  # two-filename arm that missed setup.cfg and pyproject-config suites and let
+  # them fall through to the vacuous `echo no-test-path` (57ms OK with zero
+  # tests run). The raw repo files keep deciding; DETECT_PYTEST_REPO carries
+  # the verdict into the generated battery so the agent-side toolchain
+  # bootstrap provisions pytest for exactly these repos.
+  elif is_pytest_repo "$repo"; then
+    DETECT_PYTEST_REPO=1
+    native_cmd="python3 -m pytest -q"
   elif [ -f "$repo/Cargo.toml" ]; then native_cmd="cargo test --workspace"
   elif [ -f "$repo/Makefile" ]; then
     # QA-H3-14: native leg mirrors the install-leg target probe — a Makefile
@@ -979,6 +1013,11 @@ cell() {
 # QA-HERMES-DAGGER-26: HEAD the payload was synced from, recorded on the agent
 # next to the logs so a ci-pass verdict is traceable to a commit.
 QA_HEAD_SHA='$QA_HEAD_SHA'
+# QA-AUGER-1 (2026-10-10): host detection's pytest-repo verdict (is_pytest_repo).
+# Drives the toolchain bootstrap's pytest provisioning below — a pytest.ini/
+# tox.ini/setup.cfg/conftest.py repo gets a pytest-bearing venv even though it
+# has no pyproject.toml for the old bootstrap arm to see.
+QA_PYTEST_REPO='$DETECT_PYTEST_REPO'
 QA_HEAD_PULL='$QA_HEAD_PULL'
 echo "QA-HEAD=\$QA_HEAD_SHA (pull: \$QA_HEAD_PULL)" | tee \$LOGD/qa-head.txt
 cell repo-head OK "tested HEAD=\$QA_HEAD_SHA (pull: \$QA_HEAD_PULL)"
@@ -1163,6 +1202,9 @@ suite_deps_missing() { # <logfile> — 0 when the log carries the missing-test-d
 # is vacuous when it carries the marker itself, or has zero non-whitespace
 # content besides the cap-probe lines (PARENT_CAP=/SUBSHELL_CAP=/CAP_EFFECTIVE=)
 # that the chaos-resource wrapper adds around the command.
+# QA-AUGER-1 (2026-10-10): "ran but collected nothing" is the SAME vacuity —
+# a pytest invocation that prints its banner and "no tests ran" exercised no
+# test either. native_zero_tests() below grades that shape now.
 vacuous_native_suite() { # <logfile> -> 0 when the log proves no suite ran
   local f="\$1"
   [ -f "\$f" ] || return 0
@@ -1170,6 +1212,32 @@ vacuous_native_suite() { # <logfile> -> 0 when the log proves no suite ran
   local rest
   rest=\$(grep -vE '^[[:space:]]*\$|^(PARENT_CAP|SUBSHELL_CAP|CAP_EFFECTIVE)=' "\$f")
   [ -z "\$rest" ]
+}
+# pytest_zero_collected — did a pytest invocation RUN but collect ZERO tests?
+# (QA-AUGER-1, 2026-10-10.) A pytest that exits 0 after printing its header
+# and "no tests ran" is a vacuous pass indistinguishable from a green suite
+# on rc alone — the exact class that graded auger's ci-pass OK in 57ms with
+# zero tests run. Count the summary line's integers: "3 passed", "2 failed",
+# "1 skipped", "1 error", "1 warning" all carry counts; a log without any
+# count-bearing summary is treated as non-pytest output and NOT flagged (the
+# runner-missing / vacuous-echo classifiers own those shapes).
+pytest_zero_collected() { # <logfile> -> 0 when the log proves zero tests ran
+  local f="\$1" line
+  [ -f "\$f" ] || return 1
+  line=\$(grep -E '(passed|failed|error|no tests ran)' "\$f" | tail -1)
+  case "\$line" in
+    *"no tests ran"*) return 0 ;;
+  esac
+  [ -n "\$line" ] || return 1
+  printf '%s' "\$line" | grep -oE '[0-9]+ (passed|failed|error)' >/dev/null 2>&1 && return 1
+  return 0
+}
+# native_zero_tests — harness-shaped zero-test vacuity across runners. A pytest
+# whose summary shows no collected tests is graded FAIL on ci-pass (a suite
+# that runs nothing must never grade OK/PASS) and UNVERIFIED on chaos-resource
+# (the cap was never exercised by any test).
+native_zero_tests() { # <logfile> -> 0 when the native leg provably ran zero tests
+  pytest_zero_collected "\$1"
 }
 # corr_grade — pure chaos-corruption decision. The caller owns truncation,
 # restart, and restoration; this function only grades the observed evidence.
@@ -1259,6 +1327,17 @@ if [ -f pyproject.toml ] && [ ! -x ~/tools/venv/bin/python ]; then
     && cell toolchain-bootstrap OK "python venv ready + pytest (~/tools/venv)" \
     || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/venv.log)"
 fi
+# QA-AUGER-1 (2026-10-10): pytest-declared repos WITHOUT pyproject.toml
+# (pytest.ini / tox.ini / setup.cfg / conftest.py — the shapes is_pytest_repo
+# detects host-side) previously got NO venv bootstrap at all, so the native
+# leg died `/usr/bin/python3: No module named pytest` and chaos-resource
+# burned UNVERIFIED cycles (QA-AUGER-4/10). Same arm, same venv, gated on the
+# baked QA_PYTEST_REPO verdict instead of the pyproject filename.
+if [ "\$QA_PYTEST_REPO" = "1" ] && [ ! -x ~/tools/venv/bin/python ]; then
+  ( python3 -m venv ~/tools/venv && ~/tools/venv/bin/pip install --upgrade pip setuptools wheel && ~/tools/venv/bin/pip install pytest ) >\$LOGD/venv.log 2>&1 \
+    && cell toolchain-bootstrap OK "python venv ready + pytest (~/tools/venv; pytest-config repo, QA-AUGER-1)" \
+    || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/venv.log)"
+fi
 # QA-TERMINAL-JAIL-9 (2026-09-25): the harness's own runner detection picks
 # pytest -x -q for every pyproject repo, but a pip install -e . install
 # never provisions it when the repo declares pytest in a PEP-735
@@ -1268,7 +1347,9 @@ fi
 # created before this fix or on agents where the fresh install could not
 # reach the network: offline agents log a WARN and the native-runner guard
 # in the ci-pass cell grades the affected legs UNVERIFIED.
-if [ -f pyproject.toml ] && [ -x ~/tools/venv/bin/python ] && [ ! -x ~/tools/venv/bin/pytest ]; then
+# QA-AUGER-1 (2026-10-10): the same top-up now also serves pytest-config
+# repos without pyproject.toml (QA_PYTEST_REPO=1 from is_pytest_repo).
+if { [ -f pyproject.toml ] || [ "\$QA_PYTEST_REPO" = "1" ]; } && [ -x ~/tools/venv/bin/python ] && [ ! -x ~/tools/venv/bin/pytest ]; then
   ( ~/tools/venv/bin/pip install pytest ) >\$LOGD/venv-pytest.log 2>&1 \
     && cell toolchain-bootstrap OK "pytest topped up into ~/tools/venv (QA-TERMINAL-JAIL-9)" \
     || echo "WARN: pytest top-up failed (offline agent?) - native/chaos legs will grade UNVERIFIED 'runner missing': \$(tail -1 \$LOGD/venv-pytest.log 2>/dev/null)" >&2
@@ -1755,8 +1836,15 @@ else
     # (or any other empty suite output) is NOT a suite result — nothing ran.
     # Grade UNVERIFIED before the OK, never a false green on a suite that
     # never ran. Non-vacuous rc=0 path is unchanged.
+    # QA-AUGER-1 (2026-10-10): a pytest that exits 0 having collected ZERO
+    # tests is the same vacuity one step later — the suite "ran" but no test
+    # did. A vacuous pass is WORSE than an honest skip (it reads as repo
+    # evidence), so this shape grades FAIL, not UNVERIFIED, and names the
+    # summary line so the row is diagnosable without the agent.
     if vacuous_native_suite \$LOGD/native.log; then
       cell ci-pass UNVERIFIED "native suite NEVER RAN (vacuous no-test-path placeholder) — no repo signal"
+    elif native_zero_tests \$LOGD/native.log; then
+      cell ci-pass FAIL "vacuous pass: native runner exited 0 but ZERO tests ran (summary: \$(grep -E '(passed|failed|error|no tests ran)' \$LOGD/native.log | tail -1 | cut -c1-160)) — a zero-test suite is never repo evidence (QA-AUGER-1)"
     elif [ "\$ci_rc" = "skip" ]; then
       cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS"
     else
@@ -2183,6 +2271,7 @@ elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconne
 elif go_suite_env_failure \$LOGD/disc.log; then cell chaos-disconnect INFO "ENV-BLOCKED: the go suite failed because the test host lacks a build tool (\`make\` on JIT agents, measured 2026-09-19) — the disconnect cut was exercised against a broken build, no disconnect finding (rc=\$disc_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/disc.log)"
 elif suite_deps_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "missing test dependencies — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result (rc=\$disc_rc): \$(suite_deps_missing_cause \$LOGD/disc.log)"
 elif native_runner_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "native runner missing (rc=\$disc_rc) - the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(native_runner_missing_cause \$LOGD/disc.log)"
+elif native_zero_tests \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "zero tests ran under the network cut (QA-AUGER-1 vacuity class) — the disconnect was never exercised by any test: \$(grep -E '(passed|failed|error|no tests ran)' \$LOGD/disc.log | tail -1 | cut -c1-160)"
 else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head -2 \$LOGD/disc.log)"; fi
 
 # 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
@@ -2392,6 +2481,8 @@ elif [ \$res_rc -eq 0 ]; then
   # path unchanged.
   if vacuous_native_suite \$LOGD/res.log; then
     cell chaos-resource UNVERIFIED "suite NEVER RAN under the cap (vacuous no-test-path) — the cap was never exercised by any test (\$cap_note)"
+  elif native_zero_tests \$LOGD/res.log; then
+    cell chaos-resource UNVERIFIED "vacuous pass under the cap: ZERO tests ran (summary: \$(grep -E '(passed|failed|error|no tests ran)' \$LOGD/res.log | tail -1 | cut -c1-160)) — the cap was never exercised by any test (\$cap_note, QA-AUGER-1)"
   else
     cell chaos-resource PASS "suite survives 3G memory cap (\$cap_note)"
   fi
@@ -3030,7 +3121,7 @@ case "${1:-}" in
   # re-detects the start command on the agent (the agent-side ladder is the
   # authoritative runtime detection); the hook's default keeps the variable
   # contract complete for tests.
-  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" DETECT_GO_URL="" DETECT_CI_FILES="" DETECT_ACT_NOTE="" DETECT_UP_PREV_DIR="" QA_HEAD_SHA="${QA_HEAD_SHA:-unknown}" QA_HEAD_PULL="${QA_HEAD_PULL:-none}" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
+  __gen-remote) agent="${agent:-test-agent-0000}" DETECT_INSTALL=":" DETECT_CI=":" DETECT_NATIVE=":" DETECT_BIN="" DETECT_TAG_COUNT=0 DETECT_PREV_TAG="" DETECT_PREV_VERSION="" DETECT_PKG_NAME="" DETECT_PKG_ECOSYSTEM="" DETECT_GO_URL="" DETECT_CI_FILES="" DETECT_ACT_NOTE="" DETECT_UP_PREV_DIR="" DETECT_PYTEST_REPO="${DETECT_PYTEST_REPO:-0}" QA_HEAD_SHA="${QA_HEAD_SHA:-unknown}" QA_HEAD_PULL="${QA_HEAD_PULL:-none}" build_remote_script "$2" "${3:-true}" "${4:-true}" "${5:-true}" ;;
   # QA-CRIER-20 test hook: detect_cmds is a pure function of the repo dir
   # (reads files, sets DETECT_* globals), so this is safe to run against any
   # directory. "$3" defaults to the same placeholder agent __gen-remote uses.
@@ -3042,7 +3133,7 @@ case "${1:-}" in
   # actual QA_CI_SELECT / QA_ACT_NOTE / QA_PKG_NAME a battery run would ship.
   # Opt-in on purpose — the default hook stays a fixed-placeholder render so
   # existing callers keep byte-identical output.
-  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\nDETECT_BIN=%s\nDETECT_PKG_NAME=%s\nDETECT_PKG_ECOSYSTEM=%s\nDETECT_CI_SELECT=%s\nDETECT_ACT_NOTE=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" "$DETECT_BIN" "$DETECT_PKG_NAME" "$DETECT_PKG_ECOSYSTEM" "$DETECT_CI_FILES" "$DETECT_ACT_NOTE" ;;
+  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\nDETECT_BIN=%s\nDETECT_PKG_NAME=%s\nDETECT_PKG_ECOSYSTEM=%s\nDETECT_CI_SELECT=%s\nDETECT_ACT_NOTE=%s\nDETECT_PYTEST_REPO=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" "$DETECT_BIN" "$DETECT_PKG_NAME" "$DETECT_PKG_ECOSYSTEM" "$DETECT_CI_FILES" "$DETECT_ACT_NOTE" "$DETECT_PYTEST_REPO" ;;
   # QA-9ROUTER-19/20: render with the REAL detection for $2, so a test can
   # assert what a battery run would actually ship (see the hook's comment).
   __gen-remote-detected) agent="${agent:-test-agent-0000}"; detect_cmds "$2" "${3:-test-agent-0000}"; build_remote_script "$2" "$DETECT_INSTALL" "$DETECT_CI" "$DETECT_NATIVE" ;;
