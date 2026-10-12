@@ -37,3 +37,30 @@
   artifacts commit-tree), this log.
 - **Foreman:** not woken (read-only dogfood lane; cooldown untouched). qa-audit
   foreman cooldown was 21600s at run time — not paused.
+
+## 2026-10-12 — re-proof run (dogfood lane qa-audit-dogfood-2026-10-12-21-08-57)
+
+- **Verdict:** 🟡 PROMISING-BUT-ROUGH — pipeline works end to end; both 10-11
+  fixes (29fe25352 chaos-errorpath, 83a26895f vacuous pytest) re-proven PASS
+  on fresh evidence; DG-005 still open at HEAD breaks the last step.
+- **Promise:** a fresh machine can install a fleet repo and get an honest
+  10-cell QA battery with merge-deduped evidence — promise HELD at launch/
+  battery level, BROKEN at collect (DG-005 false-truncation).
+- **Angle:** re-proof of DG-001..DG-006 + the 10-11 fixes, via a real battery
+  on auger (the QA-AUGER-1 repo). No surface re-audited.
+- **Real use:** status 426ms → launch 33.1s (agent 475b48cf @ bunker-mvp) →
+  battery 2m18s / 19 rows → collect ×3 each 95.3s → COLLECT-FAIL (false) →
+  agent destroy needed root pkill (destroy-refused:live_processes).
+- **Top findings:** DG-007 (P1, new: auger parity gate imports yaml, deps=[] —
+  cannot run on any fresh machine; dev box rides Hermes-venv PyYAML),
+  DG-008 (P2, new: chaos-resource grades a never-ran python suite as a MEMORY
+  verdict — deps classifiers are npm/runner-only), DG-005 re-proof (3rd live
+  recurrence, now at :3173, with 95.3s re-poll cost).
+- **Fixes re-proven:** chaos-errorpath `auger serve` no-config → OK clean
+  rc=1 (was rc=0 usage banner); pytest repos bootstrap venv+pytest and run
+  the real suite (no vacuous echo pass).
+- **time-to-first-success:** ~3m (status+launch+battery) to a full evidence
+  file; the honest verdict never arrives (collect mis-grades it).
+- **Rows filed:** DG-007, DG-008 on tasks.jsonl + DG-005 recurrence event
+  (id 24). Doc: docs/dogfood/2026-10-12-reproof-integration.md.
+- **Foreman:** not woken (read-only dogfood lane; cooldown untouched).
