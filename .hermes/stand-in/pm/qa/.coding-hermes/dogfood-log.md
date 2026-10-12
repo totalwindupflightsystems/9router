@@ -64,3 +64,55 @@
 - **Rows filed:** DG-007, DG-008 on tasks.jsonl + DG-005 recurrence event
   (id 24). Doc: docs/dogfood/2026-10-12-reproof-integration.md.
 - **Foreman:** not woken (read-only dogfood lane; cooldown untouched).
+# Dogfood Log — qa-audit (the QA pipeline: bunker-qa.sh + dagger-role-tick.sh)
+
+## 2026-10-12 (21:08Z tick) — third cycle: real-use run on coding-hermes-tools; DG-005 4th recurrence with root cause
+
+- **Promise tested:** a fleet operator can `bunker-qa.sh launch <repo>` → poll
+  → `collect --evidence` any Go repo and get an honest 10-cell battery verdict.
+- **Angle:** unexercised surface = a fresh Go repo never QA'd before
+  (coding-hermes-tools @a9af41a, never-qa pick #1 via qa_discover.py 1.7s).
+- **Real use (all measured):** `status` 0.4s → `qa_discover.py` 1.69s →
+  `launch` 32s (agent fb7a626b @ bunker-mvp, 116967-byte script) → battery
+  ~26m (21:24→21:50Z; act CI leg incl. red-gate self-test ~14m dominant) →
+  3× `collect` polls (2×~35s RUNNING probes + final 21:51:48Z collect) →
+  COLLECT-FAIL battery-truncated **on a fully COMPLETED battery** → destroy
+  refused (live dbus/sshd) → host pkill → destroy OK.
+- **Battery result (honest cells):** fresh-install OK (go1.26.9 pulled),
+  ci-pass OK (act 1 job green), upgrade OK (v0.1.0→HEAD), docker-deploy N/A,
+  ui-probe N/A, chaos-disconnect UNVERIFIED (empty disc.log), chaos-shutdown
+  N/A, chaos-corruption N/A, chaos-resource INFO, chaos-errorpath OK.
+- **Top findings:**
+  - **DG-005 4th live recurrence, ROOT CAUSE now proven:** the collect
+    truncation check (bunker-qa.sh:3183) greps compact
+    `"cell":"chaos-errorpath"` but the agent cell() writer (line 1048) emits
+    python `json.dumps` DEFAULT — spaced — so every healthy battery
+    false-FAILs. Evidence: /tmp/bunker-qa-evidence-20261012T212406Z-…jsonl
+    row 20 (`"cell": "chaos-errorpath"` with space). New row **DG-009**
+    filed with the fix shape (parse JSON, or write cells with
+    `separators=(',',':')`).
+  - **DG-002 3rd recurrence, root cause identified:** launch emits stray
+    stderr with rc=0; `disc_window: unbound variable` at line 1015 because
+    the generated battery only assigns `suite_dur`/`disc_window` on the
+    act-FAILED branch (battery lines 1917-1987) and the UNQUOTED heredoc
+    expands `${suite_dur:-0}` on the CONTROLLER at render time (under
+    `set -u`) whenever act is green. Plus spurious run() usage echo (2641)
+    and local go/dockerd probe noise.
+  - **Destroy hygiene:** destroy refused: live_processes (agent-owned
+    dbus-daemon + sshd) — needed a host pkill; the gate is correct but the
+    runbook should own the kill step (noted in DG-009 detail).
+- **Harness re-enable verified:** docker-lifecycle safety work is real but
+  UNCOMMITTED in /home/kara/.hermes (git diff vs 29fe25352: +79 lines —
+  opt-in gate, host cwd block, gateway-service block, ~/.hermes:/opt/data
+  compose scan, bunker-* remote fence). Commit it before another lane
+  reverts or "fixes" over it.
+- **Install leg:** SKIPPED-install-bunker for the skill-standard host
+  bunker-las-03 (ssh connect timeout to 100.69.3.13, rc=255 — same as 10-04
+  and 10-09 ticks). Named substitute: the battery's own fresh-install cell
+  ran for real on bunker-mvp (go1.26.9 pull + build on a JIT agent) — that
+  is clean-machine install proof modulo the shared host.
+- **Rows filed:** DG-009 (new, P1) on tasks.jsonl; DG-005 recurrence-4 +
+  DG-002 recurrence-3 events on events.jsonl (ids ev-dg005-rec4-* /
+  ev-dg002-rec3-*). No code or status changed (read-only lane).
+- **Left behind in the repo:** this log entry + docs/dogfood/2026-10-12b-tools-integration.md.
+- **Foreman:** not woken (read-only lane).
