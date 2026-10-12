@@ -100,3 +100,13 @@
 - left behind: rows (this commit), this log entry
 - foreman woken: no (read-only dogfood lane)
 - verdict: SHIPPABLE for its production promise (the alert->row chain finally verified delivering live); install-from-docs still fails at `make up` for a fresh user.
+
+## 2026-10-12 (run 8) | FAILED-product / PASS-run (fresh-install re-proof) 
+- angle: re-proof closed run-7 install defects (021/022/023 fixes landed 4c9d39b) on a FRESH box + first drive of disk-guard/disk-metrics-textfile own-host pipeline
+- promise: a fresh machine can `make env && make check-env && make up` per docs
+- reality: bunker-las-02 spawn failed x2 (slice-limits) -> bunker-mvp agent 8faaa8f8; clone via tar fallback (GH https clone needs cred); check-env PASS; make up reached 7/9 Up (router/prom/am/grafana/renderer/cadvisor/alloy healthy) only after 4 compensations: stale-RootlessKit-lock rescue at FIRST boot (024 re-proof, second host), Dockerfile scp (clone-only gap, 021 closure holds for real clones), bind-mount remap (022 fix requires root bootstrap), port remaps 8080/12345; loki + cost-exporter crash-loop for NEW reasons (025 exporter.py absent from published repo; 026 loki delete_request_store:s3 hard dep with no creds)
+- own-host pipeline: disk-guard timer firing, --dry-run honest (267G free, would_shed=no), textfile metrics fresh in prom (0.12s walk); DiskWillFillIn24h not firing; only cx53 TP firing
+- perf: install-to-healthy ~3.5min post-rescue; metrics 0.12s; nothing user-noticeable, no PERF rows
+- rows: MON-DOGFOOD-025 (P1), 026, 027, 028 (P2), 024-REPROOF event note
+- foreman woken: no (read-only dogfood lane)
+- verdict: FAILED-product for fresh install (docs+fixes real but 4 unsurfaced blockers remain); production surface healthy
