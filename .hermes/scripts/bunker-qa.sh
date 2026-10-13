@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Controller-side orchestration only; generated test battery is fenced to bunker-* JIT users.
 # bunker-qa.sh — QA FOREMAN pipeline: FULL fresh-system CI pass on a JIT bunker agent.
 # The stand-in PM's sibling: where the PM finds work/gaps on boards, this finds
 # BRITTLENESS by running the project on a CLEAN machine (Bane doctrine 08-24:
@@ -25,6 +26,12 @@
 #                                               destroy) while the battery is alive.
 #   bunker-qa.sh status
 #
+# Docker lifecycle cells (`docker-deploy`, `chaos-shutdown`) are opt-in because
+# `docker compose down/stop/kill` can affect an existing stack. Enable them only
+# for a disposable QA target with `BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=1`.
+# The generated remote battery also refuses an active Hermes gateway or a
+# compose file that binds the persistent `~/.hermes` home to `/opt/data`.
+#
 # WHY THE SPLIT (QA-HERMES-CANOPY-8, 2026-09-15): a full fresh-system battery
 # (spawn, sync, toolchain bootstrap, act CI, native suite, compose, 4 chaos
 # cells) takes 7-15 min, but a single Hermes terminal tool call is killed at
@@ -35,6 +42,29 @@
 # collect tool call is designed to finish far under that cap.
 # NOTE: NO `set -e` on purpose — every cell records its own status via RC echoes.
 set -uo pipefail
+
+BUNKER_QA_ENABLE_DOCKER_LIFECYCLE="${BUNKER_QA_ENABLE_DOCKER_LIFECYCLE:-0}"
+case "$BUNKER_QA_ENABLE_DOCKER_LIFECYCLE" in
+  0|1) ;;
+  *) echo "ERROR: BUNKER_QA_ENABLE_DOCKER_LIFECYCLE must be 0 or 1" >&2; exit 2 ;;
+esac
+
+# A controller on the live Hermes host must never enable Compose lifecycle
+# tests, even if an inherited environment sets the opt-in flag. This is a
+# host-side hard stop; the remote battery repeats its own target-side checks.
+BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK=0
+if [ -f "$HOME/.hermes/state.db" ]; then
+  _qa_controller_pwd=$(pwd -P)
+  case "$_qa_controller_pwd/" in
+    "$HOME/.hermes/"*) BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK=1 ;;
+  esac
+fi
+if XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user is-active --quiet hermes-gateway.service 2>/dev/null; then
+  BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK=1
+fi
+if [ "$BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK" = "1" ]; then
+  BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=0
+fi
 
 # Default server: bunker-las-03 was REMOVED from ~/.bunker/config.yaml
 # (stale default produced 4 consecutive days of P1 "spawn failed" findings,
@@ -392,7 +422,14 @@ detect_cmds() {
       fi
     done
   elif [ -f "$repo/go.mod" ]; then DETECT_INSTALL="go build ./..."
-  elif [ -f "$repo/pyproject.toml" ]; then DETECT_INSTALL="pip install -e .[dev] 2>/dev/null || pip install -e ."
+  elif [ -f "$repo/pyproject.toml" ]; then
+    # QA-HIVEMIND-WORK-25 (2026-10-13): Python 3.12+ images (3.14 on bunker-mvp
+    # agent 6a748db5) are PEP 668 externally-managed — bare `pip install`
+    # refuses with 'externally-managed-environment' and fresh-install graded
+    # FAIL on a harness env, not a repo defect. toolchain-bootstrap guarantees
+    # ~/tools/venv for every pyproject repo BEFORE the cells run, so prefer its
+    # pip; fall back to bare pip only if the venv is somehow missing.
+    DETECT_INSTALL="if [ -x ~/tools/venv/bin/pip ]; then ~/tools/venv/bin/pip install -e '.[dev]' || ~/tools/venv/bin/pip install -e .; else pip install -e '.[dev]' 2>/dev/null || pip install -e .; fi"
   elif [ -f "$repo/Cargo.toml" ]; then DETECT_INSTALL="cargo build --workspace"
   # QA-H3-14 (2026-09-21): a Makefile-only repo (no package manifest) gets a
   # make-based default only when make actually exists on the agent — JIT agents
@@ -789,6 +826,19 @@ detect_upgrade_inputs() {
     DETECT_PKG_ECOSYSTEM="pip"
     DETECT_PKG_NAME=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" | head -1)
     [ -z "$DETECT_PKG_NAME" ] && DETECT_PKG_NAME=$(sed -n "s/^[[:space:]]*name[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$repo/pyproject.toml" | head -1)
+    # QA-TERMINAL-JAIL-19 (2026-10-12): a pip repo that is NOT published to PyPI
+    # has NO registry artifact — the pip arm's `pip install <name>==<prev>` can
+    # only ever die "No matching distribution found", a harness premise failure
+    # graded as a product verdict (terminal-jail: versions: none, upgrade cell
+    # FAIL with the tag v1.0.0 present). Mirror the QA-HEADING-009 npm shape:
+    # mark the repo for the tree-upgrade arm; ship_prev_tag_tree streams the
+    # previous tag's tree and the cell upgrades the checked-out tree.
+    DETECT_UP_PREV_DIR=""
+    if [ -n "$DETECT_PREV_TAG" ] && [ -n "$DETECT_PKG_NAME" ]; then
+      if ! curl -fsS --max-time 10 "https://pypi.org/pypi/${DETECT_PKG_NAME}/json" >/dev/null 2>&1; then
+        DETECT_UP_PREV_DIR="~/qa-up-prev-pip"
+      fi
+    fi
   elif [ -f "$repo/package.json" ]; then
     # QA-9ROUTER-20: publishable name, not the private root name.
     DETECT_PKG_ECOSYSTEM="npm"
@@ -855,6 +905,11 @@ ship_prev_tag_tree() {
     # foreign repo's leftovers.
     agent_ssh "rm -rf ~/qa-up-prev-npm ~/qa-up-prev-npm.absent" >/dev/null 2>&1 || true
     agent_dir="$DETECT_UP_PREV_DIR"; verify_path="package.json"
+  elif [ "$DETECT_PKG_ECOSYSTEM" = "pip" ] && [ -n "$DETECT_UP_PREV_DIR" ] && [ -n "$DETECT_PREV_TAG" ]; then
+    # QA-TERMINAL-JAIL-19: previous tag's tree for the pip arm when the package
+    # is NOT on PyPI — verified by pyproject.toml. Same shared-agent hygiene.
+    agent_ssh "rm -rf ~/qa-up-prev-pip ~/qa-up-prev-pip.absent" >/dev/null 2>&1 || true
+    agent_dir="$DETECT_UP_PREV_DIR"; verify_path="pyproject.toml"
   else
     return 0
   fi
@@ -973,6 +1028,8 @@ sync_repo() {
 # ─── build the remote cell script (all quoting handled HERE, once) ───
 build_remote_script() { # args: proj install_cmd ci_cmd native_cmd
   local proj="$1" install_cmd="$2" ci_cmd="$3" native_cmd="$4"
+  local qa_docker_lifecycle_enabled="${BUNKER_QA_ENABLE_DOCKER_LIFECYCLE:-0}"
+  local qa_docker_lifecycle_host_block="${BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK:-0}"
   # QA-BUNKER-65: the unquoted heredoc below expands $QA_HEAD_SHA/$QA_HEAD_PULL.
   # launch() sets them (real sha, QA-HERMES-DAGGER-26); any other caller — run()
   # or the __gen-remote/__gen-remote-detected test hooks — would abort the whole
@@ -984,6 +1041,14 @@ build_remote_script() { # args: proj install_cmd ci_cmd native_cmd
 #!/usr/bin/env bash
 # qa-run.sh — generated by bunker-qa.sh for $proj (do not edit)
 PROJ='$proj'
+# Hard fence: the test battery runs ONLY inside a per-run Bunker JIT agent.
+# If a cwd/config mistake starts this generated script on the controller, fail
+# before installing tools, tests, or touching Docker/Compose.
+QA_RUN_USER=\$(id -un 2>/dev/null || true)
+case "\$QA_RUN_USER" in
+  bunker-*) ;;
+  *) printf 'FATAL: QA battery must run on a remote Bunker JIT agent; got local user %s (host=%s cwd=%s)\\n' "\$QA_RUN_USER" "\$(hostname)" "\$(pwd -P)" >&2; exit 90 ;;
+esac
 EVID=~/qa-evidence.jsonl
 # Per-run log dir in HOME — /tmp/*.log is shared across agents and the
 # sticky bit makes a fresh agent uid unable to overwrite a previous
@@ -1009,6 +1074,35 @@ cell() {
   else
     local d; d=\$(printf '%s' "\$3" | tr '\n\t\r' '   ' | sed 's/"/'"'"'/g'); echo "{\"project\":\"\$PROJ\",\"cell\":\"\$1\",\"status\":\"\$2\",\"detail\":\"\$d\",\"ts\":\"\$(date -u +%FT%TZ)\"}" >> \$EVID
   fi
+}
+QA_DOCKER_LIFECYCLE_ENABLED='$qa_docker_lifecycle_enabled'
+QA_DOCKER_LIFECYCLE_HOST_BLOCK='$qa_docker_lifecycle_host_block'
+# This gate is deliberately inside the generated battery, immediately before
+# either compose lifecycle cell. The feature remains testable on an isolated
+# QA agent, but the default is no destructive compose actions.
+qa_docker_lifecycle_block_reason() {
+  if [ "\$QA_DOCKER_LIFECYCLE_HOST_BLOCK" = "1" ]; then
+    printf '%s' 'controller is the live Hermes host; Compose lifecycle cells are forced off'
+    return 0
+  fi
+  if [ "\$QA_DOCKER_LIFECYCLE_ENABLED" != "1" ]; then
+    printf '%s' 'disabled by default; opt in only on a disposable QA target with BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=1'
+    return 0
+  fi
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet hermes-gateway.service; then
+    printf '%s' 'active hermes-gateway.service detected; refusing Docker lifecycle test on a running Hermes system'
+    return 0
+  fi
+  if [ -e "\$HOME/.hermes/state.db" ]; then
+    for _compose_file in docker-compose*.yml compose*.yml; do
+      [ -f "\$_compose_file" ] || continue
+      if grep -Fq '~/.hermes:/opt/data' "\$_compose_file" || grep -Fq "\$HOME/.hermes:/opt/data" "\$_compose_file"; then
+        printf 'compose file %s binds persistent Hermes storage to /opt/data' "\$_compose_file"
+        return 0
+      fi
+    done
+  fi
+  return 1
 }
 # QA-HERMES-DAGGER-26: HEAD the payload was synced from, recorded on the agent
 # next to the logs so a ci-pass verdict is traceable to a commit.
@@ -1998,6 +2092,12 @@ elif [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "rust" ] && [ -n "\$QA_
   # no installable index package; the tree-stream is the only real
   # previous->HEAD upgrade path for rust).
   if [ -f "\$HOME/qa-up-prev/Cargo.toml" ]; then UP_PREV="\$HOME/qa-up-prev"; fi
+elif [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "pip" ] && [ -n "\$QA_UP_PREV_DIR" ] && [ -n "\$QA_PREV_TAG" ]; then
+  # QA-TERMINAL-JAIL-19: host-streamed previous-tag tree (~/qa-up-prev-pip) for
+  # pip packages NOT published to PyPI — verified by pyproject.toml, no clone
+  # fallback (bunker agents carry no forge auth; the host stream is the only
+  # source). Same shape as the QA-HEADING-009 npm arm.
+  if [ -f "\$HOME/qa-up-prev-pip/pyproject.toml" ]; then UP_PREV="\$HOME/qa-up-prev-pip"; fi
 elif [ "\$QA_TAG_COUNT" != "0" ] && [ "\$QA_ECOSYSTEM" = "npm" ] && [ -n "\$QA_UP_PREV_DIR" ] && [ -n "\$QA_PREV_TAG" ]; then
   # QA-HEADING-009: host-streamed previous-tag tree (~/qa-up-prev-npm) for
   # non-publishable npm repos — verified by package.json, no clone fallback
@@ -2041,6 +2141,10 @@ else cell upgrade FAIL "upgrade path UNVERIFIED: the repo has \$QA_TAG_COUNT rel
 # with no diagnosis and the deployment stayed unverified. FAIL now names the
 # command, its rc, and the log's leading lines via fail_detail().
 if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
+  docker_lifecycle_reason=\$(qa_docker_lifecycle_block_reason || true)
+  if [ -n "\$docker_lifecycle_reason" ]; then
+    cell docker-deploy SKIPPED "safety gate: \$docker_lifecycle_reason"
+  else
   DC_CMD="docker compose up -d --build"
   ( \$DC_CMD ) >\$LOGD/dc.log 2>&1; dc_rc=\$?
   if [ \$dc_rc -eq 0 ]; then
@@ -2102,6 +2206,7 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
     docker compose down >/dev/null 2>&1
   elif [ \$QA_DOCKER_OK = 0 ]; then cell docker-deploy SKIPPED "docker unavailable on agent (QA-CONSENSUS-24 fail-closed): \$(tail -1 \$LOGD/dc.log 2>/dev/null | cut -c1-160)"
 else cell docker-deploy FAIL "\$(fail_detail \$dc_rc \$LOGD/dc.log \$DC_CMD)"; fi
+  fi
 else cell docker-deploy N/A "no compose file"; fi
 
 # 5 · ui-probe
@@ -2301,6 +2406,10 @@ else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head 
 
 # 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
 if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
+  docker_lifecycle_reason=\$(qa_docker_lifecycle_block_reason || true)
+  if [ -n "\$docker_lifecycle_reason" ]; then
+    cell chaos-shutdown SKIPPED "safety gate: \$docker_lifecycle_reason"
+  else
   # QA-HEADING-010 (2026-09-25): the && chain short-circuited BEFORE its echo
   # markers, so a first-verb failure left sd.log EMPTY and the cell graded
   # FAIL "rc=1" with no attribution. Run EVERY verb unconditionally, echo each
@@ -2392,6 +2501,7 @@ if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml
     else
       cell chaos-shutdown FAIL "\$(fail_detail \$sd_rc \$LOGD/sd.log 'docker compose up -d; stop; start; kill; start; down')"
     fi
+  fi
   fi
   fi
 else cell chaos-shutdown N/A "no compose file"; fi

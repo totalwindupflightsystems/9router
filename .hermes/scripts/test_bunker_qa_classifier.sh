@@ -257,6 +257,42 @@ if [ -f "$HARNESS" ]; then
   esac
 fi
 
+echo "=== destructive Docker lifecycle gate (renderer only; no Compose runs)"
+GATE_GEN="$TMPD/qa-docker-gate-generated.sh"
+BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=0 bash "$HARNESS" __gen-remote gate-check 2>/dev/null > "$GATE_GEN"
+if grep -Fq "QA_DOCKER_LIFECYCLE_ENABLED='0'" "$GATE_GEN"; then
+  check "Docker lifecycle cells default disabled" yes yes
+else
+  check "Docker lifecycle cells default disabled" yes no
+fi
+if [ "$(grep -c 'qa_docker_lifecycle_block_reason' "$GATE_GEN")" -ge 3 ]; then
+  check "both Compose lifecycle cells pass through safety gate" yes yes
+else
+  check "both Compose lifecycle cells pass through safety gate" yes no
+fi
+if grep -Fq 'active hermes-gateway.service detected' "$GATE_GEN" && grep -Fq '~/.hermes:/opt/data' "$GATE_GEN"; then
+  check "active gateway and persistent Hermes bind mount are guarded" yes yes
+else
+  check "active gateway and persistent Hermes bind mount are guarded" yes no
+fi
+if bash -n "$GATE_GEN" 2>/dev/null; then
+  check "generated gated battery parses without running it" yes yes
+else
+  check "generated gated battery parses without running it" yes no
+fi
+if grep -Fq 'local qa_docker_lifecycle_host_block=' "$HARNESS" \
+  && grep -Fq 'BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=0' "$HARNESS" \
+  && grep -Fq 'systemctl --user is-active --quiet hermes-gateway.service' "$HARNESS"; then
+  check "live controller hard-block overrides an inherited opt-in" yes yes
+else
+  check "live controller hard-block overrides an inherited opt-in" yes no
+fi
+if BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=maybe bash "$HARNESS" __gen-remote gate-check >/dev/null 2>&1; then
+  check "invalid lifecycle flag is rejected" yes no
+else
+  check "invalid lifecycle flag is rejected" yes yes
+fi
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
