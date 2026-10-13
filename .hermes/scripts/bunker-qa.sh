@@ -473,6 +473,14 @@ detect_cmds() {
   # belongs to the project (file a board row, do not mask it here).
   if jq -r '.scripts.test // ""' "$repo/package.json" 2>/dev/null | grep -q vitest || ls "$repo"/vitest.config.* >/dev/null 2>&1; then
     native_cmd="npm test -- --no-file-parallelism"
+  elif jq -r '.scripts.test // ""' "$repo/package.json" 2>/dev/null | grep -qE '(^|[[:space:]&])go test([[:space:]]|$)'; then
+    # QA-DM-RUNINBAND (2026-10-13): an npm shim whose test script wraps
+    # `go test` must NOT get Jest's --runInBand appended — npm forwards it and
+    # go test dies at flag-parse ("flag provided but not defined: -runInBand")
+    # in EVERY package before a single test runs (proven dexdat-memory: 76
+    # packages failed in ~0.01s each, zero tests executed). go test is already
+    # package-serial — pass the script through bare.
+    native_cmd="npm test"
   else
     native_cmd="npm test -- --runInBand"
   fi
