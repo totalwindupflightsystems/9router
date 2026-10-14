@@ -1,0 +1,9 @@
+{
+  "tick": "monitoring-foreman-2026-10-14-19-53-40",
+  "budget": 3,
+  "tasks": [
+    {"id": "README-016", "worktree": "/home/kara/worktrees/fleet-monitoring-README-016", "branch": "wt/README-016"},
+    {"id": "README-019", "worktree": "/home/kara/worktrees/fleet-monitoring-README-019", "branch": "wt/README-019"},
+    {"id": "MON-GAP-023", "worktree": "/home/kara/worktrees/fleet-monitoring-MON-GAP-023", "branch": "wt/MON-GAP-023"}
+  ]
+}
