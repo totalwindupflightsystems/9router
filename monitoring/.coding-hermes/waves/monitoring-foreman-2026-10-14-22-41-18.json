@@ -1,0 +1,8 @@
+{
+  "tick": "monitoring-foreman-2026-10-14-22-41-18",
+  "budget": 11,
+  "workers": [
+    {"task": "MON-REVIEW-006", "worktree": "/home/kara/worktrees/monitoring-MON-REVIEW-006", "branch": "wt/MON-REVIEW-006", "base_sha": "3d3404aea"},
+    {"task": "MON-DOGFOOD-007", "worktree": "/home/kara/worktrees/monitoring-MON-DOGFOOD-007", "branch": "wt/MON-DOGFOOD-007", "base_sha": "3d3404aea"}
+  ]
+}
