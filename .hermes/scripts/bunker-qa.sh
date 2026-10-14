@@ -3233,7 +3233,14 @@ PY
   # complete battery always carries it (any status); its absence means the
   # script died before CELLS-DONE. The collect row then FAILs (nonzero rc)
   # instead of printing a green COLLECTED over an incomplete battery.
-  LAST_CELL_SEEN=$(printf '%s' "$tmp" | grep -c '"cell":"chaos-errorpath"' || true)
+  # 2026-10-14 second defect in the same line: `printf '%s' "$tmp" | grep`
+  # greps the temp file's PATH STRING (38 chars, never contains the pattern),
+  # so the detector matched NOTHING for any battery and every COMPLETED run
+  # was flagged TRUNCATED (logsey e9035321+505b30e8, terminal-jail 9a6cdffe
+  # on 2026-10-14 — all with the errorpath row present + qa-run.finished).
+  # Grep the FILE, and match both compact and spaced JSON (the agent-side
+  # cell() writer uses python3 json.dumps = spaced separators).
+  LAST_CELL_SEEN=$(grep -Ec '"cell": ?"chaos-errorpath"' "$tmp" || true)
   if [ "${LAST_CELL_SEEN:-0}" -eq 0 ]; then
     append_collect_row FAIL "battery TRUNCATED on agent=$agent ($SERVER): pulled ${pulled:-0} rows and NONE is the final chaos-errorpath cell — qa-run.sh died mid-battery (known cause: docker socket never appeared pre-QA-CONSENSUS-24 fix; also SIGTERM/SIGKILL mid-run). Evidence merged but the run is INCOMPLETE — recover: re-launch (post-fix batteries grade docker legs SKIPPED instead of dying). agent left intact if still live"
     echo "COLLECT-FAIL battery-truncated"
