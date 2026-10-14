@@ -1036,6 +1036,7 @@ sync_repo() {
 # ─── build the remote cell script (all quoting handled HERE, once) ───
 build_remote_script() { # args: proj install_cmd ci_cmd native_cmd
   local proj="$1" install_cmd="$2" ci_cmd="$3" native_cmd="$4"
+  local install_cmd_q; install_cmd_q=$(printf '%q' "$install_cmd")
   local qa_docker_lifecycle_enabled="${BUNKER_QA_ENABLE_DOCKER_LIFECYCLE:-0}"
   local qa_docker_lifecycle_host_block="${BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK:-0}"
   # QA-BUNKER-65: the unquoted heredoc below expands $QA_HEAD_SHA/$QA_HEAD_PULL.
@@ -2135,8 +2136,8 @@ elif [ -n "\$UP_PREV" ]; then
   ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
   rm -rf ~/qa-up-prev ~/qa-up-prev.bak ~/qa-up-prev-clone ~/qa-up-prev-npm ~/qa-up-prev-npm.bak 2>/dev/null
   if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "previous release \$QA_PREV_TAG (tree via git archive) → HEAD reinstall clean"
-  elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PREV_TAG would not build (streamed tree): \$(fail_detail \$up1_rc \$LOGD/up1.log $install_cmd)"
-  else cell upgrade FAIL "upgrade from \$QA_PREV_TAG (streamed tree) to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd)"; fi
+  elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PREV_TAG would not build (streamed tree): \$(fail_detail \$up1_rc \$LOGD/up1.log $install_cmd_q)"
+  else cell upgrade FAIL "upgrade from \$QA_PREV_TAG (streamed tree) to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd_q)"; fi
 elif [ "\$QA_ECOSYSTEM" = "go" ]; then
   cell upgrade FAIL "upgrade path UNVERIFIED: repo has \$QA_TAG_COUNT release tag(s), previous \$QA_PREV_TAG, but the host's streamed previous-release tree is missing (~/qa-up-prev) and \$QA_GO_URL is not cloneable from the agent (bunker agents carry no clone auth) — re-run the battery so ship_prev_tag_tree can stream it"
 elif [ "\$QA_ECOSYSTEM" = "pip" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_VERSION" ]; then
@@ -2144,13 +2145,13 @@ elif [ "\$QA_ECOSYSTEM" = "pip" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_V
   ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
   if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "pip \$QA_PKG_NAME==\$QA_PREV_VERSION (tag \$QA_PREV_TAG, the previous release) → HEAD install clean"
   elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PKG_NAME==\$QA_PREV_VERSION would not install (tag \$QA_PREV_TAG): \$(fail_detail \$up1_rc \$LOGD/up1.log "pip install \$QA_PKG_NAME==\$QA_PREV_VERSION")"
-  else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME==\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log "$install_cmd")"; fi
+  else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME==\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd_q)"; fi
 elif [ "\$QA_ECOSYSTEM" = "npm" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_VERSION" ]; then
   ( npm install -g "\$QA_PKG_NAME@\$QA_PREV_VERSION" ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
   ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
   if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "npm -g \$QA_PKG_NAME@\$QA_PREV_VERSION (tag \$QA_PREV_TAG, the previous release) → HEAD install clean"
   elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PKG_NAME@\$QA_PREV_VERSION would not install (tag \$QA_PREV_TAG): \$(fail_detail \$up1_rc \$LOGD/up1.log "npm install -g \$QA_PKG_NAME@\$QA_PREV_VERSION")"
-  else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME@\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log "$install_cmd")"; fi
+  else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME@\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd_q)"; fi
 else cell upgrade FAIL "upgrade path UNVERIFIED: the repo has \$QA_TAG_COUNT release tag(s) (previous \$QA_PREV_TAG) but the synced tree carries no history to check out and no installable previous release was detected (ecosystem='\$QA_ECOSYSTEM' package='\$QA_PKG_NAME') — treat the cell as untested, not as not-applicable"; fi
 
 # 4 · docker-deploy — compose up + probe + down
