@@ -4,6 +4,13 @@
 # A YAML file that parses is not a valid Prometheus config; only promtool says that. Each
 # component ships its own validator, so we run theirs instead of guessing. Validators run in
 # the pinned images, so "it validated" means "it validated against the version we deploy".
+#
+# Lane governance (MON-REVIEW-006): every alert rule must carry a `lane:` label naming a
+# board the alert-router actually serves. The "== lane governance ==" check extracts each
+# lane value from alerts/rules/*.yml and validates it against LANE_ALLOWLIST, a
+# colon/whitespace-separated env var (default "monitoring"). Deployment sites extend the
+# allowlist without editing the script: LANE_ALLOWLIST="monitoring:mylane" lint-configs.sh.
+# A rule with an empty lane value, or with no lane label at all, is a failure.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -89,6 +96,39 @@ PY
 else
   ok "YAML parse skipped (PyYAML not installed on this host)"
 fi
+
+echo "== lane governance =="
+# Every rule's lane must name a board the alert-router actually serves. The allowlist is
+# an env var (colon/whitespace-separated, default "monitoring") so deployment sites can
+# extend it without editing this script. A rule with an empty lane, or no lane label, is
+# a failure (MON-REVIEW-006).
+LANE_ALLOWLIST="${LANE_ALLOWLIST:-monitoring}"
+lane_bad=0
+for rule in alerts/rules/*.yml; do
+  while IFS= read -r lane; do
+    if [ -z "$lane" ]; then
+      bad "$rule: empty lane value"
+      lane_bad=1
+      continue
+    fi
+    lane_ok=0
+    # colon/whitespace-separated allowlist; tr normalizes colons so the word loop splits both
+    for allowed in $(printf '%s' "$LANE_ALLOWLIST" | tr ':' ' '); do
+      allowed="${allowed%:}"
+      [ -z "$allowed" ] && continue
+      if [ "$lane" = "$allowed" ]; then lane_ok=1; break; fi
+    done
+    if [ "$lane_ok" -eq 0 ]; then
+      bad "$rule: lane '$lane' not in LANE_ALLOWLIST"
+      lane_bad=1
+    fi
+  done < <(sed -n 's/^[[:space:]]*lane:[[:space:]]*\(.*\)$/\1/p' "$rule")
+  if ! grep -q '^[[:space:]]*lane:' "$rule"; then
+    bad "$rule: no lane label"
+    lane_bad=1
+  fi
+done
+[ "$lane_bad" -eq 0 ] && ok "all rule lanes in allowlist (${LANE_ALLOWLIST// /:})"
 
 echo "== prometheus =="
 # the prometheus image's ENTRYPOINT is the server; promtool needs an explicit override
