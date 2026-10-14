@@ -1,0 +1,23 @@
+{
+  "scheduler_tick": "monitoring-foreman-2026-10-14-03-02-09",
+  "wave_budget": 2,
+  "repo": "/home/kara/fleet-monitoring",
+  "tasks": [
+    {
+      "board_id": "MON-DOGFOOD-025",
+      "worktree": "/home/kara/worktrees/fleet-monitoring-wt-df025-cost-exporter-push",
+      "branch": "wt/df025-cost-exporter-push",
+      "scope": "publish stack/cost-exporter (exporter.py, test_exporter.py, Dockerfile, compose service) to origin/master; add tree check that every compose build context exists in tree",
+      "commit": "4b6b57d8ba8e923e88705bb90d790bfa72a047c6",
+      "status": "merged-not-yet"
+    },
+    {
+      "board_id": "MON-DOGFOOD-031",
+      "worktree": "/home/kara/worktrees/fleet-monitoring-wt-df031-render-configs-dir-trap",
+      "branch": "wt/wt-df031-render-configs-dir-trap",
+      "scope": "render-configs.sh: rm -f active.yml before cp, assert regular file, fail loudly; lint-configs.sh validate active config path",
+      "commit": "1ef11c05b5a4",
+      "status": "merged-not-yet"
+    }
+  ]
+}
