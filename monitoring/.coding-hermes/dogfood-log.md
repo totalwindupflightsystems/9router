@@ -133,3 +133,13 @@
 - left behind: rows (pathspec commit), this log entry, docs/dogfood/2026-10-15-run10-loki-and-rootless-reproof.md
 - foreman woken: no (read-only dogfood lane; rows wait on a live lane)
 - verdict: SHIPPABLE for the Loki/production promise (pipeline fully green + fast); FAILED-product for fresh rootless install (third bind + override-merge dead end + bootstrap still sudo-only); PASS-run
+
+## 2026-10-15 (run 11) | monitoring | dashboards-as-code + fleet-cost pipeline + verify gate (fresh-install Dockerfile disproven)
+- angle: FIRST drive of the Grafana dashboards-as-code surface + Fleet Cost & Tokens end to end (MON-GAP-012 closed complete) + the verify gate; run 10 same day covered Loki/rootless, no overlap
+- promise: a user opens Grafana and sees live fleet cost & token dashboards; make verify is the honest gate
+- reality: fleet-cost dashboard 404 in live Grafana (6 dashboards provisioned, not this one); NO hermes-cost scrape target active, no cost-exporter container on fleet-monitor, live compose (a83c50dd7) is pre-cost-exporter vs repo main (84c9d4e0); hermes_session_est_cost_usd = 7876 series frozen at day=2026-10-06 (~$84 that day) — MON-GAP-012 repo-true, live-false. Exporter code GOOD: local run scrape 2.6s cold=warm, 9.2MB, 9997 cost lines incl today. verify gate: top-level host verify.sh stale (md5 4afc9529) FALSE-FAILs 'no containers found' on 11/11-Up stack; scripts/verify.sh (byte-identical to repo main) VERIFY: PASS 6/6. Fresh install (bunker-mvp agent 441ad5e0, tar fallback, destroyed): make config+check-env PASS 2s; make up FAIL 76s — fleet-monitoring/stack/alert-router/ ships NO Dockerfile on main (exists only in gh/ft009 history + live host); run-8's '021 closure holds for real clones' DISPROVEN on main@01efa2ad8
+- perf: exporter 2.6s/9.2MB scrape (not scraped); nothing else user-noticeable -> no PERF rows
+- rows: MON-DOGFOOD-039 (P1), MON-DOGFOOD-040 (P2)
+- left behind: rows (pathspec commit), this log entry, docs/dogfood/2026-10-15-run11-dashboards-cost-verify-gate.md
+- foreman woken: no (read-only dogfood lane)
+- verdict: FAILED-product for cost-dashboard promise + fresh install on main; SHIPPABLE core observability (scripts/verify.sh PASS)
