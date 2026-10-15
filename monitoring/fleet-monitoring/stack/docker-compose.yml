@@ -169,8 +169,12 @@ services:
       # lane boards, read for existing ids and appended to when WRITE=1
       - ${BOARD_ROOT:-/tmp/boards}:${BOARD_ROOT:-/boards}
       # bind the host spool dir (drained by the fleet side over rsync) - a named
-      # volume here is root-owned and the container runs as uid 10001
-      - /var/lib/fleet-monitoring/spool:/spool
+      # volume here is root-owned and the container runs as uid 10001.
+      # HOST-side paths are env-remappable so a rootless host (agent user cannot
+      # mkdir /var/lib/*) can point them at $HOME dirs it creates itself.
+      # Compose list-merge APPENDS overrides, so the base list must already use
+      # the remaps — a plain COMPOSE_EXTRA override cannot remove these.
+      - ${SPOOL_HOST_DIR:-/var/lib/fleet-monitoring/spool}:/spool
     ports:
       - "127.0.0.1:8089:8089"
     networks: [mon]
@@ -207,8 +211,9 @@ services:
       # "couldn't get dbus connection" and node_systemd_unit_state never appears
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
       - /run/systemd/private:/run/systemd/private
-      # textfile collector: the way a host publishes facts about itself (backup freshness)
-      - /var/lib/fleet-monitoring/node-exporter-textfile:/var/lib/node_exporter/textfile:ro
+      # textfile collector: the way a host publishes facts about itself (backup freshness).
+      # TEXTFILE_HOST_DIR remap: a rootless host cannot mkdir /var/lib/* (MON-DOGFOOD-035).
+      - ${TEXTFILE_HOST_DIR:-/var/lib/fleet-monitoring/node-exporter-textfile}:/var/lib/node_exporter/textfile:ro
       - alloy-data:/var/lib/alloy/data
     ports:
       - "127.0.0.1:12345:12345"
