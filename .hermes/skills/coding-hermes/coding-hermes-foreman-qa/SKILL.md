@@ -1,7 +1,7 @@
 ---
 name: coding-hermes-foreman-qa
 description: "Use when running qa foreman ticks."
-version: 1.3.0
+version: 1.3.1
 platforms: [linux]
 metadata:
   hermes:
@@ -342,7 +342,7 @@ A worker's pre-commit guard runs the full suite inside its commit, so the lock o
 
 ## Product workflow catalog and regression history — required beyond CI
 
-**Worker handoff is mandatory too.** Before dispatching QA or dogfood work, include the owning campaign row, `UC-...` workflow ID, spec anchor, test/manual procedure, existing `REG-...` cases, and expected observations in the one-message brief. Require the worker to return the complete `ch:trace` plus `STATUS` / `TIER` / `EVIDENCE`; preload `coding-hermes-worker,coding-hermes-traceability` where possible, but never rely on skill loading instead of putting the contract in the brief. The foreman validates and records the marker plus `STATUS` / `TIER` / `EVIDENCE` in the row's `worker_summary` before GitReins Tier 2, then reconciles its verdict and tested commit into the closeout. When the target repo's preflight binds IDs, use the owning row ID as the GitReins task ID. Keep fixed regressions in the future QA set and append each later pass/failure to the canonical run history.
+**Worker handoff is mandatory too.** Before dispatching QA or dogfood work, include the owning campaign row, `UC-...` workflow ID, spec anchor, test/manual procedure, existing `REG-...` cases, and expected observations in the one-message brief. Require the worker to return the complete `ch:trace` plus `STATUS` / `TIER` / `EVIDENCE`; preload `coding-hermes-worker,coding-hermes-traceability` only if the worker launch does not pass `--ignore-rules` (which suppresses preloaded skills), and never rely on skill loading instead of putting the contract in the brief. The foreman validates and records the marker plus `STATUS` / `TIER` / `EVIDENCE` in the row's `worker_summary` before GitReins Tier 2, then reconciles its verdict and tested commit into the closeout. When the target repo's preflight binds IDs, use the owning row ID as the GitReins task ID. Keep fixed regressions in the future QA set and append each later pass/failure to the canonical run history.
 
 CI is one evidence stream, not proof that a user journey works or that the product's components are connected.
 

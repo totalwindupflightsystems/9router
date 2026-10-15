@@ -1,7 +1,7 @@
 ---
 name: coding-hermes-traceability
 description: "Use when writing/reviewing fleet work — the ch:trace link graph (row→spec→wave→test→evidence→witness→verdict→commit→memory), how to TAG each data source we use daily (boards, waves, verdicts, DuckBrain, specs, films, ledger, scheduler DB, sessions, Hilo, backups), and the one-call context surface."
-version: 2.1.0
+version: 2.1.1
 author: totalwindupflightsystems
 license: MIT
 metadata:
@@ -39,7 +39,7 @@ ch:trace row=<ID> spec=<path#anchor> wave=<manifest#step> test=<path::test> doc=
 
 ## Worker dispatch and closeout (mandatory)
 
-Before dispatch, the foreman loads `worker-brief-authoring` and this skill, resolves the canonical board row and its spec/use-case anchor, then places those exact references in the worker's one-message brief. Preload `coding-hermes-worker,coding-hermes-traceability` where the session path supports skill flags; the brief must still carry the full contract because workers do not inherit the foreman's skills, board, or memory.
+Before dispatch, the foreman loads `worker-brief-authoring` and this skill, resolves the canonical board row and its spec/use-case anchor, then places those exact references in the worker's one-message brief. Preload `coding-hermes-worker,coding-hermes-traceability` only when the worker launch does not pass `--ignore-rules` (that flag suppresses preloaded skills); the one-message brief must still carry the full contract because workers do not inherit the foreman's skills, board, or memory.
 
 Require the worker's final report to include a single-line `ch:trace` marker with all eleven fields (`row`, `spec`, `wave`, `test`, `doc`, `prompt`, `evidence`, `witness`, `verdict`, `commit`, `memory`) and a `STATUS` / `TIER` / `EVIDENCE` closeout block. Values are single tokens; every absent value is an explicit `none:<reason>`, never a blank or bare `none`. Keep stable QA/dogfood `UC-...` and `REG-...` IDs in the spec/test/history pointers; a fixed regression stays in future coverage with its failure, fix commit, and permanent test recorded.
 
