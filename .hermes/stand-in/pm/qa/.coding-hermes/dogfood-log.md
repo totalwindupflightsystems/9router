@@ -116,3 +116,23 @@
   ev-dg002-rec3-*). No code or status changed (read-only lane).
 - **Left behind in the repo:** this log entry + docs/dogfood/2026-10-12b-tools-integration.md.
 - **Foreman:** not woken (read-only lane).
+
+## 2026-10-15 (21:47Z tick) — re-proof run: DG-005 fix verified on a live never-qa repo
+
+- **Verdict:** pipeline WORKS end to end — DG-005 (false COLLECT-FAIL on
+  healthy batteries) re-proven FIXED at HEAD 8d2cf8617 on fresh evidence.
+- **Real use:** `qa_discover.py` 1.4s (picked coding-hermes-boardctl,
+  never-qa) → `bunker-qa.sh status` 0.44s → `run /home/kara/coding-hermes-boardctl`
+  (agent 20b87295 @ bunker-mvp) → battery 22:02:49→22:08:28Z (~6.5 min,
+  19 evidence rows) → collect rc=0, NO COLLECT-FAIL, teardown TEARDOWN-GONE
+  verified via host read-back.
+- **Cells:** fresh-install OK (go1.26.5 JIT toolchain), ci-pass OK (act 1 job
+  green), upgrade OK (v0.1.9→HEAD), chaos-resource PASS, chaos-errorpath OK;
+  docker-deploy/ui-probe/chaos-shutdown/chaos-corruption N/A;
+  chaos-disconnect UNVERIFIED (empty disc.log — DG-006 class, act-green path
+  leaves the disconnect cell nothing to exercise).
+- **Evidence:** /tmp/bunker-qa-evidence-20261015T220249Z-1866784.jsonl;
+  event ev-df-20261015-boardctl on events.jsonl, committed 778ad8ca0, pushed
+  (origin/main). No new defect rows warranted; no perf row (status 0.44s,
+  discovery 1.4s — nothing user-noticeable-slow).
+- **Read-only lane:** no code/status changed; foreman not woken.
