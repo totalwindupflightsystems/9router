@@ -1,0 +1,9 @@
+/var/log/snoopy.log {
+    daily
+    rotate 7
+    size 100M
+    compress
+    delaycompress
+    missingok
+    notifempty
+}
