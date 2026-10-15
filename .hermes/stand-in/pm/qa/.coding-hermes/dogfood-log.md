@@ -136,3 +136,37 @@
   (origin/main). No new defect rows warranted; no perf row (status 0.44s,
   discovery 1.4s — nothing user-noticeable-slow).
 - **Read-only lane:** no code/status changed; foreman not woken.
+
+## 2026-10-15 (21:47Z tick) — fourth cycle: re-proof of DG-005 collect fix + DG-003 go-floor fix on crier; 3 new rows
+
+- **Promise tested:** a fleet operator can `bunker-qa.sh launch <repo>` → `collect --evidence`
+  a Go repo pinning go>=1.26 and get an honest 10-cell battery verdict on a fresh agent.
+- **Angle:** fresh evidence for two just-landed fixes at HEAD (d591037b0):
+  the 10-14 collect truncation detector (DG-005/DG-009) and the 10-15 floor-aware
+  toolchain bootstrap (QA-MISCHIEF-003 = DG-003). Real-use target: crier @839b4f2
+  (go.mod floor 1.26.9 — the repo class DG-003 broke; never the same repo twice).
+- **Real use (all measured):** `status` 0.42s (3 runs, stable) → `launch` ~5s wall
+  (agent d908faeb @ bunker-mvp, TTL 4h) → battery ~10m on-agent (20 rows:
+  fresh-install OK, toolchain-bootstrap OK floor=1.26.9, ci-pass OK, ci-act
+  UNVERIFIED rc=1, upgrade OK v0.1.0-rc1→HEAD, chaos-resource PASS,
+  chaos-errorpath OK, docker/chaos-shutdown SKIPPED by design, ui-probe/chaos-corruption N/A)
+  → `collect` **COLLECTED rc=0 in 2m39s** over the COMPLETED battery (DG-005 fix
+  holds; detector matched the spaced-dialect final cell; agent destroyed, verified
+  gone from `bunker list` — no destroy-refusal this run).
+- **Verdict: 🟡 PROMISING-BUT-ROUGH.** The harness's own honesty ladder improved
+  measurably: both previously-filed false-verdict classes (collect
+  false-TRUNCATED, go>=1.26 fresh-install fail) re-proven FIXED on fresh
+  evidence. Remaining roughness: the ci-act cell (DG-010), log attribution
+  (DG-011), and a latent toolchain-floor edge (DG-012).
+- **Install leg:** SKIPPED-install-bunker for the skill-standard host
+  bunker-las-03 (ssh 100.69.3.13 timeout, rc=255 — same as 10-04/10-09/10-12;
+  bunker2/bunker4 also down; bunker-mvp answered and carried the run). Named
+  substitute: the battery's own fresh-install cell on the JIT agent (go1.26.5
+  pull + full build of a go-1.26.9 repo from zero) — clean-machine install
+  proof modulo the shared host. → DG-004 updated evidence, row stays.
+- **Rows filed:** DG-010 (P1 ci-act demo-leg openssl + status contract),
+  DG-011 (P2 toolchain.log pollution of fresh-install detail), DG-012 (P2
+  hardcoded tarball vs floor) on tasks.jsonl; ev-dg005-reproof + ev-dg003-fix-verification
+  events on events.jsonl. Board tail verified: 23 rows, ids unique.
+- **Left behind in the repo:** docs/dogfood/2026-10-15-reproof-integration.md + this log.
+- **Foreman:** not woken (read-only dogfood lane; cooldown untouched).
