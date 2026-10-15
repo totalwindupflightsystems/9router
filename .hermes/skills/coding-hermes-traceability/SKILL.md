@@ -1,7 +1,7 @@
 ---
 name: coding-hermes-traceability
 description: "Use when writing/reviewing fleet work — the ch:trace link graph (row→spec→wave→test→evidence→witness→verdict→commit→memory), how to TAG each data source we use daily (boards, waves, verdicts, DuckBrain, specs, films, ledger, scheduler DB, sessions, Hilo, backups), and the one-call context surface."
-version: 2.1.1
+version: 2.1.2
 author: totalwindupflightsystems
 license: MIT
 metadata:
@@ -36,6 +36,10 @@ ch:trace row=<ID> spec=<path#anchor> wave=<manifest#step> test=<path::test> doc=
 4. `memory=` accompanies a repo-local reference, never replaces it; only resolved records are cited.
 5. `verdict=` must bind to `commit=`, reachable from the published tip (pre-merge verdicts are not evidence).
 6. The auditor is not the author. The referee is an out-of-band scan; an external reading outranks anything we wrote.
+
+## Evidence pointer syntax
+
+Use a repository-relative artifact path, a resolvable bare or `verdict:<id>` verdict, a resolvable commit SHA, or a prefixed external pointer such as `run:<id>`, `live:<locator>`, or `github:<locator>`. Bare external run labels are ambiguous and fail the gate; absent evidence must be `none:<reason>`.
 
 ## Worker dispatch and closeout (mandatory)
 

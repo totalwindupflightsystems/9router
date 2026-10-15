@@ -1,6 +1,6 @@
 ---
 name: worker-brief-authoring
-version: 1.13.1
+version: 1.13.2
 description: Use when authoring a dispatched worker's one-message brief.
 tags: [coding-hermes, foreman, dispatch, worker, brief]
 related_skills: [coding-hermes-foreman, coding-hermes-worker, coding-hermes-specs, foreman-tick-verification]
@@ -21,6 +21,8 @@ EVIDENCE: <resolvable artifact, run, verdict, or commit>
 ```
 
 Every value must be a single token; absent fields use a specific `none:<reason>`. The foreman validates the marker, writes it to the owning board row/closeout event, and only then runs GitReins Tier 2. Every GitReins task criterion must include a traceability check for row/spec/test/evidence/commit resolution; do not close on CI status alone. For repositories with a pre-eval trace gate, use the owning board-row ID as the GitReins task ID unless the gate documents another mapping; write the worker marker and closeout block into that row's `worker_summary` before `gitreins task complete`, then update the final event after the verdict. When the launch path supports it, preload `coding-hermes-worker,coding-hermes-traceability` with `-s`; regardless, the one-message brief must contain this full block so API/session dispatch paths cannot omit it.
+
+**Evidence-pointer syntax:** use a repository-relative artifact path, a resolvable bare or `verdict:<id>` verdict, a resolvable commit SHA, or a prefixed external pointer (`run:<id>`, `live:<locator>`, `github:<locator>`). Bare external run labels are not resolvable; use `none:<reason>` only when evidence is genuinely absent.
 
 **Verify every file/line citation against the live tree before dispatching.** Board-row reasoning
 and old briefs are snapshots — after any merge the cited line numbers and even section positions
