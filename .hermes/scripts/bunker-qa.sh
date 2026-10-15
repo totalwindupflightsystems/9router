@@ -1433,9 +1433,33 @@ cd ~/qa-$proj || { echo "no repo dir"; exit 1; }
 #    (user-space tarballs) BEFORE the cells, so fresh-install tests the
 #    project's own install step on a genuinely fresh system.
 mkdir -p ~/tools
-if [ -f go.mod ] && ! command -v go >/dev/null 2>&1 && [ ! -x ~/tools/go/bin/go ]; then
-  ( curl -sL -o ~/tools/go.tgz https://go.dev/dl/go1.26.5.linux-amd64.tar.gz && tar -C ~/tools -xzf ~/tools/go.tgz && rm ~/tools/go.tgz ) >\$LOGD/toolchain.log 2>&1 \
-    && cell toolchain-bootstrap OK "go 1.26.5 installed (~/tools/go)" \
+# QA-MISCHIEF-003 (2026-10-15): the old gate installed ~/tools/go ONLY when the
+# agent had NO go on PATH. An agent with a distro go BELOW the repo's go.mod
+# floor (e.g. /usr/bin/go 1.22.2 vs 'go 1.24') kept that go for every leg —
+# the upgrade cell's streamed-tree build died 'go1.24: toolchain not
+# available' and the agent has no GOTOOLCHAIN=auto net path. New gate: install
+# (or refresh) the user-space toolchain whenever ~/tools/go is missing OR its
+# version is below the go.mod floor; the unconditional PATH prepend below then
+# shadows the distro go for all cells.
+ver_ge() { # <a> <b> — rc 0 when numeric-dotted version a >= b (malformed -> not >=)
+  [ "\$1" = "\$2" ] && return 0
+  local mn
+  mn="\$(printf '%s\n%s\n' \"\$1\" \"\$2\" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)"
+  [ "\$mn" != "\$1" ]
+}
+GO_FLOOR=""
+[ -f go.mod ] && GO_FLOOR="\$(sed -n 's/^go \\([0-9][0-9.]*\\).*/\\1/p' go.mod | head -1)"
+TOOLS_GO_V=""
+[ -x ~/tools/go/bin/go ] && TOOLS_GO_V="\$( ~/tools/go/bin/go version | sed 's/.*go\\([0-9][0-9.]*\\).*/\\1/' )"
+GO_NEED_INSTALL=0
+if [ ! -x ~/tools/go/bin/go ]; then
+  GO_NEED_INSTALL=1
+elif [ -n "\$GO_FLOOR" ] && ! ver_ge "\$TOOLS_GO_V" "\$GO_FLOOR"; then
+  GO_NEED_INSTALL=1
+fi
+if [ "\$GO_NEED_INSTALL" = "1" ]; then
+  ( curl -sL -o ~/tools/go.tgz https://go.dev/dl/go1.26.5.linux-amd64.tar.gz && rm -rf ~/tools/go && tar -C ~/tools -xzf ~/tools/go.tgz && rm ~/tools/go.tgz ) >\$LOGD/toolchain.log 2>&1 \\
+    && cell toolchain-bootstrap OK "go 1.26.5 installed (~/tools/go; floor=\${GO_FLOOR:-none} distro=\${TOOLS_GO_V:-absent})" \\
     || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/toolchain.log)"
 fi
 if [ -f package.json ] && ! command -v node >/dev/null 2>&1 && [ ! -x ~/tools/node/bin/node ]; then
