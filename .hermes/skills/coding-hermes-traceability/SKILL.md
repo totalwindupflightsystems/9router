@@ -1,7 +1,7 @@
 ---
 name: coding-hermes-traceability
 description: "Use when writing/reviewing fleet work — the ch:trace link graph (row→spec→wave→test→evidence→witness→verdict→commit→memory), how to TAG each data source we use daily (boards, waves, verdicts, DuckBrain, specs, films, ledger, scheduler DB, sessions, Hilo, backups), and the one-call context surface."
-version: 2.0.0
+version: 2.1.0
 author: totalwindupflightsystems
 license: MIT
 metadata:
@@ -36,6 +36,14 @@ ch:trace row=<ID> spec=<path#anchor> wave=<manifest#step> test=<path::test> doc=
 4. `memory=` accompanies a repo-local reference, never replaces it; only resolved records are cited.
 5. `verdict=` must bind to `commit=`, reachable from the published tip (pre-merge verdicts are not evidence).
 6. The auditor is not the author. The referee is an out-of-band scan; an external reading outranks anything we wrote.
+
+## Worker dispatch and closeout (mandatory)
+
+Before dispatch, the foreman loads `worker-brief-authoring` and this skill, resolves the canonical board row and its spec/use-case anchor, then places those exact references in the worker's one-message brief. Preload `coding-hermes-worker,coding-hermes-traceability` where the session path supports skill flags; the brief must still carry the full contract because workers do not inherit the foreman's skills, board, or memory.
+
+Require the worker's final report to include a single-line `ch:trace` marker with all eleven fields (`row`, `spec`, `wave`, `test`, `doc`, `prompt`, `evidence`, `witness`, `verdict`, `commit`, `memory`) and a `STATUS` / `TIER` / `EVIDENCE` closeout block. Values are single tokens; every absent value is an explicit `none:<reason>`, never a blank or bare `none`. Keep stable QA/dogfood `UC-...` and `REG-...` IDs in the spec/test/history pointers; a fixed regression stays in future coverage with its failure, fix commit, and permanent test recorded.
+
+Before `gitreins task complete`, the foreman validates the worker marker against the owning row, spec, test/manual procedure, evidence, and landed commit; writes it and the `STATUS` / `TIER` / `EVIDENCE` block into the row's `worker_summary`; and adds a Tier 2 criterion that checks the trace links. Where a pre-eval gate binds task IDs, use the owning board-row ID as the GitReins task ID or record an explicit mapping. After the judge, update the final row/closeout event with the verdict bound to that commit. A missing or unresolved marker blocks row closure; CI status alone is not traceability evidence.
 
 ## HOW TO TAG EACH SOURCE (the piece that matters day to day)
 
