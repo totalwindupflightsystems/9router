@@ -1,0 +1,44 @@
+{
+  "tick_id": "monitoring-foreman-2026-10-16-03-02-08",
+  "project": "monitoring",
+  "tasks": [
+    {
+      "id": "GITREINS-JUDGE-001",
+      "worktree": "/home/kara/worktrees/monitoring-GITREINS-JUDGE-001",
+      "branch": "wt/GITREINS-JUDGE-001",
+      "base_sha": "bf9a70752",
+      "title": "GitReins judge config for monitoring lane",
+      "priority": "P2"
+    },
+    {
+      "id": "MON-REVIEW-004",
+      "worktree": "/home/kara/worktrees/monitoring-MON-REVIEW-004",
+      "branch": "wt/MON-REVIEW-004",
+      "base_sha": "bf9a70752",
+      "title": "Fresh-clone docker compose boot traps",
+      "priority": "P2"
+    },
+    {
+      "id": "MON-GAP-013",
+      "worktree": "/home/kara/worktrees/monitoring-MON-GAP-013",
+      "branch": "wt/MON-GAP-013",
+      "base_sha": "bf9a70752",
+      "title": "Service exporters: PostgreSQL, Redis, Traefik",
+      "priority": "P2"
+    }
+  ],
+  "dispatched_at": "2026-10-16T03:02:08-05:00",
+  "wave_budget": 3,
+  "finished_at": "2026-10-16T06:47:57+0000",
+  "recovery": {
+    "merged": [
+      "wt/GITREINS-JUDGE-001"
+    ],
+    "noop": [
+      "wt/MON-REVIEW-004 (zero commits)"
+    ],
+    "superseded": [
+      "wt/MON-GAP-013 (content already on main; stale base, not merged)"
+    ]
+  }
+}
