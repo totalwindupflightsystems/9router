@@ -77,6 +77,21 @@ echo "== YAML parse =="
 if python3 -c "import yaml" 2>/dev/null; then
 python3 - <<'PY' || fail=1
 import glob, sys, yaml
+
+# The compose-spec uses "!override" as a YAML tag to express list replacement semantics
+# (e.g., volumes: !override []). safe_load_all rejects unknown tags, but we need to
+# accept !override for rootless override files (stack/docker-compose.override.yml).
+# Create a Loader that accepts !override while keeping everything else safe.
+class ComposeLoader(yaml.SafeLoader):
+    pass
+
+def override_constructor(loader, suffix, node):
+    # Accept compose-spec "!override" tag — the real merge semantics
+    # are handled by docker compose, not by our linter.
+    return None
+
+ComposeLoader.add_multi_constructor("!override", override_constructor)
+
 bad = []
 for path in sorted(glob.glob("alerts/**/*.yml", recursive=True) +
                    glob.glob("stack/**/*.yml", recursive=True) +
@@ -84,7 +99,7 @@ for path in sorted(glob.glob("alerts/**/*.yml", recursive=True) +
                    glob.glob("cloud-init/*.yaml", recursive=True)):
     try:
         with open(path) as fh:
-            list(yaml.safe_load_all(fh))
+            list(yaml.load_all(fh, Loader=ComposeLoader))
     except Exception as exc:
         bad.append("%s: %s" % (path, exc))
 if bad:
