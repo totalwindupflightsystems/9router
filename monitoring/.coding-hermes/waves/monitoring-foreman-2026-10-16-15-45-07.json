@@ -1,0 +1,26 @@
+{
+  "tick_id": "monitoring-foreman-2026-10-16-15-45-07",
+  "project": "monitoring",
+  "wave_budget": 1,
+  "serial_mode": true,
+  "tasks": [
+    {
+      "id": "MON-GAP-026",
+      "title": "Restore durability scripts (backup-to-s3, restore-check, restore-from-s3) from production host into repo",
+      "priority": "P2",
+      "origin": "MON-REVIEW-004 probe",
+      "worktree": "/home/kara/worktrees/monitoring-MON-GAP-026",
+      "branch": "wt/MON-GAP-026",
+      "model": "glm-5.3-flash",
+      "provider": null
+    }
+  ],
+  "dispatched_at": "2026-10-16T15:53:00-05:00",
+  "recovery": {
+    "merged": [
+      "wt/MON-GAP-026 as e18825384"
+    ],
+    "noop": [],
+    "superseded": []
+  }
+}
