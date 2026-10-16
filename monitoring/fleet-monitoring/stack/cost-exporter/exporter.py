@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Expose daily Hermes usage aggregates from the read-only state.db."""
+"""Expose daily Hermes usage aggregates from the read-only state.db.
+
+Metric names are daily gauges keyed by (day, lane, provider). For query-convention
+compatibility, hermes_session_tokens_in_total / hermes_session_tokens_out_total are
+emitted as aliases of the token gauges (Prometheus reserves the _total suffix for
+counters; these are deliberately NOT counters — each series is that UTC day's total).
+"""
 import os
 import re
 import sqlite3
@@ -64,13 +70,25 @@ def scrape_text(db_path=DB_PATH):
         "hermes_session_cache_hit_ratio": "Cache-read / (input + cache-read) token ratio.",
         "hermes_session_cost_per_api_call_usd": "Estimated USD per API call work unit.",
     }
+    # Additive aliases: same (day, lane, provider) labels and values as the token
+    # gauges. _total keeps query-convention naming working; the export remains
+    # gauges (daily totals), not counters.
+    aliases = {
+        "hermes_session_tokens_in_total": "hermes_session_tokens_in",
+        "hermes_session_tokens_out_total": "hermes_session_tokens_out",
+    }
     out = [line for name, help_ in defs.items() for line in (f"# HELP {name} {help_}", f"# TYPE {name} gauge")]
+    for name, base in aliases.items():
+        out.append(f"# HELP {name} Alias of {base} (daily gauge; see {base}).")
+        out.append(f"# TYPE {name} gauge")
     for (day, lane, provider), (tin, tout, cache, cost, calls, writes) in sorted(data.items()):
         labels = f'day="{day}",lane="{_label(lane)}",provider="{_label(provider)}"'
         vals = (tin, tout, cache, cost, calls, writes,
                 cache / (tin + cache) if tin + cache else 0, cost / calls if calls else 0)
         for name, value in zip(defs, vals):
             out.append(f"{name}{{{labels}}} {value:.12g}")
+        out.append(f"hermes_session_tokens_in_total{{{labels}}} {tin:.12g}")
+        out.append(f"hermes_session_tokens_out_total{{{labels}}} {tout:.12g}")
     return "\n".join(out) + "\n"
 
 

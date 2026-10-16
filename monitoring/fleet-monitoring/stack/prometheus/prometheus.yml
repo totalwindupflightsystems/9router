@@ -1,11 +1,100 @@
+# fleet-monitoring — Prometheus
+#
+# The fleet PUSHES to this instance (remote_write) rather than being scraped, because the
+# monitoring host has no inbound service ports: agents reach it over the tailnet, and the
+# public interface only carries WireGuard. Local scrape jobs cover the stack's own services.
+
 global:
-  scrape_interval: 60s
-  evaluation_interval: 60s
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    monitor: fleet-monitoring
+
+rule_files:
+  # Prometheus does NOT support `**` recursive globs — a nested path here is rejected at boot
+  # ("invalid rule file path"). Rules live flat under alerts/rules/ and are mounted as such.
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
-      - targets: ["prometheus:9090"]
+      - targets: ["localhost:9090"]
+        labels: { host: monitoring, role: monitor }
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+        labels: { host: monitoring, role: logs }
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels: { host: monitoring, role: alerts }
+
+  - job_name: alert-router
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["alert-router:8089"]
+        labels: { host: monitoring, role: alert-router }
+
+# Agents everywhere else arrive by remote_write (--web.enable-remote-write-receiver, set in
+# docker-compose.yml). Pushed series need no scrape job here, and Prometheus rejects unknown
+# top-level keys — so there is deliberately nothing to declare for them in this file.
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+        labels: { host: monitoring, role: containers }
+
+  - job_name: blackbox-probes
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    file_sd_configs:
+      - files: [/etc/prometheus/probe-targets.json]
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [probe_module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # MON-GAP-012 / MON-DOGFOOD-039 (re-enabled 2026-10-16): hermes-cost-exporter runs on the
+  # work box as a systemd --user service (hermes-cost-exporter.service, wrapper2, 14-day
+  # window), bound to that host's tailscale IP only. Reads state.db read-only at the
+  # source — the monitoring host cannot mount that db.
   - job_name: hermes-cost
     metrics_path: /metrics
     static_configs:
-      - targets: ["cost-exporter:9108"]
+      - targets: ["100.97.236.14:19109"]
+        labels: { host: karahermes-mde-7840hs, role: cost }
+
+# --- MON-GAP-013 (2026-10-10): service-level exporters for the master001 coolify stack.
+# Push architecture note: the fleet pushes via remote_write; these two services have no
+# in-network agent, so they are scraped directly across the tailnet. The exporters on
+# master001 bind ONLY to its tailscale IP (100.99.183.108) — never 0.0.0.0 — so nothing
+# is exposed on the public interface. traefik is deliberately absent: enabling its
+#   /metrics endpoint is enabled on master001's tailnet-only metrics listener (:8082).
+  - job_name: services-postgres
+    static_configs:
+      - targets: ["100.99.183.108:9187"]
+        labels: { host: master001, role: services }
+  - job_name: services-redis
+    static_configs:
+      - targets: ["100.99.183.108:9121"]
+        labels: { host: master001, role: services }
+
+  - job_name: services-traefik
+    static_configs:
+      - targets: ["100.99.183.108:8082"]
+        labels: { host: master001, role: services }
