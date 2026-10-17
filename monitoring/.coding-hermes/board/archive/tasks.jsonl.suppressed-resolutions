@@ -1,0 +1,1 @@
+{"id":"MON-MONITORING-NOFP-20261017-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"OOMKillsLowPressure","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-17 03:06:49","endsAt":null,"note":"pre-resolved (benign): CI-memcg: cgroup-scoped kills with >=15% MemAvailable - no pending row written"}

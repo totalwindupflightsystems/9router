@@ -401,25 +401,13 @@ def _is_benign_alert(alert):
     host = (alert.get("labels") or {}).get("host", "")
     
     for pattern_str, entries in BENIGN_ALERTS.items():
-        import re as _re
-        if not _re.match(pattern_str, alertname):
+        if not re.match(pattern_str, alertname):
             continue
         for host_re, reason in entries:
-            if _re.match(host_re, host):
+            if re.match(host_re, host):
                 return True, reason
     return False, ""
 
-
-
-    # MON-GAP-025: pre-resolve benign alerts before any state check
-    is_benign, benign_reason = _is_benign_alert(alert)
-    if is_benign:
-        event = build_resolution(alert, lane, when)
-        event["note"] = f"pre-resolved (benign): {benign_reason} - no pending row written"
-        bump("resolved_suppressed_total")
-        log(f"pre-resolved (benign): {event['id']} - {benign_reason}")
-        emit_resolution(event, directory)
-        return
 
 def handle_alert(alert, when):
     labels = alert.get("labels") or {}
@@ -428,8 +416,20 @@ def handle_alert(alert, when):
         bump("rejected_total")
         log("rejecting alert with unusable lane label: %r" % lane)
         return
-    status = (alert.get("status") or "firing").lower()
     directory = lane_dir(lane)
+
+    # MON-GAP-025: pre-resolve benign alerts before any state check or row write
+    is_benign, benign_reason = _is_benign_alert(alert)
+    if is_benign:
+        event = build_resolution(alert, lane, when)
+        event["note"] = "pre-resolved (benign): %s - no pending row written" % benign_reason
+        bump("resolved_suppressed_total")
+        log("pre-resolved (benign): %s - %s" % (event['id'], benign_reason))
+        # no emit_resolution: a resolution with no pending row is board noise;
+        # full suppression writes nothing (MON-GAP-025 live proof 2026-10-17)
+        return
+
+    status = (alert.get("status") or "firing").lower()
 
     if status == "resolved":
         # Guard against "absence looks like recovery" false resolutions: only

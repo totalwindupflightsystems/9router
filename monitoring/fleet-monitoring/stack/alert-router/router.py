@@ -68,6 +68,11 @@ STATE_CHECK_BACKOFF = 30.0
 BOARD_DIR = ".coding-hermes/board"
 LANE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 SEVERITY_PRIORITY = {"critical": 0, "warning": 1, "info": 2}
+BENIGN_ALERTS = {
+    "OOMKillsLowPressure": [
+        (re.compile(r".*"), "CI-memcg: cgroup-scoped kills with >=15% MemAvailable"),
+    ],
+}
 
 _lock = threading.Lock()
 _prom_up_cache = {"ok": False, "ts": 0.0}
@@ -218,6 +223,17 @@ def spool_row(row):
 
 # ------------------------------------------------------------------- prometheus live state
 
+# Labels Alertmanager injects from its own config (external_labels / identity),
+# which NEVER exist on Prometheus's local ALERTS series. Matching on any of them
+# makes the state-check query match nothing -> every firing alert reads as
+# "not firing" and gets pre-resolved instead of landing on its board (seen live
+# 2026-10-07: 47 pre-resolutions in 48h, 0 spooled rows, while TargetUnreachable
+# on standby-cx53-01-2147 was firing the whole time).
+AM_EXTERNAL_LABELS = frozenset({
+    "monitor",
+})
+
+
 def prom_label_matchers(labels):
     """PromQL selector for an alert's labels, minus `alertstate`.
 
@@ -230,7 +246,7 @@ def prom_label_matchers(labels):
     parts = []
     for key in sorted(labels or {}):
         value = labels[key]
-        if key == "alertstate" or value is None or value == "":
+        if key == "alertstate" or key in AM_EXTERNAL_LABELS or value is None or value == "":
             continue
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key):
             continue
@@ -376,6 +392,23 @@ def emit_resolution(event, directory):
         log("resolved spool failed: %s" % exc)
 
 
+def _is_benign_alert(alert):
+    """Return (True, reason) if this alert is known-benign and should be pre-resolved.
+
+    Matches on alertname regex + host regex. Returns (False, "") for all other alerts.
+    """
+    alertname = (alert.get("labels") or {}).get("alertname", "")
+    host = (alert.get("labels") or {}).get("host", "")
+    
+    for pattern_str, entries in BENIGN_ALERTS.items():
+        if not re.match(pattern_str, alertname):
+            continue
+        for host_re, reason in entries:
+            if re.match(host_re, host):
+                return True, reason
+    return False, ""
+
+
 def handle_alert(alert, when):
     labels = alert.get("labels") or {}
     lane = (labels.get("lane") or "monitoring").strip().lower()
@@ -383,8 +416,20 @@ def handle_alert(alert, when):
         bump("rejected_total")
         log("rejecting alert with unusable lane label: %r" % lane)
         return
-    status = (alert.get("status") or "firing").lower()
     directory = lane_dir(lane)
+
+    # MON-GAP-025: pre-resolve benign alerts before any state check or row write
+    is_benign, benign_reason = _is_benign_alert(alert)
+    if is_benign:
+        event = build_resolution(alert, lane, when)
+        event["note"] = "pre-resolved (benign): %s - no pending row written" % benign_reason
+        bump("resolved_suppressed_total")
+        log("pre-resolved (benign): %s - %s" % (event['id'], benign_reason))
+        # no emit_resolution: a resolution with no pending row is board noise;
+        # full suppression writes nothing (MON-GAP-025 live proof 2026-10-17)
+        return
+
+    status = (alert.get("status") or "firing").lower()
 
     if status == "resolved":
         # Guard against "absence looks like recovery" false resolutions: only
