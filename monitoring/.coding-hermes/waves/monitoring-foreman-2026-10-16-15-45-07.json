@@ -22,5 +22,8 @@
     ],
     "noop": [],
     "superseded": []
-  }
+  },
+  "finished_at": "2026-10-17T03:30:00Z",
+  "finished_by": "monitoring-foreman-2026-10-17-02-53-05",
+  "finish_note": "Manifest already showed wt/MON-GAP-026 merged (e18825384) with no unmerged branches or live worktrees; this recovery tick re-verified merge-base ancestry vs current main HEAD (STALE-BASE RULE clean), deleted the residual wt/MON-GAP-026 branch, and closed the manifest. No mid-flight fixups needed."
 }
