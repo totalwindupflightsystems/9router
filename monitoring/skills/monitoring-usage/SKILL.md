@@ -27,8 +27,9 @@ BOARD_ROOT, else spools for the drain. One row per problem per day (fingerprint+
 
 ## Run commands (on the host, /root/fleet-monitoring)
 
-- `make up` / `make ps` / `make logs` — start/status/tail (NOTE: `make config` lint
-  currently fails on RENDERER_TOKEN — see MON-DOGFOOD-003; compose itself is fine).
+- `make up` / `make ps` / `make logs` — start/status/tail. NOTE: `make config` can
+  report FAIL on `alloy fmt` (not gofmt-clean config.alloy); fix with `alloy fmt`
+  then retry. RENDERER_TOKEN lint (MON-DOGFOOD-003) is fixed — compose is fine.
 - `make verify` — asserts data is arriving (metrics, logs, datasources).
 - `make check-env` — refuses placeholder .env; run it before anything.
 - `make backup` / `make restore-check` — S3 snapshot + readability assertion.
@@ -40,8 +41,8 @@ BOARD_ROOT, else spools for the drain. One row per problem per day (fingerprint+
   "spool empty". The token file `stack/alertmanager/router-token` must stay readable by
   the alertmanager container's uid (65534/nobody) — a 0600 root-owned fix is exactly
   what silently killed all deliveries once.
-- **`lane=hermes-fleet-ops` on all fleet-health rules has no matching lane** — rows will
-  spool forever until the lane exists or labels are repointed (MON-DOGFOOD-002).
+- **All fleet-health rules label `lane: monitoring`** (MON-DOGFOOD-002 fixed — all 20 rules
+  carry `lane: monitoring`, not `hermes-fleet-ops`).
 - Verify alert text against Prometheus (`/api/v1/query` with the rule's expr) before
   triaging; the alert alone is not evidence.
 - Rootless docker on bunker agents: the bunkerd socket
