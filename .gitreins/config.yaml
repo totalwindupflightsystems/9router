@@ -1,0 +1,10 @@
+# GitReins evaluator config for monitoring lane
+# Ambient GITREINS_LLM_MODEL provides the model; this section configures the guard/judge.
+
+guard:
+  tier1:
+    enabled: true
+
+evaluator:
+  tier2:
+    enabled: true
