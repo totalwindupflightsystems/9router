@@ -1347,12 +1347,37 @@ pytest_zero_collected() { # <logfile> -> 0 when the log proves zero tests ran
   printf '%s' "\$line" | grep -oE '[0-9]+ (passed|failed|error)' >/dev/null 2>&1 && return 1
   return 0
 }
+# go_zero_tests — zero-test vacuity for GO test logs (QA-ASCE-8, 2026-10-18).
+# Non-verbose `go test ./...` emits one result line per package: `ok` + run of
+# spaces/tabs + pkg + duration (tests ran), `FAIL` (tests or build failed),
+# and `?` + spaces + pkg + [no test files] (nothing to run there). A repo-wide
+# run executed at least one test iff an ok/FAIL result line exists; a log with
+# only `?` lines ran zero tests repo-wide.
+go_zero_tests() { # <logfile> -> 0 when a go-test log proves zero tests ran
+  local f="\$1"
+  [ -f "\$f" ] || return 1
+  grep -qE '^(ok[[:space:]]|FAIL|--- FAIL)' "\$f" && return 1
+  return 0
+}
 # native_zero_tests — harness-shaped zero-test vacuity across runners. A pytest
 # whose summary shows no collected tests is graded FAIL on ci-pass (a suite
 # that runs nothing must never grade OK/PASS) and UNVERIFIED on chaos-resource
 # (the cap was never exercised by any test).
+# QA-ASCE-8 (2026-10-18): go-test logs classify FIRST. pytest_zero_collected
+# greps the last line matching (passed|failed|error|no tests ran) and demands
+# an N-count; the go line `ok    <module>/internal/errors  0.108s` matches via
+# the substring 'error' in the PACKAGE PATH and carries no count, so every Go
+# module with 'error' in any package path graded false 'ZERO tests ran'
+# (asce ci-pass FAIL two cycles running; QA-ASCE-7 born false 2026-10-17,
+# retired premise-false 2026-10-18).
 native_zero_tests() { # <logfile> -> 0 when the native leg provably ran zero tests
-  pytest_zero_collected "\$1"
+  local f="\$1"
+  [ -f "\$f" ] || return 1
+  if grep -qE '^(ok[[:space:]]|FAIL|^\?[[:space:]]{2,})' "\$f"; then
+    go_zero_tests "\$f"
+  else
+    pytest_zero_collected "\$f"
+  fi
 }
 # corr_grade — pure chaos-corruption decision. The caller owns truncation,
 # restart, and restoration; this function only grades the observed evidence.
