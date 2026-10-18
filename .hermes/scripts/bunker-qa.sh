@@ -1348,11 +1348,11 @@ pytest_zero_collected() { # <logfile> -> 0 when the log proves zero tests ran
   return 0
 }
 # go_zero_tests — zero-test vacuity for GO test logs (QA-ASCE-8, 2026-10-18).
-# Non-verbose `go test ./...` emits one result line per package: `ok` + run of
-# spaces/tabs + pkg + duration (tests ran), `FAIL` (tests or build failed),
-# and `?` + spaces + pkg + [no test files] (nothing to run there). A repo-wide
-# run executed at least one test iff an ok/FAIL result line exists; a log with
-# only `?` lines ran zero tests repo-wide.
+# Non-verbose go test ./... emits one result line per package: an ok line
+# (pkg + duration = tests ran), a FAIL line (tests or build failed), and a
+# question-mark line (pkg + [no test files] = nothing to run there). A
+# repo-wide run executed at least one test iff an ok/FAIL result line exists;
+# a log with only question-mark lines ran zero tests repo-wide.
 go_zero_tests() { # <logfile> -> 0 when a go-test log proves zero tests ran
   local f="\$1"
   [ -f "\$f" ] || return 1
@@ -1365,7 +1365,7 @@ go_zero_tests() { # <logfile> -> 0 when a go-test log proves zero tests ran
 # (the cap was never exercised by any test).
 # QA-ASCE-8 (2026-10-18): go-test logs classify FIRST. pytest_zero_collected
 # greps the last line matching (passed|failed|error|no tests ran) and demands
-# an N-count; the go line `ok    <module>/internal/errors  0.108s` matches via
+# an N-count; the go line 'ok    <module>/internal/errors  0.108s' matches via
 # the substring 'error' in the PACKAGE PATH and carries no count, so every Go
 # module with 'error' in any package path graded false 'ZERO tests ran'
 # (asce ci-pass FAIL two cycles running; QA-ASCE-7 born false 2026-10-17,
