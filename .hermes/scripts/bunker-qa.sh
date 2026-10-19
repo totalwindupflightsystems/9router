@@ -2385,8 +2385,27 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
       *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
     esac
   fi
-elif [ -f go.mod ] && grep -qE 'http\.ListenAndServe|http\.Server|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|gorilla/mux' *.go 2>/dev/null; then
-  UI_PORTS=${BUNKER_QA_UI_PORTS:-3000 5173 8000 8080 8081 8766 8767 9000}
+elif [ -f go.mod ] && grep -qRE 'http\.ListenAndServe|http\.Server|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|gorilla/mux|net/http|\.Serve(' . --include='*.go' 2>/dev/null; then
+  # QA-BUNKER-B21 (2026-10-19): broadened Go HTTP detection + port discovery.
+  # coding-hermes-scheduler serves an htmx dashboard on :9090 (documented in
+  # docs/reference/flags.md --listen 127.0.0.1:9090) but the old arm missed it:
+  # (a) grep only scanned *.go at repo root (scheduler HTTP is in cmd/schedulerd/),
+  # (b) :9090 was not in the default port list, (c) no doc-parsing for listen ports.
+  # Fix: recursive grep with --include, parse README/flags docs for --listen/--port,
+  # add 9090 to defaults, support BUNKER_QA_UI_PORTS override. N/A only when no
+  # listen flag exists at all.
+  UI_PORTS="${BUNKER_QA_UI_PORTS:-}"
+  if [ -z "$UI_PORTS" ]; then
+    UI_PORTS="3000 5173 8000 8080 8081 8766 8767 9000 9090"
+    for doc in README.md docs/reference/flags.md docs/flags.md docs/reference/cli.md; do
+      if [ -f "$doc" ]; then
+        for p in $(grep -oE '(--listen|--port|--addr|listen|port)[= :]+[^,;"]*' "$doc" 2>/dev/null | grep -oE '[0-9]{4,5}' | sort -u); do
+          UI_PORTS="$UI_PORTS $p"
+        done
+      fi
+    done
+    UI_PORTS=$(echo "$UI_PORTS" | tr ' ' '\n' | sort -un | tr '\n' ' ')
+  fi
   UI_BINS="${BIN:-go run .}"
   case "${BIN:-}" in
     "go run ./cmd/"*)
