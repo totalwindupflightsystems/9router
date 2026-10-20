@@ -1224,7 +1224,7 @@ build_incomplete() { # <logfile> — 0 when the log shows the build never comple
 # stamps the symbols the binary reads" shells to \`make -n build\`, the JIT
 # agent's PATH has no make, and the suite dies with
 #   --- FAIL: TestServerVersionCLIFlags ...
-#   main_test.go:1358: make -n build: exec: "make": executable file not found in $PATH
+#   main_test.go:1358: make -n build: exec: "make": executable file not found in \$PATH
 # while hosted CI is GREEN at that exact HEAD and the same test PASSES on any
 # host with make. A tool-less host says NOTHING about the code, so the two
 # chaos cells must not grade this shape and ci-pass must NAME what failed.)
@@ -1586,7 +1586,7 @@ fi
         ld)
           # QA-H3-14 v3 (2026-09-21, battery 23ae94ab): bare agents lack binutils
           # entirely and GNU make's ./configure aborts with "no acceptable ld
-          # found in $PATH" — ld is NOT a zig subcommand, so it cannot ride the
+          # found in \$PATH" — ld is NOT a zig subcommand, so it cannot ride the
           # plain-forward *) branch. zig serves lld as \`zig ld.lld\`. Live-proven
           # on the kept battery agent: with this wrapper configure passes,
           # build.sh produces GNU Make 4.4.1, and a toy target runs (TOY_OK).
@@ -1606,11 +1606,11 @@ fi
     cell toolchain-bootstrap INFO "no C toolchain on agent (no sudo) and zig install failed - C-toolchain-dependent cells (make bootstrap, rust build scripts) grade ENV-BLOCKED (\$(tail -2 \$LOGD/zig.log))"
   fi
 # QA-H3-14 v2 (2026-09-21, tick h3-2026-09-21-11-07-15): battery 8ff078b2 re-run FALSIFIED v1 — the make
-# bootstrap ran BEFORE the zig C-toolchain leg and defaulted CC=${CC:-cc}; on an agent with NEITHER make NOR cc
+# bootstrap ran BEFORE the zig C-toolchain leg and defaulted CC=\${CC:-cc}; on an agent with NEITHER make NOR cc
 # configure died instantly and make.log stayed EMPTY (silent). v2: the zig leg moves ABOVE the make bootstrap
 # and becomes UNCONDITIONAL (a user-space C toolchain serves make configure AND rust build scripts; re-verified
 # locally with cc masked: zig 0.15.2 bootstraps, make 4.4.1 builds a toy target). The make subshell drops its
-# CC=${CC:-cc} default — CC arrives from the zig export or the cell grades ENV-BLOCKED with the real cause.
+# CC=\${CC:-cc} default — CC arrives from the zig export or the cell grades ENV-BLOCKED with the real cause.
 # v3 (same tick, battery 23ae94ab kept-agent autopsy): configure failed on bare agents with "no acceptable ld
 # found in \$PATH" (no binutils) — the zig loop now also emits an ld wrapper (zig ld.lld), and configure/build.sh
 # output is captured into make.log (the inner >/dev/null redirects made every failure an EMPTY, undiagnosable log).
@@ -2394,20 +2394,20 @@ elif [ -f go.mod ] && grep -qRE 'http\.ListenAndServe|http\.Server|chi\.NewRoute
   # Fix: recursive grep with --include, parse README/flags docs for --listen/--port,
   # add 9090 to defaults, support BUNKER_QA_UI_PORTS override. N/A only when no
   # listen flag exists at all.
-  UI_PORTS="${BUNKER_QA_UI_PORTS:-}"
-  if [ -z "$UI_PORTS" ]; then
+  UI_PORTS="\${BUNKER_QA_UI_PORTS:-}"
+  if [ -z "\$UI_PORTS" ]; then
     UI_PORTS="3000 5173 8000 8080 8081 8766 8767 9000 9090"
     for doc in README.md docs/reference/flags.md docs/flags.md docs/reference/cli.md; do
-      if [ -f "$doc" ]; then
-        for p in $(grep -oE '(--listen|--port|--addr|listen|port)[= :]+[^,;"]*' "$doc" 2>/dev/null | grep -oE '[0-9]{4,5}' | sort -u); do
-          UI_PORTS="$UI_PORTS $p"
+      if [ -f "\$doc" ]; then
+        for p in \$(grep -oE '(--listen|--port|--addr|listen|port)[= :]+[^,;"]*' "\$doc" 2>/dev/null | grep -oE '[0-9]{4,5}' | sort -u); do
+          UI_PORTS="\$UI_PORTS \$p"
         done
       fi
     done
-    UI_PORTS=$(echo "$UI_PORTS" | tr ' ' '\n' | sort -un | tr '\n' ' ')
+    UI_PORTS=\$(echo "\$UI_PORTS" | tr ' ' '\n' | sort -un | tr '\n' ' ')
   fi
-  UI_BINS="${BIN:-go run .}"
-  case "${BIN:-}" in
+  UI_BINS="\${BIN:-go run .}"
+  case "\${BIN:-}" in
     "go run ./cmd/"*)
       # start-cmd fallback queue: when the detected cmd/ binary is not the HTTP
       # server (see comment above), the remaining cmd/ main packages get one
@@ -2756,6 +2756,83 @@ echo CELLS-DONE
 touch ~/qa-run.finished
 EOF
   )
+}
+
+# ─── fence_check — static guard for the render fence (QA-RENDER-FENCE) ───
+# The unquoted heredoc above is expanded by the CONTROLLER at render time, so an
+# UNESCAPED `$...` on a remote-side line is never a runtime variable there: it is
+# either an unbound-variable abort (`set -u` kills the whole cat → a 0-byte
+# battery shipped fleet-wide; GUARD-DF-009: `$UI_PORTS`, line 1061) or a silent
+# rewrite of the script that ships (`${BIN:-}` collapsed the remote's
+# start-command case; `$PATH` re-rendered a diagnostic comment). Nothing gated
+# that class and it regressed once — QA-BUNKER-B21 shipped the ui-probe port
+# list unescaped. This scan walks the heredoc body and FAILS on any unescaped
+# `$`/backtick whose token is not in the render's intended-substitution contract.
+# Run it after ANY edit inside the heredoc body: bunker-qa.sh __fence-check
+fence_check() {
+  local self="${BASH_SOURCE[0]}"
+  # Intended controller-side substitutions (the render's own inputs). Everything
+  # else in the body must carry a backslash so the remote script sees a variable.
+  local -a fence_allow=(
+    proj agent install_cmd install_cmd_q ci_cmd native_cmd
+    QA_HEAD_SHA QA_HEAD_PULL QA_HEAD_TS ACT_URL MAKE_URL
+    qa_docker_lifecycle_enabled qa_docker_lifecycle_host_block
+    DETECT_INSTALL DETECT_CI DETECT_NATIVE DETECT_BIN DETECT_TAG_COUNT
+    DETECT_PREV_TAG DETECT_PREV_VERSION DETECT_PKG_NAME DETECT_PKG_ECOSYSTEM
+    DETECT_GO_URL DETECT_CI_FILES DETECT_ACT_NOTE DETECT_UP_PREV_DIR
+    DETECT_PYTEST_REPO
+  )
+  awk -v allow="${fence_allow[*]}" '
+    BEGIN {
+      n = split(allow, a, " ")
+      for (i = 1; i <= n; i++) ALLOW[a[i]] = 1
+      started = 0; bad = 0; nsub = 0; nbody = 0; found = 0
+    }
+    !started {
+      if (index($0, "cat <<EOF") > 0) { started = 1; found = 1 }
+      next
+    }
+    $0 == "EOF" { started = 0; exit }
+    {
+      nbody++
+      line = $0
+      i = 1
+      L = length(line)
+      while (i <= L) {
+        c = substr(line, i, 1)
+        if (c == "\\" && i < L) { i += 2; continue }
+        if (c == "`") {
+          printf "FENCE-VIOLATION line %d: unescaped backtick runs on the controller at render time: %s\n", NR, line
+          bad++; i++; continue
+        }
+        if (c == "$") {
+          rest = substr(line, i + 1)
+          name = ""
+          if (match(rest, /^[A-Za-z_][A-Za-z0-9_]*/)) name = substr(rest, 1, RLENGTH)
+          else if (substr(rest, 1, 1) == "{") {
+            r2 = substr(rest, 2)
+            if (match(r2, /^[A-Za-z_][A-Za-z0-9_]*/)) name = substr(r2, 1, RLENGTH)
+          }
+          if (name != "") {
+            if (name in ALLOW) nsub++
+            else {
+              printf "FENCE-VIOLATION line %d: unescaped $%s expands on the controller at render time: %s\n", NR, name, line
+              bad++
+            }
+          } else if (substr(rest, 1, 1) == "(") {
+            printf "FENCE-VIOLATION line %d: unescaped $( ) executes on the controller at render time: %s\n", NR, line
+            bad++
+          }
+        }
+        i++
+      }
+    }
+    END {
+      if (!found) { print "FENCE-CHECK ERROR: heredoc opener (cat <<EOF) not found — cannot scan"; exit 3 }
+      printf "FENCE-CHECK body_lines=%d intended_substitutions=%d violations=%d\n", nbody, nsub, bad
+      exit (bad ? 1 : 0)
+    }
+  ' "$self"
 }
 
 run() {
@@ -3369,5 +3446,10 @@ case "${1:-}" in
   # QA-9ROUTER-19/20: render with the REAL detection for $2, so a test can
   # assert what a battery run would actually ship (see the hook's comment).
   __gen-remote-detected) agent="${agent:-test-agent-0000}"; detect_cmds "$2" "${3:-test-agent-0000}"; build_remote_script "$2" "$DETECT_INSTALL" "$DETECT_CI" "$DETECT_NATIVE" ;;
+  # GUARD-DF-009: static guard for the render fence. Fails (rc=1) on any
+  # unescaped $.../backtick in the heredoc body whose token is not an intended
+  # controller-side substitution — the class that aborted the render to a
+  # 0-byte battery (QA-BUNKER-B21 regression). Run after ANY heredoc edit.
+  __fence-check) fence_check ;;
   *) echo "usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>" ;;
 esac
