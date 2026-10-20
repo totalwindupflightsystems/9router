@@ -67,3 +67,29 @@ alone; cross-check ci-pass against fresh-install before believing either.
 Treat TEARDOWN-LEAK and destroy-refused agents as capacity incidents (8-slot
 cap; two stale agents currently sit on bunker-mvp). Copy evidence jsonls
 somewhere durable if the finding matters — /tmp does not survive.
+
+## What the 2026-10-20 run added to this trail
+
+- **ci-pass's OK text is act-only evidence on the act-green path (DG-015).** When the
+  workflow is triggerable and act exits 0, the cell is graded from act alone
+  (`bunker-qa.sh:2040-2041`) and the native suite — which lives in the act-RED branch at
+  `:2053` — never runs: today's harvest holds 14 per-cell logs and no `native.log`. The
+  job count in that text is computed with a dead alternation (`'Job succeeded|✅ Success'`;
+  act prints TWO spaces after the glyph, so the second branch has never matched). Read the
+  act log itself when you need test evidence on an act-green battery.
+- **The CLI has no first-touch help path (DG-016).** `launch --help` is treated as a repo
+  path: the repo sanity check refuses it (correctly, pre-spawn) and the refusal's `.meta`
+  records `project=` = basename(1)'s multi-line help text, because `PROJ=$(basename "$repo")`
+  (`:3041`) consumes the flag. The Usage block exists in the file but is not reachable by
+  asking the tool for it.
+- **The render path no longer aborts, and it is cheap.** `__gen-remote` renders 123018 B
+  in 0.03s, byte-identical on an immediate second render; a real launch shipped
+  `script_bytes=123353` and produced a complete 19-row battery. So the P0
+  0-byte-render premise (QA-HARNESS-RENDER-001) does not reproduce at this tree —
+  `69b621250` (GUARD-DF-009) is an ancestor of HEAD. Keep rendering as a cheap pre-flight
+  probe: it costs 0.03s and catches the whole class before a slot is spent.
+- **The floor-aware bootstrap works — but only in the working tree.** The run's
+  toolchain-bootstrap row (`go 1.27.3 installed … floor=1.26.9`) came from an uncommitted
+  sibling patch; HEAD still hardcodes the tarball. Verify provenance of a harness fix
+  before crediting it: `sha256sum` the script the battery actually read, and check the
+  comments' row id (QA-GUARD-005) against HEAD's content.
