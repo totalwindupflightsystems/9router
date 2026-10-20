@@ -67,3 +67,28 @@ BOARD_ROOT, else spools for the drain. One row per problem per day (fingerprint+
   it currently exits 0; treat it as failure until MON-DOGFOOD-009 lands.
 - restore-check PASS on a set you just made by hand proves the guard works on
   good sets; it says nothing about what the timer produced last night.
+
+## Reading an alert row as an operator (run 12, 2026-10-20)
+
+The board IS the operator's work list, and an alert row is a claim that needs checking:
+
+- **Verify the claim on a second leg** before acting: query the rule's own metric —
+  `ALERTS{alertname="X",host="H"}` for the firing window and the metric expression itself
+  (`node_filesystem_avail_bytes/size` for DiskFull). Run 12 confirmed a real 0%-free event
+  this way; the alert was true.
+- **The row's `generator:` link is dead** (docker-internal Prometheus hostname, e.g.
+  `http://83163ca754e7:9090/graph?...` — `getent hosts` says no such host). Use the query
+  text in the row; do not hand that URL to a user (MON-DOGFOOD-043).
+- **Resolutions are NOT in events.jsonl** while the router spools: they land in
+  `tasks.jsonl` as `type: alert-resolved` rows with no status (80 today). Grep for
+  `<row-id>-RESOLVED` in tasks.jsonl (MON-DOGFOOD-041).
+- **A resolved condition leaves its row `pending`** and re-mints a fresh row daily
+  (16/15/14/13/12 mints on five fingerprints) — treat the pending list as "fired recently",
+  not "still broken" (MON-DOGFOOD-042).
+- **The UI is loopback-only on the host**: `ssh -N -L 13000:127.0.0.1:3000 fleet-monitor`,
+  then POST `/login` with `GRAFANA_USER`/`GRAFANA_PASSWORD` from the host `.env`. Headless
+  Chrome rendered no panel grid for any dashboard (216 DOM nodes, empty `page-panes`, zero
+  `/api/ds/query`) while the API legs were green — an environment limitation, not a finding.
+- **The drain is the expensive part**: 42-68s wall / 38-50s CPU per 15-min run to append 0-2
+  rows (3 process spawns per spool line, ~79ms/line, spool +54 lines/day) — PERF-1. Use
+  `DRY=1` when you only want to see what it would do.
