@@ -92,3 +92,49 @@ The board IS the operator's work list, and an alert row is a claim that needs ch
 - **The drain is the expensive part**: 42-68s wall / 38-50s CPU per 15-min run to append 0-2
   rows (3 process spawns per spool line, ~79ms/line, spool +54 lines/day) — PERF-1. Use
   `DRY=1` when you only want to see what it would do.
+
+## Silencing a chronic alert (verified live 2026-10-20, run 14)
+
+Silences live in **Alertmanager**, not in the alert-router — the router has no silence
+surface at all (it mints rows from whatever AM delivers, so a silence stops both the
+notification AND the row). AM's API is loopback-only and unauthenticated; drive it from the
+host:
+
+```bash
+ssh fleet-monitor
+AM=http://127.0.0.1:9093
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ); END=$(date -u -d "+2 hours" +%Y-%m-%dT%H:%M:%SZ)
+# 1. create (matchers are ANDed; keep them narrow — alertname + host)
+curl -s -X POST $AM/api/v2/silences -H 'Content-Type: application/json' -d "{
+  \"matchers\":[{\"name\":\"alertname\",\"value\":\"TargetUnreachable\",\"isRegex\":false},
+               {\"name\":\"host\",\"value\":\"standby-cx53-01-2147\",\"isRegex\":false}],
+  \"startsAt\":\"$NOW\",\"endsAt\":\"$END\",\"createdBy\":\"<you>\",\"comment\":\"why\"}"
+# 2. verify it MATCHES what you meant (silencedBy on the alerts, and NOT on a control alert)
+curl -s $AM/api/v2/alerts | python3 -m json.tool | grep -A2 silencedBy
+# 3. remove when done; a deleted silence stays listed as state "expired" (0 active)
+curl -s -X DELETE $AM/api/v2/silence/<silenceID>
+```
+
+Facts that matter for planning a silence (read from `/api/v2/status`):
+`group_wait 30s`, `group_interval 5m`, `repeat_interval 12h`, `resolve_timeout 5m`,
+receiver `alert-router`, `send_resolved: true`. Consequence: a chronic alert re-notifies at
+most every 12 h, so **a short silence window cannot be validated by counting router
+deliveries** — validate on `status.silencedBy` instead. A silence is a stopgap: it lapses
+and the alert re-mints a row the moment it does, so it never replaces the underlying fix.
+
+## Continuous profiling (pyroscope) — the working probe set
+
+`mon-pyroscope` (`grafana/pyroscope:1.9.0`, published `0.0.0.0:4040`) IS ingesting; the
+URL the fleet perf skill documents (`/pyroscope/api/v1/labels`) **404s on 1.9.0**. Use:
+
+```bash
+P=http://127.0.0.1:4040
+curl -s $P/ready                                   # "ready"
+curl -s $P/api/v1/status/buildinfo                 # {"version":"1.9.0",...}
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+     $P/querier.v1.QuerierService/ProfileTypes     # profile types present
+curl -s -X POST -H 'Content-Type: application/json' -d '{"matchers":[]}' \
+     $P/querier.v1.QuerierService/Series           # labelsSet -> profiles IS in the store
+docker logs --tail 5 mon-pyroscope                 # hourly "head successfully written to block"
+# Grafana: /api/datasources/uid/pyroscope/health -> "Data source is working"
+```

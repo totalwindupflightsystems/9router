@@ -167,3 +167,32 @@ Hard-won facts from run 12 (each one is a filed row, not a guess):
   `page-panes`, zero `/api/ds/query` calls) for every dashboard while the API legs were green;
   treat "panels don't render headless" as an environment limitation, not a product defect,
   until someone reproduces it in a headed browser.
+
+## 2026-10-20 (run 14) — silences live in Alertmanager; pyroscope's API shape is version-specific
+
+Two mechanisms an operator/lane gets wrong when guessing, both verified live today.
+
+**Silencing.** The alert-router has NO silence surface — it mints rows from whatever
+Alertmanager chooses to deliver, so a silence created in AM stops both the notification and
+the row mint. Drive it from the host (`ssh fleet-monitor`): `POST
+http://127.0.0.1:9093/api/v2/silences` with ANDed matchers, verify on
+`GET /api/v2/alerts` → `status.silencedBy` (and check a CONTROL alert stays unsilenced —
+that is what proves your matchers are not over-broad), then `DELETE
+/api/v2/silence/<id>`. A deleted silence keeps appearing in the silences list as
+`state: expired` (0 active) — that is AM's bookkeeping, not a leaked silence. Cadence read
+from `/api/v2/status`: `group_wait 30s`, `group_interval 5m`, `repeat_interval 12h`,
+`resolve_timeout 5m`, receiver `alert-router`, `send_resolved: true`; because chronic alerts
+re-notify only every 12 h, **do not try to validate a silence by counting router deliveries
+in a short window** — validate the match, not the silence's effect on delivery timing.
+
+**Probing a service whose API shape moved between versions.** `mon-pyroscope`
+(`grafana/pyroscope:1.9.0`, `0.0.0.0:4040`) is ingesting real profiles, but its query API is
+the connect-style `/querier.v1.QuerierService/{ProfileTypes,Series}` (POST + JSON body),
+while the older REST label paths (`/pyroscope/api/v1/labels`, `/api/v1/labels`) return 404 —
+which is exactly the URL the fleet perf skill documents, so a lane following it concludes a
+working surface is dead. The version-independent checks that DID work: `GET /ready`,
+`GET /api/v1/status/buildinfo` (names the version), `GET /metrics` size, Grafana's
+`/api/datasources/uid/<uid>/health`, and the container's own hourly
+`head successfully written to block` lines. Lesson: when a documented probe 404s on a
+service that has a `/buildinfo` or `/status` route, read the version first and prefer the
+probe the deployed version actually serves (MON-DOGFOOD-045).
