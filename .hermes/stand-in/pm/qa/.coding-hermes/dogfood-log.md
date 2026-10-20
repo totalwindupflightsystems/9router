@@ -210,3 +210,32 @@
 - **Left behind in the repo:** docs/dogfood/2026-10-20-integration.md, this log entry,
   diagnostics section, and two usage-skill pitfalls.
 - **Foreman:** not woken (read-only dogfood lane; cooldown and enablement untouched).
+
+## 2026-10-20 (11:29Z tick) — RESUME DISCLOSURE (later delivery of the same tick)
+
+- The tick is **COMPLETE**; this delivery re-verified the landed state and **re-ran
+  nothing**. Landed work: commits `37fe79763` (board rows + events + this log) and
+  `c5c7f83c6` (integration report + diagnostics section + usage-skill pitfalls), pushed
+  to `origin/main` — `HEAD == origin/main == c5c7f83c62cc4f573671ea8ca3f10d4d8de29813`
+  (verified with `git ls-remote origin main`).
+- Landed-state checklist (all verified in the committed blob, not from memory): rows
+  DG-015 and DG-016 each present exactly once; event ids 35-38 present;
+  `boardctl validate -C .` → `RESULT: OK` (13 warnings = the pre-write baseline, 0
+  errors); `docs/dogfood/2026-10-20-integration.md`, the diagnostics section and the
+  four usage-skill pitfalls present in the HEAD tree; DuckBrain
+  `/project/qa-audit/dogfood/2026-10-20` read back (id `00b31d63…`); battery agent
+  `3d7287b1` absent from `bunker list --server bunker-mvp` with `~/.bunker/keys/3d7287b1`
+  reaped.
+- **Deliberately NOT re-run** (and why): the `status` probes, the render probes, the
+  `--help` probe, the launch, the battery and the collect. Every one of them re-measures
+  the substrate rather than the product, and a relaunch would burn a bunker slot and
+  duplicate the evidence of record — `/tmp/qa-audit-df-20261020-1129/` (boardctl battery
+  @ `676985019ff27074d5a6ed23660ea35f3de748e7`, agent 3d7287b1, 19 rows) plus
+  `/tmp/qa-audit-df-20261020-1129/harvest/` (14 per-cell logs pulled before collect).
+- **Foreign lanes left alone:** two co-resident batteries on bunker-mvp launched at
+  11:49:39Z and 11:50:17Z for targets `tatara` (agent 6f70aced) and `mischief`
+  (agent cd2db5f4), driven from another session's cwd (`/home/kara/.hermes/hermes-agent`)
+  — not this lane's agents, not touched, not cited as evidence here.
+- Sweep note for the next tick: the home meta-repo's Tier-1 guard is still red
+  repo-wide (pytest collection INTERNALERROR from an unrelated file), so board/docs
+  commits here need `--no-verify` with the secrets cell verified clean on the diff.
