@@ -157,3 +157,14 @@
 - left behind: rows, this log entry, docs/dogfood/2026-10-20-run12-operator-triage.md, diagnostics.md section, skills/monitoring-usage update
 - foreman woken: no (read-only dogfood lane; rows wait on a live lane)
 - verdict: SHIPPABLE for the alerting promise (the stack told the truth about a real disk exhaustion and delivered it in 10s); PROMISING-BUT-ROUGH as an operator work list; FAILED-product for fresh install (unchanged)
+
+## 2026-10-20 (run 13) | monitoring | PROMISING-BUT-ROUGH (live alert re-proof + install battery)
+- angle: re-proof the live alert set and drain idempotence after run 12, then run the active `bunker-qa.sh` fresh-agent leg against the correctly scoped fleet-monitoring subtree
+- promise: a real operator can verify an alert, drain it to the lane board, and install the stack from the documented Makefile path on a fresh machine
+- reality: live Prometheus reported DiskWillFillIn24h on bunker-mvp, OOMKillsLowPressure on bunker-mvp and karahermes-mde-7840hs, and two known TargetUnreachable alerts; direct bunker-mvp filesystem ratio was 0.15727011946882058, so the warning was grounded. DiskFull had resolved. Drain appended the DiskFull resolution twin once; repeat drain appended 0 and skipped 710. Board readback after the append: 539 valid lines, 539 unique ids.
+- install: EXECUTED on bunker-mvp (agent b3cda072, destroyed by collect, evidence `/tmp/bunker-qa-evidence-20261020T040827Z-3795904.jsonl`); scoped subtree transfer and `make build`/compose config render passed, but the battery did not run `make up` (docker-deploy reported no compose file) and native verify failed because the stack was never started. Fresh install remains unproven/failed at the documented `make up` path; MON-DOGFOOD-039 remains the existing product finding.
+- perf: drain 56.16s cold-ish / 63.03s warm at ~710 spool lines; re-proof of PERF-1, no duplicate row. strace: wait4 42.52s, read 3.39s.
+- rows: no new rows; re-proved MON-DOGFOOD-039, MON-DOGFOOD-041..044, and PERF-1
+- left behind: docs/dogfood/2026-10-20-run13-live-alert-and-install-reproof.md; no code or scheduler changes
+- foreman woken: no (read-only dogfood lane)
+- verdict: PROMISING-BUT-ROUGH — production alerting reports real conditions and drain is idempotent, but operator reconciliation/evidence-link defects remain and fresh `make up` install is not delivered
