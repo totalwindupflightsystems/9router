@@ -2333,6 +2333,40 @@ else cell docker-deploy N/A "no compose file"; fi
 # credited the foreign server to the repo under test, and a bare fuser -k on
 # an answering port kills unrelated socket-holders (measured: it killed a
 # process that merely HELD A CONNECTION to :5173).
+# ── QA-CRIER-19-R2 (2026-10-20): THE DETECTION GATE MUST NOT FAIL SILENT ──────
+# The Go-HTTP precondition below is what lets the strongest ui-probe arm run,
+# and it silently stopped being satisfiable: QA-BUNKER-B21 shipped the ERE term
+# '\.Serve(' — an UNTERMINATED GROUP — so grep -qRE exited 2 with
+# "grep: Unmatched ( or \(". In an && chain rc=2 is a false condition exactly
+# like rc=1 ("no match"), so the whole arm was skipped and the battery fell
+# through to the final N/A "no web UI detected" for crier — a Go server serving
+# 87,584 B of text/html at /chat plus /docs at 11,732 B. Measured 2026-10-20 on
+# the emitted qa-run.sh at HEAD 2f68709: gate rc=2, cell N/A, product UI up
+# (QA-CRIER-19-R2). A broken or blank panel was therefore invisible to every
+# cycle: precisely the surface the battery exists to watch.
+# Two rules now hold for this gate:
+#   (1) the pattern is COMPILED before it is trusted — a pattern grep rejects is
+#       a HARNESS fault, never evidence about the repo; and
+#   (2) when the ERE is unusable the scan degrades to fixed-string terms, says so
+#       in the cell it grades, and a degraded scan that finds nothing grades
+#       HARNESS-DEGRADED — never N/A.
+ui_pat_compiles() { # 0 = grep accepts this ERE (match or no-match), 1 = grep rejects it
+  printf '\n' | grep -qE "\$1" 2>/dev/null
+  [ \$? -le 1 ]
+}
+UI_HTTP_PAT='http\.ListenAndServe|http\.Server|http\.ServeMux|http\.HandleFunc|http\.Handler|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|fiber\.New|fasthttp|gorilla/mux|net/http|\.Serve\('
+UI_HTTP_SCAN='not-scanned'
+ui_go_http_source() { # 0 = tree has HTTP-serving Go source, 1 = none, 2 = scan untrustworthy
+  if ui_pat_compiles "\$UI_HTTP_PAT"; then
+    if grep -rqE "\$UI_HTTP_PAT" . --include='*.go' 2>/dev/null; then UI_HTTP_SCAN='found'; return 0; fi
+    UI_HTTP_SCAN='none'; return 1
+  fi
+  # ERE rejected by grep: same intent, fixed-string terms (grep -F cannot return 2)
+  if grep -rqF -e 'net/http' -e 'http.Server' -e 'http.ListenAndServe' -e 'http.ServeMux' -e 'http.HandleFunc' -e 'http.Handler' -e 'chi.NewRouter' -e 'mux.NewRouter' -e 'gin.Default' -e 'echo.New' -e 'fiber.New' -e 'fasthttp' -e '.Serve(' --include='*.go' . 2>/dev/null; then
+    UI_HTTP_SCAN='found-degraded'; return 0
+  fi
+  UI_HTTP_SCAN='degraded'; return 2
+}
 if [ -f package.json ] && grep -qE '"dev"|"start"' package.json; then
   # QA-9ROUTER-21 (2026-09-21): the old probe curled / with NO -L and accepted
   # only 200, so any redirect-first UI graded a guaranteed false FAIL —
@@ -2419,7 +2453,7 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
       *) cell ui-probe FAIL "frontend/ UI not serving (http=\$UP\${LAND:+, landed: \$LAND}): \$(tail -2 \$LOGD/ui.log)" ;;
     esac
   fi
-elif [ -f go.mod ] && grep -qRE 'http\.ListenAndServe|http\.Server|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|gorilla/mux|net/http|\.Serve(' . --include='*.go' 2>/dev/null; then
+elif [ -f go.mod ] && ui_go_http_source; then
   # QA-BUNKER-B21 (2026-10-19): broadened Go HTTP detection + port discovery.
   # coding-hermes-scheduler serves an htmx dashboard on :9090 (documented in
   # docs/reference/flags.md --listen 127.0.0.1:9090) but the old arm missed it:
@@ -2460,38 +2494,82 @@ elif [ -f go.mod ] && grep -qRE 'http\.ListenAndServe|http\.Server|chi\.NewRoute
     [ "\$UI_C" = "000" ] && UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 "http://127.0.0.1:\$p/docs" 2>/dev/null)
     if [ -n "\$UI_C" ] && [ "\$UI_C" != "000" ]; then UI_OCCUPIED="\$UI_OCCUPIED\$p "; fi
   done
-  UI_HIT=""; UI_OTHER=""; UI_PROBED=" "
+  # QA-CRIER-19-R2 (2026-10-20): probe the documented SURFACE LIST, not just
+  # /docs then /, and name every text/html answer with URL + status +
+  # content-type + size. crier's operator panel is /chat (87,584 B) while / is
+  # 404 application/json and /docs is only the 11,732 B OpenAPI page: a probe
+  # that stops at /docs — or at a 404 / — can still miss the largest surface it
+  # is here to watch, and a cell reading only "responded, port 8767" leaves the
+  # finding unreadable six cycles later.
+  # Listening detection is now SEPARATE from HTML detection: any non-000 status
+  # proves the port answers (crier's / is 404), so a server whose landing page is
+  # JSON or 404 is awaited properly instead of being treated as dead.
+  UI_PATHS="\${BUNKER_QA_UI_PATHS:-/chat /docs / /ui /dashboard /app /index.html}"
+  UI_DEGRADE_NOTE=""
+  case "\${UI_HTTP_SCAN:-}" in
+    found-degraded) UI_DEGRADE_NOTE=" (HARNESS-DEGRADED: the detection ERE was rejected by grep — the arm ran on fixed-string terms)" ;;
+  esac
+  UI_SURFACES=""; UI_OTHER=""; UI_PROBED=" "; UI_HIT=""; UI_LISTEN=""
   for UI_B in "\${UI_LIST[@]}"; do
     ( setsid timeout 45 \$UI_B ) </dev/null >\$LOGD/ui-probe.log 2>&1 &
     UIPID=\$!
-    UI_HIT=""; UI_OTHER=""
+    UI_SURFACES=""; UI_OTHER=""; UI_LISTEN=""
+    # 1 · wait for a listener on a port nobody else held before we started
     for i in \$(seq 1 20); do
       kill -0 \$UIPID 2>/dev/null || break
       for p in \$UI_PORTS; do
         case "\$UI_OCCUPIED" in *" \$p "*) continue ;; esac
-        UI_R=\$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 2 "http://127.0.0.1:\$p/docs" 2>/dev/null)
-        case "\$UI_R" in "200 text/html"*) UI_HIT=\$p; break 2 ;; 000*|"") : ;; *) case "\$UI_PROBED" in *" \$p "*) : ;; *) UI_PROBED="\$UI_PROBED\$p "; UI_OTHER="\$UI_OTHER \${p}=[\$UI_R]" ;; esac ;; esac
-        UI_R=\$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 2 "http://127.0.0.1:\$p/" 2>/dev/null)
-        case "\$UI_R" in "200 text/html"*) UI_HIT=\$p; break 2 ;; 000*|"") : ;; *) case "\$UI_PROBED" in *" \$p "*) : ;; *) UI_PROBED="\$UI_PROBED\$p "; UI_OTHER="\$UI_OTHER \${p}=[\$UI_R]" ;; esac ;; esac
+        UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$p/" 2>/dev/null)
+        [ "\$UI_C" = "000" ] && UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$p/chat" 2>/dev/null)
+        case "\$UI_C" in 000|"") : ;; *) UI_LISTEN=\$p; break ;; esac
       done
+      [ -n "\$UI_LISTEN" ] && break
       sleep 1
     done
-    if [ -n "\$UI_HIT" ] || [ -n "\$UI_OTHER" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
+    # 2 · sweep every documented path on the port that answered
+    if [ -n "\$UI_LISTEN" ]; then
+      UI_HIT=\$UI_LISTEN
+      for path in \$UI_PATHS; do
+        UI_R=\$(curl -s -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' --max-time 3 "http://127.0.0.1:\$UI_LISTEN\$path" 2>/dev/null)
+        IFS='|' read -r UI_C UI_CT UI_SZ <<< "\$UI_R"
+        case "\$UI_C" in
+          2??) case "\$UI_CT" in
+                 text/html*) UI_SURFACES="\$UI_SURFACES http://127.0.0.1:\$UI_LISTEN\$path \$UI_C \$UI_CT \${UI_SZ}B" ;;
+                 *) UI_OTHER="\$UI_OTHER \$path=[\$UI_C \$UI_CT \${UI_SZ}B]" ;;
+               esac ;;
+          000|"") : ;;
+          *) UI_OTHER="\$UI_OTHER \$path=[\$UI_C \$UI_CT]" ;;
+        esac
+      done
+    fi
+    if [ -n "\$UI_SURFACES" ] || [ -n "\$UI_OTHER" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
   done
-  if [ -n "\$UI_HIT" ]; then
-    cell ui-probe OK "go-native http server responded (pattern: \$UI_B, port \$UI_HIT)"
+  if [ -n "\$UI_SURFACES" ]; then
+    cell ui-probe OK "UI serves text/html:\${UI_SURFACES} (start: \$UI_B)\${UI_OTHER:+, other paths:\$UI_OTHER}\${UI_DEGRADE_NOTE}"
   elif [ -n "\$UI_OTHER" ]; then
-    cell ui-probe INFO "go-native server serves but no 200 text/html surface found on probed ports [\$UI_PORTS]:\$UI_OTHER"
+    cell ui-probe INFO "go-native server answers on :\$UI_LISTEN but NO 2xx text/html surface on any probed path [\$UI_PATHS] — exact answers:\$UI_OTHER (start: \$UI_B)\${UI_DEGRADE_NOTE}"
   elif ! kill -0 \$UIPID 2>/dev/null; then
-    cell ui-probe INFO "go-native start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)"
+    cell ui-probe INFO "go-native start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DEGRADE_NOTE}"
   else
-    cell ui-probe INFO "go-native server ran 20s, no probed port answered [\$UI_PORTS] — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)"
+    cell ui-probe INFO "go-native server ran 20s, no probed port answered [\$UI_PORTS] — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DEGRADE_NOTE}"
   fi
   kill -- -\$UIPID 2>/dev/null; sleep 1; kill -9 -- -\$UIPID 2>/dev/null
   kill \$UIPID 2>/dev/null; sleep 1; kill -9 \$UIPID 2>/dev/null
-  for p in \$UI_PROBED; do fuser -k \$p/tcp >/dev/null 2>&1; done
+  for p in \$UI_LISTEN; do fuser -k \$p/tcp >/dev/null 2>&1; done
   true
-else cell ui-probe N/A "no web UI detected"; fi
+else
+  # QA-CRIER-19-R2 · AC-3: N/A stays for a repo with NO HTML route, but it NAMES
+  # what the gate scanned, so a reader can tell "looked, found none" from "never
+  # looked" — the exact defect this row exists for. A scan that could not be
+  # trusted grades HARNESS-DEGRADED, never N/A: an unknown is not a product fact.
+  if [ "\${UI_HTTP_SCAN:-not-scanned}" = 'degraded' ]; then
+    cell ui-probe INFO "HARNESS-DEGRADED: go.mod repo, but the HTTP-detection scan was UNTRUSTWORTHY (grep rejected the ERE and no fixed-string HTTP term matched) — a harness fault, not a no-UI verdict; re-run before reading anything into it"
+  elif [ -f go.mod ]; then
+    cell ui-probe N/A "no web UI detected: go.mod repo with no HTTP-serving source in *.go (scanned: net/http, http.Server, ListenAndServe, ServeMux, HandleFunc, chi/mux/gin/echo/fiber routers, .Serve() ) and no package.json dev/start script"
+  else
+    cell ui-probe N/A "no web UI detected: no npm dev/start script (package.json or frontend/package.json) and no go.mod HTTP server source"
+  fi
+fi
 
 # 6 · chaos-disconnect — network cut via dead proxy: clean fail or HANG?
 # Window is sized from the NATIVE SUITE's observed duration (suite_dur, timed
