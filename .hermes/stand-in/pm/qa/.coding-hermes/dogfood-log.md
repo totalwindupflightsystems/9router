@@ -170,3 +170,43 @@
   events on events.jsonl. Board tail verified: 23 rows, ids unique.
 - **Left behind in the repo:** docs/dogfood/2026-10-15-reproof-integration.md + this log.
 - **Foreman:** not woken (read-only dogfood lane; cooldown untouched).
+
+## 2026-10-20 (11:29Z tick) — real battery on a never-QA'd Go repo (boardctl); ci-pass evidence gap + CLI help gap; 2 rows, 4 events
+
+- **Verdict:** 🟡 PROMISING-BUT-ROUGH — the harness ran end to end for real; the two
+  findings are about its own evidence quality, not about a broken run.
+- **Promise tested:** an operator can `status` → `launch <repo>` → `collect --evidence`
+  and get an honest fresh-machine battery verdict for a fleet repo.
+- **Resumed tick — legs NOT repeated.** This tick's first delivery ran status ×3
+  (0.53/0.52/0.52s), the render probes, a `launch --help` probe (refused pre-spawn,
+  junk `.meta`), the boardctl launch (41.54s, agent 3d7287b1 @ bunker-mvp), the battery
+  (11:35:50Z→11:41:00Z, 19 rows) and collect (COLLECTED rc=0, 91.01s). This delivery
+  harvested the per-cell logs PRE-collect, judged, filed rows and wrote the docs —
+  deliberately no re-run and no second battery (a relaunch re-measures the substrate and
+  burns a slot). Evidence: /tmp/qa-audit-df-20261020-1129/.
+- **Cells:** fresh-install OK · toolchain-bootstrap OK ×7 (go 1.27.3, floor 1.26.9) ·
+  ci-pass OK (act leg green incl. Test 22.6s — native suite never ran on this path) ·
+  upgrade OK (v0.1.10→HEAD) · chaos-resource PASS · chaos-errorpath OK rc=2 ·
+  docker-deploy/ui-probe/chaos-shutdown/chaos-corruption N/A · chaos-disconnect
+  UNVERIFIED (0-byte disc.log — DG-006 class). Target at 676985019ff27074d5a6ed23660ea35f3de748e7.
+- **Install leg:** RUN on bunker-mvp (the battery's fresh-install cell builds the repo
+  from zero on a JIT box). The skill's standard host bunker-las-03 is tailnet-offline
+  (15 d) → named substitute per the leg's own rule, so no SKIPPED row.
+- **Perf (Step 2b):** status 0.53s cold / 0.52s warm; launch 41.54s (controller stages
+  <0.1s, render 0.03s/123018B, payload 33.9MB — the rest is ship+boot, user+sys ≈0.5s);
+  collect 91.01s for a finished battery. **Nothing filed as a PERF row:** no CPU hotspot
+  exists to profile and both waits are inherent to moving a repo to a JIT box and proving
+  it gone. The usage doc's launch "≤30s" is exceeded by this 34MB repo class — recorded
+  here, not filed (a doc bound, not a defect a user can act on).
+- **Rows:** DG-015 (P3 — ci-pass act-green evidence: dead '✅ Success' count pattern +
+  no tests-ran marker + no native.log), DG-016 (P4 — `launch --help` graded as a repo
+  path; refusal writes basename's help text into the meta's project= field). Minted with
+  board_next_id.py (free-verified), validate 13 warnings = pre-write baseline, 0 errors.
+- **Events:** 35 → DG-006 (artifact-level proof, premise intact) · 36 → DG-012 (re-proof
+  in the WORKING TREE only — the floor-tracking bootstrap is an uncommitted sibling patch,
+  sha256 56294ccd…) · 37 → QA-HARNESS-RENDER-001 (re-proof: 123018B render, byte-identical
+  re-render, real launch script_bytes=123353; fix 69b621250 ancestor of HEAD) ·
+  38 → DG-014 (checked, not triggered — host had 20GB free).
+- **Left behind in the repo:** docs/dogfood/2026-10-20-integration.md, this log entry,
+  diagnostics section, and two usage-skill pitfalls.
+- **Foreman:** not woken (read-only dogfood lane; cooldown and enablement untouched).
