@@ -1245,6 +1245,22 @@ go_toolchain_oom_cause() { # <logfile> - print the line proving the toolchain fa
   grep -m1 -E 'SystemResources|cannot allocate memory|out of memory \(Go toolchain\)|failed to initialize build cache.*address space' "\$1" 2>/dev/null | cut -c1-220
 }
 go_toolchain_oom() { [ -n "\$(go_toolchain_oom_cause "\$1")" ]; }
+# go_toolchain_floor_failure — did the go suite refuse to run because the
+# PROVISIONED toolchain is older than the repo's go.mod floor? (QA-GUARD-005,
+# 2026-10-20.) chaos-disconnect runs GOTOOLCHAIN=local (offline by design: a
+# toolchain download would defeat the network cut), so a repo whose go.mod
+# floor exceeds the toolchain the fresh-install cell installed dies BEFORE any
+# test with the refusal
+#   go: go.mod requires go >= 1.26.9 (running go 1.26.5; GOTOOLCHAIN=local)
+# That refusal is an environment gap (harness provisioned below-floor), never
+# a disconnect finding, and the network cut was never exercised — grade
+# UNVERIFIED naming the real refusal instead of a blind rc shape.
+go_toolchain_floor_failure_cause() { # <logfile> — print the line proving the floor refusal
+  grep -m1 -E '^go: go\.mod requires go >= [0-9][0-9.]+ \(running go [0-9][0-9.]*; GOTOOLCHAIN=local\)' "\$1" 2>/dev/null | cut -c1-220
+}
+go_toolchain_floor_failure() { # <logfile> — 0 when the log carries the toolchain-floor refusal
+  [ -n "\$(go_toolchain_floor_failure_cause "\$1")" ]
+}
 # go_panic_timeout — did go test hit its own 10m timeout and PANIC under the cap?
 # (QA-HERMES-CANOPY-38.) internal/session on a 3G cap panics 'test timed out
 # after 10m0s' instead of failing a package: the suite has NO clean failure mode
@@ -1483,8 +1499,20 @@ elif [ -n "\$GO_FLOOR" ] && ! ver_ge "\$TOOLS_GO_V" "\$GO_FLOOR"; then
   GO_NEED_INSTALL=1
 fi
 if [ "\$GO_NEED_INSTALL" = "1" ]; then
-  ( curl -sL -o ~/tools/go.tgz https://go.dev/dl/go1.26.5.linux-amd64.tar.gz && rm -rf ~/tools/go && tar -C ~/tools -xzf ~/tools/go.tgz && rm ~/tools/go.tgz ) >\$LOGD/toolchain.log 2>&1 \\
-    && cell toolchain-bootstrap OK "go 1.26.5 installed (~/tools/go; floor=\${GO_FLOOR:-none} distro=\${TOOLS_GO_V:-absent})" \\
+  # QA-GUARD-005 (2026-10-20): the pinned go1.26.5 tarball sits BELOW current
+  # go.mod floors already shipping in fleet repos (go 1.26.9), so an
+  # above-floor repo got a provisioned toolchain that its own go.mod refuses
+  # — every GOTOOLCHAIN=local leg (chaos-disconnect is offline by design)
+  # died before a single test. The bootstrap now tracks the FLOOR: resolve the
+  # newest patch of the requested minor (go.dev/dl/?mode=json), prefer it, and
+  # fall back to the pin when the discovery call fails (no network surprises,
+  # same URL channel as before). TOOLS_GO_V is re-derived after install so the
+  # OK line reports the toolchain the cells will actually run.
+  GO_BOOT_V="\$(curl -s --max-time 15 'https://go.dev/dl/?mode=json' 2>/dev/null | grep -oE 'go[0-9]+\\.[0-9]+(\\.[0-9]+)?' | head -1 | sed 's/^go//')"
+  case "\$GO_BOOT_V" in *[!0-9.]*|"") GO_BOOT_V="1.26.5" ;; esac
+  ( curl -sL -o ~/tools/go.tgz "https://go.dev/dl/go\${GO_BOOT_V}.linux-amd64.tar.gz" && rm -rf ~/tools/go && tar -C ~/tools -xzf ~/tools/go.tgz && rm ~/tools/go.tgz ) >\$LOGD/toolchain.log 2>&1 \\
+    && TOOLS_GO_V="\$( ~/tools/go/bin/go version | sed 's/.*go\\([0-9][0-9.]*\\).*/\\1/' )" \\
+    && cell toolchain-bootstrap OK "go \$GO_BOOT_V installed (~/tools/go; floor=\${GO_FLOOR:-none} distro=\${TOOLS_GO_V:-absent})" \\
     || cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/toolchain.log)"
 fi
 if [ -f package.json ] && ! command -v node >/dev/null 2>&1 && [ ! -x ~/tools/node/bin/node ]; then
@@ -2016,7 +2044,13 @@ else
   # QA-HIVEMIND-WORK-18(c): the native leg previously had NO timeout at all —
   # a hung go/cargo/npm suite ran until the agent TTL. term+kill enforcement:
   # TERM at BUNKER_QA_NATIVE_TEST_TIMEOUT (default 5400s), KILL 30s later.
-  ( timeout -k 30 \${BUNKER_QA_NATIVE_TEST_TIMEOUT:-5400} $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
+  # QA-GUARD-005 (2026-10-20): PATH pin mirrors the chaos-disconnect arm — the
+  # subshell must resolve the go binary from the provisioned ~/tools/go, not
+  # from the image's distro go. The pin rides through env(1) because timeout
+  # execs its COMMAND verbatim: a bare VAR=val prefix after the duration is
+  # treated as the command name (measured: "failed to execute process" rc=127,
+  # 2026-10-20 verification battery).
+  ( timeout -k 30 \${BUNKER_QA_NATIVE_TEST_TIMEOUT:-5400} env PATH="\$HOME/tools/go/bin:\$PATH" $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
   suite_end=\$(date +%s)
   suite_dur=\$(( suite_end - suite_start ))
   if [ \$nat_rc -eq 0 ]; then
@@ -2479,7 +2513,17 @@ disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 #    window no matter what the suite does (toolchain probes, plugins, etc.).
 # GOTOOLCHAIN=local prevents a toolchain download attempt. These env vars are
 # harmless for non-Go native_cmd values (npm/pytest/cargo ignore them).
-( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+# QA-GUARD-005 (2026-10-20): PATH is pinned to ~/tools/go/bin INSIDE the
+# subshell. Without it the arm resolves the go binary from the DISTRO
+# (go 1.26.5 on the image), not the toolchain the fresh-install cell
+# provisioned, so any repo whose go.mod floor exceeds the image toolchain
+# died BEFORE a single test with 'go.mod requires go >= X (running
+# go 1.26.5; GOTOOLCHAIN=local)' — classifier unreachable, cell graded
+# UNVERIFIED. ~/tools/go always exists on Go repos (the bootstrap above
+# guarantees it; the subshell pin below leaves the outer PATH untouched for
+# every other consumer and is a no-op when the file is absent). The same pin
+# rides the native leg above.
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
 if [ -n "\${nat_rc:-}" ] && [ "\$nat_rc" -ne 0 ] 2>/dev/null; then cell chaos-disconnect UNVERIFIED "ci-pass native suite FAILED first (nat_rc=\$nat_rc) — the disconnect verdict is not derivable from a failing suite; fix the ci-pass failure before reading this cell (QA-HERMES-DAGGER-26); disconnect probe rc=\$disc_rc: \$(head -2 \$LOGD/disc.log)"
 elif vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
@@ -2488,6 +2532,7 @@ elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network 
 elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
 elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
 elif go_suite_env_failure \$LOGD/disc.log; then cell chaos-disconnect INFO "ENV-BLOCKED: the go suite failed because the test host lacks a build tool (\`make\` on JIT agents, measured 2026-09-19) — the disconnect cut was exercised against a broken build, no disconnect finding (rc=\$disc_rc): \$(grep -m1 -E 'exec: .* executable file not found' \$LOGD/disc.log)"
+elif go_toolchain_floor_failure \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "toolchain-floor refusal (QA-GUARD-005): the suite NEVER RAN — the go binary on PATH is older than the repo's go.mod floor and GOTOOLCHAIN=local forbids the offline switch, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(go_toolchain_floor_failure_cause \$LOGD/disc.log)"
 elif suite_deps_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "missing test dependencies — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result (rc=\$disc_rc): \$(suite_deps_missing_cause \$LOGD/disc.log)"
 elif native_runner_missing \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "native runner missing (rc=\$disc_rc) - the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(native_runner_missing_cause \$LOGD/disc.log)"
 elif native_zero_tests \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "zero tests ran under the network cut (QA-AUGER-1 vacuity class) — the disconnect was never exercised by any test: \$(grep -E '(passed|failed|error|no tests ran)' \$LOGD/disc.log | tail -1 | cut -c1-160)"
