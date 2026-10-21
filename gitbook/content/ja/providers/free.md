@@ -8,7 +8,7 @@
 
 無料階層プロバイダーは、サブスクリプションと低価格クォータが消費された時の**フォールバック**:
 
-- 🆓 **iFlow** - 8モデル無料 (Kimi K2、Qwen3、GLM 4.7、MiniMax M2...)
+- 💳 **iFlow** - 15モデル(有料プラン、OAuth)(Kimi K2、Qwen3、GLM 4.7、DeepSeek...)
 - 🆓 **Qwen** - 3モデル無料 (Qwen3 Coder Plus/Flash、Vision)
 - 🆓 **Kiro** - 2モデル無料 (Claude Sonnet 4.5、Haiku 4.5)
 
@@ -16,13 +16,13 @@
 
 ---
 
-## iFlow (8つの無料モデル)
+## iFlow(15モデル、有料プラン)
 
 ### 料金
 
 | プラン | 月額コスト | モデル | クォータ |
 |------|--------------|--------|-------|
-| FREE | $0 | 8モデル | 無制限 |
+| 有料(OAuth) | プランによる | 15 | プラン別割り当て |
 
 **最高の価値:** 無料階層で最も多くのモデル! Kimi K2、Qwen3、GLM、MiniMax、DeepSeek。
 
@@ -46,34 +46,34 @@
 **ステップ3: CLIで使用**
 
 ```
-Model: if/kimi-k2-thinking
+Model: if/kimi-k2
        if/kimi-k2
        if/qwen3-coder-plus
        if/glm-4.7
-       if/minimax-m2
+       if/qwen3-vl-plus
        if/deepseek-r1
-       if/deepseek-v3.2-chat
-       if/deepseek-v3.2-reasoner
+       if/deepseek-v3.2
+       if/qwen3-235b-a22b-thinking-2507
 ```
 
 ### 利用可能なモデル
 
 | モデルID | 説明 | 最適用途 |
 |----------|-------------|----------|
-| `if/kimi-k2-thinking` | Kimi K2 Thinking | 複雑な推論 |
+| `if/kimi-k2` | Kimi K2 | 複雑な推論 |
 | `if/kimi-k2` | Kimi K2 | 汎用コーディング |
 | `if/qwen3-coder-plus` | Qwen3 Coder Plus | コード生成 |
 | `if/glm-4.7` | GLM 4.7 | 中国語 + 英語 |
-| `if/minimax-m2` | MiniMax M2 | 長いコンテキスト |
+| `if/qwen3-vl-plus` | Qwen3 VL Plus | 長いコンテキスト |
 | `if/deepseek-r1` | DeepSeek R1 | 推論タスク |
-| `if/deepseek-v3.2-chat` | DeepSeek V3.2 Chat | 会話 |
-| `if/deepseek-v3.2-reasoner` | DeepSeek V3.2 Reasoner | 複雑なロジック |
+| `if/deepseek-v3.2` | DeepSeek V3.2 Exp | 会話 |
+| `if/qwen3-235b-a22b-thinking-2507` | Qwen3 235B A22B Thinking | 複雑なロジック |
 
 ### プロのヒント
 
 - **8モデル無料** - 無料階層で最多種類
-- **無制限利用** - クォータ制限なし
-- **Kimi K2 Thinking** - 複雑な推論に最適
+- **有料プラン** - プラン別割り当て
+- **Kimi K2** - 複雑な推論に最適
 - **DeepSeek R1** - 強力な推論能力
 
 ---
@@ -185,7 +185,7 @@ Model: kr/claude-sonnet-4.5
 
 | プロバイダー | モデル | 最高のモデル | セットアップ | クォータ |
 |----------|--------|------------|-------|-------|
-| **iFlow** | 8 | Kimi K2 Thinking | OAuth | 無制限 |
+| **iFlow** | 15 | Kimi K2 | OAuth | 有料プラン |
 | **Qwen** | 3 | Qwen3 Coder Plus | デバイスコード | 無制限 |
 | **Kiro** | 2 | Claude Sonnet 4.5 | AWS Builder ID | 無制限 |
 
@@ -201,7 +201,7 @@ Model: kr/claude-sonnet-4.5
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [9routerダッシュボードから取得]
-  Model: if/kimi-k2-thinking
+  Model: if/kimi-k2
 ```
 
 ### コンボを作成 (推奨)
@@ -209,13 +209,13 @@ Settings → Models → Advanced:
 ```
 Dashboard → Combos → Create New
 
-Name: free-combo
+Name: budget-combo
 Models:
-  1. if/kimi-k2-thinking (iFlowプライマリ)
+  1. if/kimi-k2 (iFlowプライマリ)
   2. qw/qwen3-coder-plus (Qwenバックアップ)
   3. kr/claude-sonnet-4.5 (Kiro品質)
 
-CLIで使用: free-combo
+CLIで使用: budget-combo
 ```
 
 **結果:** ゼロコスト、最大アップタイム!
@@ -232,10 +232,10 @@ Dashboard → Combos → Create New
 Name: complete-fallback
 Models:
   1. gc/gemini-3-flash-preview (無料サブスクリプション)
-  2. cc/claude-opus-4-5 (有料サブスクリプション)
+  2. cc/claude-opus-5 (有料サブスクリプション)
   3. glm/glm-4.7 (低価格バックアップ、100万あたり$0.6)
   4. minimax/MiniMax-M2.1 (最安、100万あたり$0.2)
-  5. if/kimi-k2-thinking (無料フォールバック)
+  5. if/kimi-k2 (有料フォールバック(OAuth))
   6. kr/claude-sonnet-4.5 (無料品質)
 
 CLIで使用: complete-fallback
@@ -245,7 +245,7 @@ CLIで使用: complete-fallback
 - Tier 1: 無料サブスクリプション (Gemini CLI)
 - Tier 2: 有料サブスクリプション (Claude Code)
 - Tier 3: 低価格バックアップ (GLM、MiniMax)
-- Tier 4: 無料フォールバック (iFlow、Kiro)
+- Tier 4: 有料フォールバック(OAuth) (iFlow、Kiro)
 
 **コーディングが止まらない!**
 
@@ -270,10 +270,10 @@ CLIで使用: complete-fallback
 ### 2. 適切なモデルを選択
 
 ```
-複雑な推論: if/kimi-k2-thinking
+複雑な推論: if/kimi-k2
 高速コーディング: qw/qwen3-coder-flash
 最高品質: kr/claude-sonnet-4.5
-長いコンテキスト: if/minimax-m2
+長いコンテキスト: if/qwen3-vl-plus
 Visionタスク: qw/vision-model
 ```
 
@@ -285,7 +285,7 @@ Visionタスク: qw/vision-model
 Name: zero-cost
 Models:
   1. kr/claude-sonnet-4.5 (最高品質)
-  2. if/kimi-k2-thinking (複雑なタスク)
+  2. if/kimi-k2 (複雑なタスク)
   3. qw/qwen3-coder-plus (高速コーディング)
 
 コスト: 永久に$0!
@@ -315,7 +315,7 @@ Models:
 ```
 セットアップ:
 1. kr/claude-sonnet-4.5 (最高品質)
-2. if/kimi-k2-thinking (複雑な推論)
+2. if/kimi-k2 (複雑な推論)
 3. qw/qwen3-coder-plus (高速コーディング)
 
 月次コスト: $0
@@ -333,7 +333,7 @@ Models:
 セットアップ:
 1. gc/gemini-3-flash-preview (月18万無料)
 2. glm/glm-4.7 (低価格バックアップ、100万あたり$0.6)
-3. if/kimi-k2-thinking (無料フォールバック)
+3. if/kimi-k2 (有料フォールバック(OAuth))
 
 月次コスト: $5〜10
 利用: 1億以上のトークン
@@ -349,11 +349,11 @@ Models:
 ```
 セットアップ:
 1. gc/gemini-3-flash-preview (月18万無料)
-2. cc/claude-opus-4-5 (サブスクリプション$20〜100)
+2. cc/claude-opus-5 (サブスクリプション$20〜100)
 3. cx/gpt-5.2-codex (サブスクリプション$20〜200)
 4. glm/glm-4.7 (低価格 100万あたり$0.6)
 5. minimax/MiniMax-M2.1 (最安 100万あたり$0.2)
-6. if/kimi-k2-thinking (無料無制限)
+6. if/kimi-k2 (無料無制限)
 7. kr/claude-sonnet-4.5 (無料品質)
 
 月次コスト: $40〜320 (サブスクリプション) + $10〜20 (低価格階層)
@@ -387,7 +387,7 @@ Models:
 Gemini CLI経由で6000万 (無料): $0
 Claude Code経由で3000万 (サブスクリプション): $0追加
 GLM経由で800万 (低価格): $4.80
-iFlow経由で200万 (無料): $0
+iFlow経由で200万 (有料プラン): $0
 合計: 月$4.80 + すでに持っているサブスクリプション
 節約: 月$1,995 (99.76%)
 ```

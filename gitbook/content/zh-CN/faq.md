@@ -41,8 +41,8 @@
 
 **目标:** 比 ChatGPT API(每 1M $20)便宜 90%!
 
-### 第 3 层:免费(应急)
-- **iFlow**:8 个免费模型(Kimi K2、Qwen3、GLM、MiniMax...)
+### 第 3 层:备用(iFlow 付费套餐,Kiro 免费)
+- **iFlow**:15 个模型(付费套餐)(Kimi K2、Qwen3、GLM、MiniMax...)
 - **Qwen**:3 个免费模型(Qwen3 Coder Plus/Flash、Vision)
 - **Kiro**:2 个免费模型(Claude Sonnet 4.5、Haiku 4.5)
 
@@ -56,7 +56,7 @@
 
 **可用的免费层提供商:**
 - **Gemini CLI** - 每月 180K 次补全(免费 Google 账户)
-- **iFlow** - 8 个无限模型(免费 OAuth)
+- **iFlow** - 15 个模型(付费套餐、OAuth)
 - **Qwen** - 3 个无限模型(免费 OAuth)
 - **Kiro** - Claude Sonnet/Haiku(免费 AWS Builder ID)
 
@@ -84,7 +84,7 @@
 - **OpenRouter** - 透传到任意 OpenRouter 模型
 
 ### 免费提供商
-- **iFlow** - 8 个模型(Kimi K2、Qwen3、GLM、MiniMax、DeepSeek...)
+- **iFlow** - 15 个模型(Kimi K2、Qwen3、GLM、MiniMax、DeepSeek...)
 - **Qwen** - 3 个模型(Qwen3 Coder Plus/Flash、Vision)
 - **Kiro** - 2 个模型(Claude Sonnet 4.5、Haiku 4.5)
 
@@ -102,9 +102,9 @@
 
 ```
 示例组合: "premium-coding"
-1. cc/claude-opus-4-5(订阅主力)
+1. cc/claude-opus-5(订阅主力)
 2. glm/glm-4.7(低价备用)
-3. if/kimi-k2(免费应急)
+3. if/kimi-k2(付费应急)
 
 → 配额耗尽时自动切换
 → 永不停止编码
@@ -166,7 +166,7 @@
 Cursor Settings → Models → Advanced:
   OpenAI API Base URL: https://9router.com/v1
   OpenAI API Key: [从仪表盘获取]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 **替代方案:** 在 VPS 上自托管,使用公开域名:

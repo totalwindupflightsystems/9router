@@ -29,7 +29,7 @@ Agrega la siguiente configuración a tu `config.json`:
     {
       "title": "9Router - Claude Opus",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     }
@@ -44,7 +44,7 @@ Agrega la siguiente configuración a tu `config.json`:
     {
       "title": "9Router - Claude Opus (Best)",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     },
@@ -94,7 +94,7 @@ Reemplaza `apiBase` con:
 ## Modelos disponibles
 
 ### Modelos Claude (Anthropic)
-- `cc/claude-opus-4-5-20251101` - El más capaz, ideal para tareas complejas
+- `cc/claude-opus-5` - El más capaz, ideal para tareas complejas
 - `cc/claude-sonnet-4-20250514` - Rendimiento y velocidad equilibrados
 - `cc/claude-haiku-4-20250514` - El más rápido, bueno para tareas simples
 
@@ -160,7 +160,7 @@ Ajusta el comportamiento del modelo con parámetros:
     {
       "title": "9Router - Creative Writer",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key",
       "apiBase": "http://localhost:20128/v1",
       "temperature": 0.9,
@@ -228,7 +228,7 @@ Configura qué contexto envía Continue al modelo:
 ### Estrategia de selección de modelo
 - **Ediciones rápidas**: Usa `cc/claude-haiku-4-20250514`
 - **Generación de código**: Usa `cx/deepseek-chat`
-- **Refactoring complejo**: Usa `cc/claude-opus-4-5-20251101`
+- **Refactoring complejo**: Usa `cc/claude-opus-5`
 - **Resolución de problemas**: Usa `cx/deepseek-reasoner`
 
 ### Gestión de contexto

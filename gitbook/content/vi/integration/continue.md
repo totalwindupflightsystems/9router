@@ -29,7 +29,7 @@ Thêm cấu hình sau vào `config.json`:
     {
       "title": "9Router - Claude Opus",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     }
@@ -44,7 +44,7 @@ Thêm cấu hình sau vào `config.json`:
     {
       "title": "9Router - Claude Opus (Best)",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     },
@@ -94,7 +94,7 @@ Thay `apiBase` bằng:
 ## Model có sẵn
 
 ### Claude Models (Anthropic)
-- `cc/claude-opus-4-5-20251101` - Mạnh nhất, tốt nhất cho task phức tạp
+- `cc/claude-opus-5` - Mạnh nhất, tốt nhất cho task phức tạp
 - `cc/claude-sonnet-4-20250514` - Cân bằng hiệu năng và tốc độ
 - `cc/claude-haiku-4-20250514` - Nhanh nhất, phù hợp task đơn giản
 
@@ -160,7 +160,7 @@ Thêm system prompt tùy chỉnh cho hành vi cụ thể:
     {
       "title": "9Router - Creative Writer",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key",
       "apiBase": "http://localhost:20128/v1",
       "temperature": 0.9,
@@ -228,7 +228,7 @@ Cấu hình context Continue gửi đến model:
 ### Chiến lược Chọn Model
 - **Edit nhanh**: Dùng `cc/claude-haiku-4-20250514`
 - **Tạo code**: Dùng `cx/deepseek-chat`
-- **Refactoring phức tạp**: Dùng `cc/claude-opus-4-5-20251101`
+- **Refactoring phức tạp**: Dùng `cc/claude-opus-5`
 - **Giải quyết vấn đề**: Dùng `cx/deepseek-reasoner`
 
 ### Quản lý Context

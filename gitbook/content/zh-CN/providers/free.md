@@ -8,7 +8,7 @@
 
 免费层提供商是订阅和低价配额都耗尽时的 **回退**:
 
-- 🆓 **iFlow** - 8 个免费模型(Kimi K2、Qwen3、GLM 4.7、MiniMax M2...)
+- 💳 **iFlow** - 15 个模型(付费套餐、OAuth)(Kimi K2、Qwen3、GLM 4.7、DeepSeek...)
 - 🆓 **Qwen** - 3 个免费模型(Qwen3 Coder Plus/Flash、Vision)
 - 🆓 **Kiro** - 2 个免费模型(Claude Sonnet 4.5、Haiku 4.5)
 
@@ -16,13 +16,13 @@
 
 ---
 
-## iFlow(8 个免费模型)
+## iFlow(15 个模型(付费套餐))
 
 ### 价格
 
 | 套餐 | 月费 | 模型 | 配额 |
 |------|--------------|--------|-------|
-| 免费 | $0 | 8 个模型 | 无限 |
+| 付费(OAuth) | 因套餐而异 | 15 | 按套餐配额 |
 
 **最佳价值:** 免费层中模型最多!Kimi K2、Qwen3、GLM、MiniMax、DeepSeek。
 
@@ -46,34 +46,34 @@
 **步骤 3:在 CLI 中使用**
 
 ```
-Model: if/kimi-k2-thinking
+Model: if/kimi-k2
        if/kimi-k2
        if/qwen3-coder-plus
        if/glm-4.7
-       if/minimax-m2
+       if/qwen3-vl-plus
        if/deepseek-r1
-       if/deepseek-v3.2-chat
-       if/deepseek-v3.2-reasoner
+       if/deepseek-v3.2
+       if/qwen3-235b-a22b-thinking-2507
 ```
 
 ### 可用模型
 
 | 模型 ID | 描述 | 最佳场景 |
 |----------|-------------|----------|
-| `if/kimi-k2-thinking` | Kimi K2 Thinking | 复杂推理 |
+| `if/kimi-k2` | Kimi K2 | 复杂推理 |
 | `if/kimi-k2` | Kimi K2 | 通用编码 |
 | `if/qwen3-coder-plus` | Qwen3 Coder Plus | 代码生成 |
 | `if/glm-4.7` | GLM 4.7 | 中文 + 英文 |
-| `if/minimax-m2` | MiniMax M2 | 长上下文 |
+| `if/qwen3-vl-plus` | Qwen3 VL Plus | 长上下文 |
 | `if/deepseek-r1` | DeepSeek R1 | 推理任务 |
-| `if/deepseek-v3.2-chat` | DeepSeek V3.2 Chat | 对话型 |
-| `if/deepseek-v3.2-reasoner` | DeepSeek V3.2 Reasoner | 复杂逻辑 |
+| `if/deepseek-v3.2` | DeepSeek V3.2 Exp | 对话型 |
+| `if/qwen3-235b-a22b-thinking-2507` | Qwen3 235B A22B Thinking | 复杂逻辑 |
 
 ### 专业建议
 
 - **8 个免费模型** - 免费层中最丰富
-- **无限用量** - 无配额限制
-- **Kimi K2 Thinking** - 复杂推理最佳
+- **付费套餐** - 按套餐配额
+- **Kimi K2** - 复杂推理最佳
 - **DeepSeek R1** - 强大的推理能力
 
 ---
@@ -185,7 +185,7 @@ Model: kr/claude-sonnet-4.5
 
 | 提供商 | 模型 | 最佳模型 | 设置方式 | 配额 |
 |----------|--------|------------|-------|-------|
-| **iFlow** | 8 | Kimi K2 Thinking | OAuth | 无限 |
+| **iFlow** | 15 | Kimi K2 | OAuth | 付费套餐 |
 | **Qwen** | 3 | Qwen3 Coder Plus | 设备码 | 无限 |
 | **Kiro** | 2 | Claude Sonnet 4.5 | AWS Builder ID | 无限 |
 
@@ -201,7 +201,7 @@ Model: kr/claude-sonnet-4.5
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [从 9router 仪表盘获取]
-  Model: if/kimi-k2-thinking
+  Model: if/kimi-k2
 ```
 
 ### 创建组合(推荐)
@@ -209,13 +209,13 @@ Settings → Models → Advanced:
 ```
 仪表盘 → 组合 → 新建
 
-名称: free-combo
+名称: budget-combo
 模型:
-  1. if/kimi-k2-thinking (iFlow 主力)
+  1. if/kimi-k2 (iFlow 主力)
   2. qw/qwen3-coder-plus (Qwen 备用)
   3. kr/claude-sonnet-4.5 (Kiro 质量)
 
-CLI 中使用: free-combo
+CLI 中使用: budget-combo
 ```
 
 **结果:** 零成本,最大在线!
@@ -232,10 +232,10 @@ CLI 中使用: free-combo
 名称: complete-fallback
 模型:
   1. gc/gemini-3-flash-preview (免费订阅)
-  2. cc/claude-opus-4-5 (付费订阅)
+  2. cc/claude-opus-5 (付费订阅)
   3. glm/glm-4.7 (低价备用, 每 1M $0.6)
   4. minimax/MiniMax-M2.1 (最便宜, 每 1M $0.2)
-  5. if/kimi-k2-thinking (免费回退)
+  5. if/kimi-k2 (付费回退(OAuth))
   6. kr/claude-sonnet-4.5 (免费质量)
 
 CLI 中使用: complete-fallback
@@ -245,7 +245,7 @@ CLI 中使用: complete-fallback
 - 第 1 层: 免费订阅(Gemini CLI)
 - 第 2 层: 付费订阅(Claude Code)
 - 第 3 层: 低价备用(GLM、MiniMax)
-- 第 4 层: 免费回退(iFlow、Kiro)
+- 第 4 层: 付费回退(OAuth)(iFlow、Kiro)
 
 **永不停码!**
 
@@ -270,10 +270,10 @@ CLI 中使用: complete-fallback
 ### 2. 选择合适的模型
 
 ```
-复杂推理: if/kimi-k2-thinking
+复杂推理: if/kimi-k2
 快速编码: qw/qwen3-coder-flash
 最佳质量: kr/claude-sonnet-4.5
-长上下文: if/minimax-m2
+长上下文: if/qwen3-vl-plus
 视觉任务: qw/vision-model
 ```
 
@@ -285,7 +285,7 @@ CLI 中使用: complete-fallback
 名称: zero-cost
 模型:
   1. kr/claude-sonnet-4.5 (最佳质量)
-  2. if/kimi-k2-thinking (复杂任务)
+  2. if/kimi-k2 (复杂任务)
   3. qw/qwen3-coder-plus (快速编码)
 
 成本: 永远 $0!
@@ -315,7 +315,7 @@ CLI 中使用: complete-fallback
 ```
 设置:
 1. kr/claude-sonnet-4.5 (最佳质量)
-2. if/kimi-k2-thinking (复杂推理)
+2. if/kimi-k2 (复杂推理)
 3. qw/qwen3-coder-plus (快速编码)
 
 月成本: $0
@@ -333,7 +333,7 @@ CLI 中使用: complete-fallback
 设置:
 1. gc/gemini-3-flash-preview (每月免费 180K)
 2. glm/glm-4.7 (低价备用, 每 1M $0.6)
-3. if/kimi-k2-thinking (免费回退)
+3. if/kimi-k2 (付费回退(OAuth))
 
 月成本: $5-10
 用量: 100M+ tokens
@@ -349,11 +349,11 @@ CLI 中使用: complete-fallback
 ```
 设置:
 1. gc/gemini-3-flash-preview (每月免费 180K)
-2. cc/claude-opus-4-5 (订阅 $20-100)
+2. cc/claude-opus-5 (订阅 $20-100)
 3. cx/gpt-5.2-codex (订阅 $20-200)
 4. glm/glm-4.7 (低价 每 1M $0.6)
 5. minimax/MiniMax-M2.1 (最便宜 每 1M $0.2)
-6. if/kimi-k2-thinking (免费无限)
+6. if/kimi-k2 (免费无限)
 7. kr/claude-sonnet-4.5 (免费质量)
 
 月成本: $40-320(订阅)+ $10-20(低价层)
@@ -387,7 +387,7 @@ CLI 中使用: complete-fallback
 60M 通过 Gemini CLI(免费): $0
 30M 通过 Claude Code(订阅): 无额外费用
 8M 通过 GLM(低价): $4.80
-2M 通过 iFlow(免费): $0
+2M 通过 iFlow(付费, OAuth): $0
 合计: $4.80/月 + 你已有的订阅
 节省: $1,995/月 (99.76%)
 ```

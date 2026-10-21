@@ -51,7 +51,7 @@ https://9router.com
 
 1. Click **View All Models** button
 2. Click **Add Custom Model**
-3. Enter the model name from your 9Router configuration (e.g., `gpt-4`, `claude-opus-4-5`, etc.)
+3. Enter the model name from your 9Router configuration (e.g., `gpt-4`, `claude-opus-5`, etc.)
 4. Click **Add**
 
 ### 6. Select Model
@@ -68,7 +68,7 @@ Your Cursor settings should look like this:
 OpenAI API: ✓ Enabled
 Base URL: https://9router.com
 API Key: sk-9router-xxxxxxxxxxxxx
-Custom Models: gpt-4, claude-opus-4-5, gemini-2.0-flash
+Custom Models: gpt-4, claude-opus-5, gemini-2.0-flash
 ```
 
 ## Available Models
@@ -79,8 +79,8 @@ You can use any model configured in your 9Router dashboard. Common examples:
 |------------|----------|-------------|
 | `gpt-4` | OpenAI | GPT-4 Turbo |
 | `gpt-4o` | OpenAI | GPT-4 Optimized |
-| `claude-opus-4-5` | Anthropic | Claude Opus 4.5 |
-| `claude-sonnet-4-5` | Anthropic | Claude Sonnet 4.5 |
+| `claude-opus-5` | Anthropic | Claude Opus 4.5 |
+| `claude-sonnet-5` | Anthropic | Claude Sonnet 4.5 |
 | `gemini-2.0-flash` | Google | Gemini 2.0 Flash |
 
 ## Usage

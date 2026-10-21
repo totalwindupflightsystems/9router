@@ -51,7 +51,7 @@ https://9router.com
 
 1. 点击 **View All Models** 按钮
 2. 点击 **Add Custom Model**
-3. 输入 9Router 配置中的模型名(例如 `gpt-4`、`claude-opus-4-5` 等)
+3. 输入 9Router 配置中的模型名(例如 `gpt-4`、`claude-opus-5` 等)
 4. 点击 **Add**
 
 ### 6. 选择模型
@@ -68,7 +68,7 @@ https://9router.com
 OpenAI API: ✓ 已启用
 Base URL: https://9router.com
 API Key: sk-9router-xxxxxxxxxxxxx
-Custom Models: gpt-4, claude-opus-4-5, gemini-2.0-flash
+Custom Models: gpt-4, claude-opus-5, gemini-2.0-flash
 ```
 
 ## 可用模型
@@ -79,8 +79,8 @@ Custom Models: gpt-4, claude-opus-4-5, gemini-2.0-flash
 |------------|----------|-------------|
 | `gpt-4` | OpenAI | GPT-4 Turbo |
 | `gpt-4o` | OpenAI | GPT-4 Optimized |
-| `claude-opus-4-5` | Anthropic | Claude Opus 4.5 |
-| `claude-sonnet-4-5` | Anthropic | Claude Sonnet 4.5 |
+| `claude-opus-5` | Anthropic | Claude Opus 4.5 |
+| `claude-sonnet-5` | Anthropic | Claude Sonnet 4.5 |
 | `gemini-2.0-flash` | Google | Gemini 2.0 Flash |
 
 ## 使用

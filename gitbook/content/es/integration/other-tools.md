@@ -32,7 +32,7 @@ Model: cualquier modelo de 9Router (cc/*, cx/*, glm/*, etc.)
 ## Modelos disponibles
 
 ### Modelos Claude (Anthropic)
-- `cc/claude-opus-4-5-20251101`
+- `cc/claude-opus-5`
 - `cc/claude-sonnet-4-20250514`
 - `cc/claude-haiku-4-20250514`
 
@@ -348,7 +348,7 @@ Error: Invalid API key
 
 **Problema:** 404 Model not found
 ```
-Error: Model 'cc/claude-opus' not found
+Error: Model 'cc/claude-opus-5' not found
 ```
 
 **Solución:**

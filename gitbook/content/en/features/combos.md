@@ -12,7 +12,7 @@ Combos are **custom fallback chains** that you create in the dashboard. Instead 
 ```
 Combo name: premium-coding
 Models:
-  1. cc/claude-opus-4-5-20251101 (try first)
+  1. cc/claude-opus-5 (try first)
   2. glm/glm-4.7 (if #1 quota exhausted)
   3. minimax/MiniMax-M2.1 (if #2 quota exhausted)
 ```
@@ -30,15 +30,15 @@ Model: premium-coding
 
 ### 1. Maximize Subscription Value
 ```
-cc/claude-opus → glm/glm-4.7 → if/kimi-k2-thinking
+cc/claude-opus-5 → glm/glm-4.7 → if/kimi-k2
 
-→ Use subscription first, cheap backup, free emergency
+→ Use subscription first, cheap backup, paid emergency
 → Get full value from subscriptions you already pay for
 ```
 
 ### 2. Minimize Costs
 ```
-glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
+glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2
 
 → Start with cheapest paid option ($0.60/1M)
 → Fallback to even cheaper ($0.20/1M)
@@ -48,7 +48,7 @@ glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
 
 ### 3. Ensure 24/7 Availability
 ```
-cc/claude-opus → cx/gpt-5.2-codex → glm/glm-4.7 → if/kimi-k2-thinking
+cc/claude-opus-5 → cx/gpt-5.2-codex → glm/glm-4.7 → if/kimi-k2
 
 → Always include free tier at the end
 → Never run out of quota
@@ -57,7 +57,7 @@ cc/claude-opus → cx/gpt-5.2-codex → glm/glm-4.7 → if/kimi-k2-thinking
 
 ### 4. Optimize for Quality
 ```
-cc/claude-opus-4-5 → cx/gpt-5.2-codex → gc/gemini-3-pro
+cc/claude-opus-5 → cx/gpt-5.2-codex → gc/gemini-3-pro
 
 → Best models first
 → Fallback to other premium models
@@ -90,12 +90,12 @@ premium-coding
 
 **Description (optional):**
 ```
-Subscription first, cheap backup, free emergency
+Subscription first, cheap backup, paid emergency
 ```
 
 **Select Models:**
 ```
-1. cc/claude-opus-4-5-20251101
+1. cc/claude-opus-5
 2. glm/glm-4.7
 3. minimax/MiniMax-M2.1
 ```
@@ -129,7 +129,7 @@ Dashboard → Combos → Create New
 
 Name: premium-coding
 Models:
-  1. cc/claude-opus-4-5-20251101
+  1. cc/claude-opus-5
   2. glm/glm-4.7
   3. minimax/MiniMax-M2.1
 ```
@@ -143,7 +143,7 @@ Cursor IDE:
 **Behavior:**
 ```
 Morning (fresh quota):
-  Request → cc/claude-opus-4-5 ✅
+  Request → cc/claude-opus-5 ✅
 
 Afternoon (Claude quota out):
   Request → glm/glm-4.7 ✅ (auto switched)
@@ -175,7 +175,7 @@ Name: budget-combo
 Models:
   1. glm/glm-4.7
   2. minimax/MiniMax-M2.1
-  3. if/kimi-k2-thinking
+  3. if/kimi-k2
 ```
 
 **Usage:**
@@ -191,7 +191,7 @@ Cline:
 Request → glm/glm-4.7
   ✅ Daily quota available → Use GLM ($0.60/1M)
   ❌ Quota exhausted → Try MiniMax ($0.20/1M)
-  ❌ MiniMax quota out → Use iFlow (FREE)
+  ❌ MiniMax quota out → Use iFlow (Paid, OAuth)
 ```
 
 **Monthly cost (100M tokens):**
@@ -213,9 +213,9 @@ Total: $46 vs $2000 on ChatGPT API
 ```
 Dashboard → Combos → Create New
 
-Name: free-combo
+Name: budget-combo
 Models:
-  1. if/kimi-k2-thinking
+  1. if/kimi-k2
   2. qw/qwen3-coder-plus
   3. kr/claude-sonnet-4.5
 ```
@@ -223,12 +223,12 @@ Models:
 **Usage:**
 ```
 Claude Desktop:
-  Model: free-combo
+  Model: budget-combo
 ```
 
 **Behavior:**
 ```
-Request → if/kimi-k2-thinking
+Request → if/kimi-k2
   ✅ Available → Use iFlow
   ❌ Error → Try Qwen
   ❌ Error → Try Kiro
@@ -253,7 +253,7 @@ Dashboard → Combos → Create New
 
 Name: quality-first
 Models:
-  1. cc/claude-opus-4-5-20251101
+  1. cc/claude-opus-5
   2. cx/gpt-5.2-codex
   3. gc/gemini-3-pro-preview
 ```
@@ -267,7 +267,7 @@ Codex CLI:
 
 **Behavior:**
 ```
-Request → cc/claude-opus-4-5
+Request → cc/claude-opus-5
   ❌ Quota out → cx/gpt-5.2-codex
   ❌ Quota out → gc/gemini-3-pro-preview
   ❌ All out → Return error (no cheap fallback)
@@ -287,11 +287,11 @@ Dashboard → Combos → Create New
 Name: multi-sub
 Models:
   1. gc/gemini-3-flash-preview (FREE 180K/month)
-  2. cc/claude-opus-4-5-20251101 (Pro subscription)
+  2. cc/claude-opus-5 (Pro subscription)
   3. cx/gpt-5.2-codex (Plus subscription)
   4. gh/gpt-5 (Copilot subscription)
   5. glm/glm-4.7 (Cheap backup)
-  6. if/kimi-k2-thinking (Free emergency)
+  6. if/kimi-k2 (Paid emergency, OAuth)
 ```
 
 **Monthly cost (200M tokens):**
@@ -318,11 +318,11 @@ Dashboard → Combos → Create New
 
 Name: reset-optimized
 Models:
-  1. cc/claude-opus-4-5 (5h reset, use morning)
+  1. cc/claude-opus-5 (5h reset, use morning)
   2. gc/gemini-3-flash (1K/day, use afternoon)
   3. glm/glm-4.7 (daily 10AM reset, use evening)
   4. minimax/MiniMax-M2.1 (5h rolling, use night)
-  5. if/kimi-k2-thinking (unlimited, emergency)
+  5. if/kimi-k2 (unlimited, emergency)
 ```
 
 **Daily routine:**
@@ -348,14 +348,24 @@ Settings → Models → Advanced:
   Model: premium-coding
 ```
 
-### Claude Desktop
+### Claude Code / Claude Desktop
 
-Edit `~/.claude/config.json`:
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+
+# use a combo by model name:
+claude --model budget-combo
+```
+
+Or persist the connection in `~/.claude/settings.json`:
+
 ```json
 {
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key",
-  "model": "budget-combo"
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-9router-api-key"
+  }
 }
 ```
 
@@ -374,7 +384,7 @@ codex --model quality-first "your prompt"
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [from dashboard]
-Model: free-combo
+Model: budget-combo
 ```
 
 ### API Request
@@ -400,10 +410,10 @@ curl http://localhost:20128/v1/chat/completions \
 
 ```
 ✅ Good:
-cc/claude-opus → glm/glm-4.7 → if/kimi-k2-thinking
+cc/claude-opus-5 → glm/glm-4.7 → if/kimi-k2
 
 ❌ Bad:
-cc/claude-opus → glm/glm-4.7
+cc/claude-opus-5 → glm/glm-4.7
 (no free fallback, can run out of quota)
 ```
 
@@ -413,10 +423,10 @@ cc/claude-opus → glm/glm-4.7
 
 ```
 ✅ Good:
-glm/glm-4.7 → minimax/MiniMax-M2.1 → cc/claude-opus
+glm/glm-4.7 → minimax/MiniMax-M2.1 → cc/claude-opus-5
 
 ❌ Bad:
-cc/claude-opus → glm/glm-4.7
+cc/claude-opus-5 → glm/glm-4.7
 (wastes subscription quota on simple tasks)
 ```
 
@@ -426,23 +436,23 @@ cc/claude-opus → glm/glm-4.7
 
 ```
 For production code:
-cc/claude-opus → cx/gpt-5.2-codex → glm/glm-4.7
+cc/claude-opus-5 → cx/gpt-5.2-codex → glm/glm-4.7
 
 For quick tasks:
-glm/glm-4.7 → if/kimi-k2-thinking
+glm/glm-4.7 → if/kimi-k2
 
 For experimentation:
-if/kimi-k2-thinking → qw/qwen3-coder-plus
+if/kimi-k2 → qw/qwen3-coder-plus
 ```
 
 ### 4. Consider Quota Reset Times
 
 ```
 Morning combo (fresh quotas):
-cc/claude-opus → cx/gpt-5.2-codex
+cc/claude-opus-5 → cx/gpt-5.2-codex
 
 Evening combo (quotas likely exhausted):
-glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
+glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2
 ```
 
 ### 5. Create Multiple Combos for Different Use Cases
@@ -450,7 +460,7 @@ glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
 ```
 premium-coding: For complex tasks
 budget-combo: For simple tasks
-free-combo: For experimentation
+budget-combo: For experimentation
 quality-first: For production code
 ```
 
@@ -461,7 +471,7 @@ quality-first: For production code
 ```
 Dashboard → Analytics → Combo Usage:
   premium-coding:
-    80% via cc/claude-opus (good, using subscription)
+    80% via cc/claude-opus-5 (good, using subscription)
     15% via glm/glm-4.7 (acceptable backup)
     5% via minimax (rare fallback)
 ```
@@ -486,9 +496,9 @@ When limit reached, 9Router skips paid models and uses free tier only.
 
 ```
 Dashboard → Combos → Edit → Models:
-  ✅ cc/claude-opus-4-5 (enabled)
+  ✅ cc/claude-opus-5 (enabled)
   ❌ glm/glm-4.7 (temporarily disabled)
-  ✅ if/kimi-k2-thinking (enabled)
+  ✅ if/kimi-k2 (enabled)
 ```
 
 **Use case**: Temporarily disable expensive models without deleting combo.

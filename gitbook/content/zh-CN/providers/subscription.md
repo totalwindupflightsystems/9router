@@ -46,8 +46,8 @@
 **步骤 3:在 CLI 中使用**
 
 ```
-Model: cc/claude-opus-4-5-20251101
-       cc/claude-sonnet-4-5-20250929
+Model: cc/claude-opus-5
+       cc/claude-sonnet-5
        cc/claude-haiku-4-5-20251001
 ```
 
@@ -55,8 +55,8 @@ Model: cc/claude-opus-4-5-20251101
 
 | 模型 ID | 描述 | 最佳场景 |
 |----------|-------------|----------|
-| `cc/claude-opus-4-5-20251101` | Claude 4.5 Opus | 复杂任务、架构 |
-| `cc/claude-sonnet-4-5-20250929` | Claude 4.5 Sonnet | 平衡速度/质量 |
+| `cc/claude-opus-5` | Claude 4.5 Opus | 复杂任务、架构 |
+| `cc/claude-sonnet-5` | Claude 4.5 Sonnet | 平衡速度/质量 |
 | `cc/claude-haiku-4-5-20251001` | Claude 4.5 Haiku | 快速响应 |
 
 ### 专业建议
@@ -202,7 +202,7 @@ Model: gc/gemini-3-flash-preview
 ```
 Model: gh/gpt-5
        gh/gpt-5.1-codex-max
-       gh/claude-4.5-sonnet
+       gh/claude-sonnet-4.5
        gh/gemini-3-pro
 ```
 
@@ -212,7 +212,7 @@ Model: gh/gpt-5
 |----------|-------------|----------|
 | `gh/gpt-5` | GPT-5 | 最新 OpenAI 模型 |
 | `gh/gpt-5.1-codex-max` | GPT-5.1 Codex Max | 最大上下文 |
-| `gh/claude-4.5-sonnet` | Claude 4.5 Sonnet | Anthropic 质量 |
+| `gh/claude-sonnet-4.5` | Claude 4.5 Sonnet | Anthropic 质量 |
 | `gh/gemini-3-pro` | Gemini 3 Pro | Google 质量 |
 
 ### 专业建议
@@ -251,8 +251,8 @@ Model: gh/gpt-5
 
 ```
 Model: ag/gemini-3-pro-high
-       ag/claude-sonnet-4-5
-       ag/claude-opus-4-5-thinking
+       ag/claude-sonnet-4-6
+       ag/claude-opus-4-6-thinking
 ```
 
 ### 可用模型
@@ -260,8 +260,8 @@ Model: ag/gemini-3-pro-high
 | 模型 ID | 描述 | 最佳场景 |
 |----------|-------------|----------|
 | `ag/gemini-3-pro-high` | Gemini 3 Pro High | 高质量响应 |
-| `ag/claude-sonnet-4-5` | Claude Sonnet 4.5 | Anthropic 质量 |
-| `ag/claude-opus-4-5-thinking` | Claude Opus 4.5 Thinking | 复杂推理 |
+| `ag/claude-sonnet-4-6` | Claude Sonnet 4.5 | Anthropic 质量 |
+| `ag/claude-opus-4-6-thinking` | Claude Opus 4.5 Thinking | 复杂推理 |
 
 ### 专业建议
 
@@ -293,7 +293,7 @@ Model: ag/gemini-3-pro-high
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [从 9router 仪表盘获取]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 ### 创建组合(推荐)
@@ -304,7 +304,7 @@ Settings → Models → Advanced:
 名称: premium-coding
 模型:
   1. gc/gemini-3-flash-preview (免费, 优先使用)
-  2. cc/claude-opus-4-5-20251101 (订阅)
+  2. cc/claude-opus-5 (订阅)
   3. cx/gpt-5.2-codex (订阅备用)
 
 CLI 中使用: premium-coding
@@ -357,9 +357,9 @@ Claude Code Pro
 ```
 示例组合:
 1. gc/gemini-3-flash-preview(免费主力)
-2. cc/claude-opus-4-5(复杂任务)
+2. cc/claude-opus-5(复杂任务)
 3. glm/glm-4.7(低价备用)
-4. if/kimi-k2-thinking(免费回退)
+4. if/kimi-k2(付费回退(OAuth))
 ```
 
 ### 4. 按时间优化
@@ -392,8 +392,8 @@ Claude Code Pro
 
 **方案:**
 - 订阅配额已用尽
-- 添加回退:`cc/claude-opus → glm/glm-4.7`
-- 使用免费层:`if/kimi-k2-thinking`
+- 添加回退:`cc/claude-opus-5 → glm/glm-4.7`
+- 使用免费层:`if/kimi-k2`
 
 ---
 

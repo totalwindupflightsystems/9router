@@ -44,7 +44,7 @@ npm install -g 9router
 1. 点击 "Connect Claude Code"
 2. 用你的 Claude 账户登录
 3. 授权 9Router
-4. ✅ 完成!使用模型:`cc/claude-opus-4-5-20251101`
+4. ✅ 完成!使用模型:`cc/claude-opus-5`
 
 #### 方式 B:API Key(低价提供商)
 
@@ -63,7 +63,7 @@ npm install -g 9router
 3. 仪表盘 → 添加 API Key → 提供商:`glm` → 粘贴 key
 4. ✅ 完成!使用模型:`glm/glm-4.7`
 
-#### 方式 C:免费提供商(零成本)
+#### 选项 C:免费与付费(OAuth)提供商
 
 **适用于:** iFlow、Qwen、Kiro
 
@@ -77,7 +77,7 @@ npm install -g 9router
 1. 点击 "Connect iFlow"
 2. 用 iFlow 账户登录
 3. 授权
-4. ✅ 完成!使用 8 个模型:`if/kimi-k2-thinking`、`if/qwen3-coder-plus` 等
+4. ✅ 完成!使用 15 个模型:`if/kimi-k2`、`if/qwen3-coder-plus` 等
 
 ---
 
@@ -91,17 +91,26 @@ npm install -g 9router
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [从 9router 仪表盘获取]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
-### Claude Desktop
+### Claude Code / Claude Desktop
 
-编辑 `~/.claude/config.json`:
+Set environment variables (Claude Code reads `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`):
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+```
+
+Or persist them in `~/.claude/settings.json`:
 
 ```json
 {
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key"
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-9router-api-key"
+  }
 }
 ```
 
@@ -111,7 +120,7 @@ Settings → Models → Advanced:
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [从仪表盘获取]
-Model: cc/claude-opus-4-5-20251101
+Model: cc/claude-opus-5
 ```
 
 ### Codex CLI
@@ -134,9 +143,9 @@ codex "your prompt"
 
 名称: premium-coding
 模型:
-  1. cc/claude-opus-4-5-20251101 (订阅主力)
+  1. cc/claude-opus-5 (订阅主力)
   2. glm/glm-4.7 (低价备用, $0.6/1M)
-  3. if/kimi-k2-thinking (免费回退)
+  3. if/kimi-k2 (付费回退(OAuth))
 
 CLI 中使用: premium-coding
 ```
@@ -144,7 +153,7 @@ CLI 中使用: premium-coding
 **工作原理:**
 1. 先尝试 Claude Opus(你的订阅)
 2. 配额耗尽 → GLM-4.7(超低价)
-3. 预算上限 → iFlow(免费)
+3. 预算上限 → iFlow(付费, OAuth)
 4. 零停机,自动切换!
 
 ---
@@ -154,8 +163,8 @@ CLI 中使用: premium-coding
 ### 订阅型模型(优先使用)
 
 **Claude Code (`cc/`)** - Pro/Max 订阅:
-- `cc/claude-opus-4-5-20251101` - Claude 4.5 Opus
-- `cc/claude-sonnet-4-5-20250929` - Claude 4.5 Sonnet
+- `cc/claude-opus-5` - Claude 4.5 Opus
+- `cc/claude-sonnet-5` - Claude 4.5 Sonnet
 - `cc/claude-haiku-4-5-20251001` - Claude 4.5 Haiku
 
 **Codex (`cx/`)** - Plus/Pro 订阅:
@@ -168,7 +177,7 @@ CLI 中使用: premium-coding
 
 **GitHub Copilot (`gh/`)** - 订阅:
 - `gh/gpt-5` - GPT-5
-- `gh/claude-4.5-sonnet` - Claude 4.5 Sonnet
+- `gh/claude-sonnet-4.5` - Claude 4.5 Sonnet
 
 ### 低价模型(备用)
 
@@ -181,10 +190,10 @@ CLI 中使用: premium-coding
 **Kimi (`kimi/`)** - $9/月(10M tokens):
 - `kimi/kimi-latest` - Kimi Latest
 
-### 免费模型(应急)
+### 付费套餐(iFlow)— 应急备用
 
-**iFlow (`if/`)** - 8 个免费模型:
-- `if/kimi-k2-thinking` - Kimi K2 Thinking
+**iFlow (`if/`)** - 15 个模型(付费套餐、OAuth):
+- `if/kimi-k2` - Kimi K2
 - `if/qwen3-coder-plus` - Qwen3 Coder Plus
 - `if/glm-4.7` - GLM 4.7
 - `if/deepseek-r1` - DeepSeek R1
@@ -207,7 +216,7 @@ CLI 中使用: premium-coding
 1. 用 Gemini CLI 免费层(每月 180K)处理快速任务
 2. 用足 Claude Code 订阅配额(你已经付费了)
 3. 配额用完后回退到 GLM(每 1M $0.6)
-4. 应急: MiniMax M2.1(每 1M $0.20)或 iFlow(免费)
+4. 应急: MiniMax M2.1(每 1M $0.20)或 iFlow(付费, OAuth)
 
 真实案例(每月 100M tokens):
   60M 通过 Gemini CLI: $0(免费层)
@@ -224,7 +233,7 @@ CLI 中使用: premium-coding
 1. 早上: 全新的 Claude Code 配额(5h 重置)
 2. 下午: 切换到 Gemini CLI(每日 1K)
 3. 晚上: GLM 每日配额(次日 10AM 重置)
-4. 深夜: MiniMax(5h 滚动)或 iFlow(免费)
+4. 深夜: MiniMax(5h 滚动)或 iFlow(付费, OAuth)
 
 → 24/7 编码,几乎零额外成本!
 ```

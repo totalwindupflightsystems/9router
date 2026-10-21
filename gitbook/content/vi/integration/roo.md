@@ -37,7 +37,7 @@ API Key: your-api-key-from-dashboard
 Chọn từ các model 9Router có sẵn:
 
 **Claude Models:**
-- `cc/claude-opus-4-5-20251101` - Mạnh nhất
+- `cc/claude-opus-5` - Mạnh nhất
 - `cc/claude-sonnet-4-20250514` - Cân bằng
 - `cc/claude-haiku-4-20250514` - Nhanh
 
@@ -81,7 +81,7 @@ Model: cx/deepseek-reasoner
 
 - **Task nhanh**: Dùng `cc/claude-haiku-4-20250514` hoặc `glm/glm-4-flash`
 - **Hiệu năng cân bằng**: Dùng `cc/claude-sonnet-4-20250514` hoặc `cx/deepseek-chat`
-- **Reasoning phức tạp**: Dùng `cc/claude-opus-4-5-20251101` hoặc `cx/deepseek-reasoner`
+- **Reasoning phức tạp**: Dùng `cc/claude-opus-5` hoặc `cx/deepseek-reasoner`
 - **Tối ưu chi phí**: Dùng model DeepSeek hoặc GLM
 
 ## Troubleshooting
@@ -109,7 +109,7 @@ Bạn có thể tạo shortcut cho model thường dùng trong Roo settings:
 
 ```
 Alias: "fast" → cc/claude-haiku-4-20250514
-Alias: "smart" → cc/claude-opus-4-5-20251101
+Alias: "smart" → cc/claude-opus-5
 Alias: "code" → cx/deepseek-chat
 ```
 

@@ -8,7 +8,7 @@ Respaldo de emergencia cuando todo lo demás está limitado por cuota. ¡Codific
 
 Los proveedores del nivel gratis son tu **fallback** cuando se agota la cuota de suscripción y la del nivel barato:
 
-- 🆓 **iFlow** - 8 modelos GRATIS (Kimi K2, Qwen3, GLM 4.7, MiniMax M2...)
+- 💳 **iFlow** - 15 modelos (planes de pago, OAuth) (Kimi K2, Qwen3, GLM 4.7, DeepSeek...)
 - 🆓 **Qwen** - 3 modelos GRATIS (Qwen3 Coder Plus/Flash, Vision)
 - 🆓 **Kiro** - 2 modelos GRATIS (Claude Sonnet 4.5, Haiku 4.5)
 
@@ -16,13 +16,13 @@ Los proveedores del nivel gratis son tu **fallback** cuando se agota la cuota de
 
 ---
 
-## iFlow (8 modelos GRATIS)
+## iFlow (15 modelos, planes de pago)
 
 ### Precios
 
 | Plan | Costo mensual | Modelos | Cuota |
 |------|--------------|--------|-------|
-| FREE | $0 | 8 modelos | Ilimitado |
+| Pago (OAuth) | según plan | 15 | Cuotas por plan |
 
 **Mejor valor:** ¡La mayoría de modelos en el nivel gratis! Kimi K2, Qwen3, GLM, MiniMax, DeepSeek.
 
@@ -46,34 +46,34 @@ Los proveedores del nivel gratis son tu **fallback** cuando se agota la cuota de
 **Paso 3: Usar en CLI**
 
 ```
-Model: if/kimi-k2-thinking
+Model: if/kimi-k2
        if/kimi-k2
        if/qwen3-coder-plus
        if/glm-4.7
-       if/minimax-m2
+       if/qwen3-vl-plus
        if/deepseek-r1
-       if/deepseek-v3.2-chat
-       if/deepseek-v3.2-reasoner
+       if/deepseek-v3.2
+       if/qwen3-235b-a22b-thinking-2507
 ```
 
 ### Modelos disponibles
 
 | ID del modelo | Descripción | Ideal para |
 |----------|-------------|----------|
-| `if/kimi-k2-thinking` | Kimi K2 Thinking | Razonamiento complejo |
+| `if/kimi-k2` | Kimi K2 | Razonamiento complejo |
 | `if/kimi-k2` | Kimi K2 | Codificación general |
 | `if/qwen3-coder-plus` | Qwen3 Coder Plus | Generación de código |
 | `if/glm-4.7` | GLM 4.7 | Chino + inglés |
-| `if/minimax-m2` | MiniMax M2 | Contexto largo |
+| `if/qwen3-vl-plus` | Qwen3 VL Plus | Contexto largo |
 | `if/deepseek-r1` | DeepSeek R1 | Tareas de razonamiento |
-| `if/deepseek-v3.2-chat` | DeepSeek V3.2 Chat | Conversacional |
-| `if/deepseek-v3.2-reasoner` | DeepSeek V3.2 Reasoner | Lógica compleja |
+| `if/deepseek-v3.2` | DeepSeek V3.2 Exp | Conversacional |
+| `if/qwen3-235b-a22b-thinking-2507` | Qwen3 235B A22B Thinking | Lógica compleja |
 
 ### Pro Tips
 
-- **8 modelos GRATIS** - La mayor variedad en el nivel gratis
-- **Uso ilimitado** - Sin límites de cuota
-- **Kimi K2 Thinking** - Ideal para razonamiento complejo
+- **15 modelos** - El catálogo más amplio
+- **Planes de pago** - cuotas por nivel
+- **Kimi K2** - Ideal para razonamiento complejo
 - **DeepSeek R1** - Fuertes capacidades de razonamiento
 
 ---
@@ -185,7 +185,7 @@ Model: kr/claude-sonnet-4.5
 
 | Proveedor | Modelos | Mejor modelo | Configuración | Cuota |
 |----------|--------|------------|-------|-------|
-| **iFlow** | 8 | Kimi K2 Thinking | OAuth | Ilimitado |
+| **iFlow** | 15 | Kimi K2 | OAuth | Planes de pago |
 | **Qwen** | 3 | Qwen3 Coder Plus | Device Code | Ilimitado |
 | **Kiro** | 2 | Claude Sonnet 4.5 | AWS Builder ID | Ilimitado |
 
@@ -201,7 +201,7 @@ Model: kr/claude-sonnet-4.5
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [desde el dashboard de 9router]
-  Model: if/kimi-k2-thinking
+  Model: if/kimi-k2
 ```
 
 ### Crear combo (Recomendado)
@@ -209,13 +209,13 @@ Settings → Models → Advanced:
 ```
 Dashboard → Combos → Create New
 
-Name: free-combo
+Name: budget-combo
 Models:
-  1. if/kimi-k2-thinking (iFlow principal)
+  1. if/kimi-k2 (iFlow principal)
   2. qw/qwen3-coder-plus (Qwen respaldo)
   3. kr/claude-sonnet-4.5 (Kiro calidad)
 
-Usar en CLI: free-combo
+Usar en CLI: budget-combo
 ```
 
 **Resultado:** ¡Cero costo, máximo uptime!
@@ -232,10 +232,10 @@ Dashboard → Combos → Create New
 Name: complete-fallback
 Models:
   1. gc/gemini-3-flash-preview (Suscripción GRATIS)
-  2. cc/claude-opus-4-5 (Suscripción de pago)
+  2. cc/claude-opus-5 (Suscripción de pago)
   3. glm/glm-4.7 (Respaldo barato, $0.6/1M)
   4. minimax/MiniMax-M2.1 (Más barato, $0.2/1M)
-  5. if/kimi-k2-thinking (Fallback GRATIS)
+  5. if/kimi-k2 (Fallback GRATIS)
   6. kr/claude-sonnet-4.5 (Calidad GRATIS)
 
 Usar en CLI: complete-fallback
@@ -270,10 +270,10 @@ Usa el nivel gratis solo cuando:
 ### 2. Elige el modelo correcto
 
 ```
-Razonamiento complejo: if/kimi-k2-thinking
+Razonamiento complejo: if/kimi-k2
 Codificación rápida: qw/qwen3-coder-flash
 Mejor calidad: kr/claude-sonnet-4.5
-Contexto largo: if/minimax-m2
+Contexto largo: if/qwen3-vl-plus
 Tareas de visión: qw/vision-model
 ```
 
@@ -285,7 +285,7 @@ Para codificación de cero costo:
 Name: zero-cost
 Models:
   1. kr/claude-sonnet-4.5 (Mejor calidad)
-  2. if/kimi-k2-thinking (Tareas complejas)
+  2. if/kimi-k2 (Tareas complejas)
   3. qw/qwen3-coder-plus (Codificación rápida)
 
 ¡Costo: $0 para siempre!
@@ -315,7 +315,7 @@ Guarda la cuota de pago para:
 ```
 Configuración:
 1. kr/claude-sonnet-4.5 (Mejor calidad)
-2. if/kimi-k2-thinking (Razonamiento complejo)
+2. if/kimi-k2 (Razonamiento complejo)
 3. qw/qwen3-coder-plus (Codificación rápida)
 
 Costo mensual: $0
@@ -333,7 +333,7 @@ Perfecto para:
 Configuración:
 1. gc/gemini-3-flash-preview (GRATIS 180K/mes)
 2. glm/glm-4.7 (Respaldo barato, $0.6/1M)
-3. if/kimi-k2-thinking (Fallback GRATIS)
+3. if/kimi-k2 (Fallback GRATIS)
 
 Costo mensual: $5-10
 Uso: 100M+ tokens
@@ -349,11 +349,11 @@ Perfecto para:
 ```
 Configuración:
 1. gc/gemini-3-flash-preview (GRATIS 180K/mes)
-2. cc/claude-opus-4-5 (Suscripción $20-100)
+2. cc/claude-opus-5 (Suscripción $20-100)
 3. cx/gpt-5.2-codex (Suscripción $20-200)
 4. glm/glm-4.7 (Barato $0.6/1M)
 5. minimax/MiniMax-M2.1 (Más barato $0.2/1M)
-6. if/kimi-k2-thinking (GRATIS ilimitado)
+6. if/kimi-k2 (GRATIS ilimitado)
 7. kr/claude-sonnet-4.5 (Calidad GRATIS)
 
 Costo mensual: $40-320 (suscripciones) + $10-20 (nivel barato)
@@ -387,7 +387,7 @@ Ahorros: $2,000/mes (100%)
 60M vía Gemini CLI (GRATIS): $0
 30M vía Claude Code (suscripción): $0 extra
 8M vía GLM (barato): $4.80
-2M vía iFlow (GRATIS): $0
+2M vía iFlow (de pago, OAuth): $0
 Total: $4.80/mes + suscripciones que ya tienes
 Ahorros: $1,995/mes (99.76%)
 ```

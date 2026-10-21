@@ -37,7 +37,7 @@ API Key: your-api-key-from-dashboard
 从可用的 9Router 模型中选择:
 
 **Claude 模型:**
-- `cc/claude-opus-4-5-20251101` - 最强
+- `cc/claude-opus-5` - 最强
 - `cc/claude-sonnet-4-20250514` - 平衡
 - `cc/claude-haiku-4-20250514` - 快速
 
@@ -81,7 +81,7 @@ Hello! Can you confirm you're connected through 9Router?
 
 - **快速任务**:使用 `cc/claude-haiku-4-20250514` 或 `glm/glm-4-flash`
 - **均衡性能**:使用 `cc/claude-sonnet-4-20250514` 或 `cx/deepseek-chat`
-- **复杂推理**:使用 `cc/claude-opus-4-5-20251101` 或 `cx/deepseek-reasoner`
+- **复杂推理**:使用 `cc/claude-opus-5` 或 `cx/deepseek-reasoner`
 - **成本优化**:使用 DeepSeek 或 GLM 模型
 
 ## 故障排除
@@ -109,7 +109,7 @@ Hello! Can you confirm you're connected through 9Router?
 
 ```
 别名: "fast" → cc/claude-haiku-4-20250514
-别名: "smart" → cc/claude-opus-4-5-20251101
+别名: "smart" → cc/claude-opus-5
 别名: "code" → cx/deepseek-chat
 ```
 

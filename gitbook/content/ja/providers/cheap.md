@@ -266,10 +266,10 @@ Dashboard → Combos → Create New
 
 Name: cheap-backup
 Models:
-  1. cc/claude-opus-4-5 (サブスクリプション優先)
+  1. cc/claude-opus-5 (サブスクリプション優先)
   2. glm/glm-4.7 (低価格バックアップ、日次リセット)
   3. minimax/MiniMax-M2.1 (最安フォールバック)
-  4. if/kimi-k2-thinking (無料緊急時)
+  4. if/kimi-k2 (緊急時(有料プラン))
 
 CLIで使用: cheap-backup
 ```
@@ -319,7 +319,7 @@ vs ChatGPT APIでは$20で100万トークン!
 2. Claude Code (すでに支払っているサブスクリプション)
 3. GLM-4.7 (低価格バックアップ、100万あたり$0.6)
 4. MiniMax M2.1 (最安、100万あたり$0.2)
-5. iFlow (無料緊急時)
+5. iFlow (緊急時(有料プラン))
 
 月次コスト例 (1億トークン):
 - Gemini CLI経由で6000万: $0 (無料)
@@ -409,7 +409,7 @@ Coding Plan: 3×クォータ (同じ価格!)
 1. gc/gemini-3-flash (無料プライマリ)
 2. glm/glm-4.7 (低価格バックアップ)
 3. minimax/MiniMax-M2.1 (最安)
-4. if/kimi-k2-thinking (無料緊急時)
+4. if/kimi-k2 (緊急時(有料プラン))
 
 結果: コストを最小化、アップタイムを最大化
 ```

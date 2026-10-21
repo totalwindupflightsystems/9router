@@ -29,7 +29,7 @@
     {
       "title": "9Router - Claude Opus",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     }
@@ -44,7 +44,7 @@
     {
       "title": "9Router - Claude Opus (Best)",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     },
@@ -94,7 +94,7 @@
 ## 利用可能なモデル
 
 ### Claudeモデル (Anthropic)
-- `cc/claude-opus-4-5-20251101` - 最も高性能、複雑なタスクに最適
+- `cc/claude-opus-5` - 最も高性能、複雑なタスクに最適
 - `cc/claude-sonnet-4-20250514` - パフォーマンスと速度のバランス
 - `cc/claude-haiku-4-20250514` - 最速、シンプルなタスクに適している
 
@@ -160,7 +160,7 @@
     {
       "title": "9Router - Creative Writer",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key",
       "apiBase": "http://localhost:20128/v1",
       "temperature": 0.9,
@@ -228,7 +228,7 @@ Continueがモデルに送信するコンテキストを設定:
 ### モデル選択戦略
 - **クイック編集**: `cc/claude-haiku-4-20250514` を使用
 - **コード生成**: `cx/deepseek-chat` を使用
-- **複雑なリファクタリング**: `cc/claude-opus-4-5-20251101` を使用
+- **複雑なリファクタリング**: `cc/claude-opus-5` を使用
 - **問題解決**: `cx/deepseek-reasoner` を使用
 
 ### コンテキスト管理

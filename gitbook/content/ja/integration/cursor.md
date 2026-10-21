@@ -51,7 +51,7 @@ https://9router.com
 
 1. **View All Models** ボタンをクリック
 2. **Add Custom Model** をクリック
-3. 9Router設定からモデル名を入力 (例: `gpt-4`、`claude-opus-4-5` など)
+3. 9Router設定からモデル名を入力 (例: `gpt-4`、`claude-opus-5` など)
 4. **Add** をクリック
 
 ### 6. モデルを選択
@@ -68,7 +68,7 @@ Cursor設定は次のようになります:
 OpenAI API: ✓ Enabled
 Base URL: https://9router.com
 API Key: sk-9router-xxxxxxxxxxxxx
-Custom Models: gpt-4, claude-opus-4-5, gemini-2.0-flash
+Custom Models: gpt-4, claude-opus-5, gemini-2.0-flash
 ```
 
 ## 利用可能なモデル
@@ -79,8 +79,8 @@ Custom Models: gpt-4, claude-opus-4-5, gemini-2.0-flash
 |------------|----------|-------------|
 | `gpt-4` | OpenAI | GPT-4 Turbo |
 | `gpt-4o` | OpenAI | GPT-4 Optimized |
-| `claude-opus-4-5` | Anthropic | Claude Opus 4.5 |
-| `claude-sonnet-4-5` | Anthropic | Claude Sonnet 4.5 |
+| `claude-opus-5` | Anthropic | Claude Opus 4.5 |
+| `claude-sonnet-5` | Anthropic | Claude Sonnet 4.5 |
 | `gemini-2.0-flash` | Google | Gemini 2.0 Flash |
 
 ## 使用法

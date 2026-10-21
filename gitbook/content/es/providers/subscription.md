@@ -46,8 +46,8 @@ Los proveedores del nivel de suscripción son tu opción **principal** - ya est�
 **Paso 3: Usar en CLI**
 
 ```
-Model: cc/claude-opus-4-5-20251101
-       cc/claude-sonnet-4-5-20250929
+Model: cc/claude-opus-5
+       cc/claude-sonnet-5
        cc/claude-haiku-4-5-20251001
 ```
 
@@ -55,8 +55,8 @@ Model: cc/claude-opus-4-5-20251101
 
 | ID del modelo | Descripción | Ideal para |
 |----------|-------------|----------|
-| `cc/claude-opus-4-5-20251101` | Claude 4.5 Opus | Tareas complejas, arquitectura |
-| `cc/claude-sonnet-4-5-20250929` | Claude 4.5 Sonnet | Velocidad/calidad equilibrada |
+| `cc/claude-opus-5` | Claude 4.5 Opus | Tareas complejas, arquitectura |
+| `cc/claude-sonnet-5` | Claude 4.5 Sonnet | Velocidad/calidad equilibrada |
 | `cc/claude-haiku-4-5-20251001` | Claude 4.5 Haiku | Respuestas rápidas |
 
 ### Pro Tips
@@ -202,7 +202,7 @@ Model: gc/gemini-3-flash-preview
 ```
 Model: gh/gpt-5
        gh/gpt-5.1-codex-max
-       gh/claude-4.5-sonnet
+       gh/claude-sonnet-4.5
        gh/gemini-3-pro
 ```
 
@@ -212,7 +212,7 @@ Model: gh/gpt-5
 |----------|-------------|----------|
 | `gh/gpt-5` | GPT-5 | Último modelo de OpenAI |
 | `gh/gpt-5.1-codex-max` | GPT-5.1 Codex Max | Contexto máximo |
-| `gh/claude-4.5-sonnet` | Claude 4.5 Sonnet | Calidad de Anthropic |
+| `gh/claude-sonnet-4.5` | Claude 4.5 Sonnet | Calidad de Anthropic |
 | `gh/gemini-3-pro` | Gemini 3 Pro | Calidad de Google |
 
 ### Pro Tips
@@ -251,8 +251,8 @@ Model: gh/gpt-5
 
 ```
 Model: ag/gemini-3-pro-high
-       ag/claude-sonnet-4-5
-       ag/claude-opus-4-5-thinking
+       ag/claude-sonnet-4-6
+       ag/claude-opus-4-6-thinking
 ```
 
 ### Modelos disponibles
@@ -260,8 +260,8 @@ Model: ag/gemini-3-pro-high
 | ID del modelo | Descripción | Ideal para |
 |----------|-------------|----------|
 | `ag/gemini-3-pro-high` | Gemini 3 Pro High | Respuestas de alta calidad |
-| `ag/claude-sonnet-4-5` | Claude Sonnet 4.5 | Calidad de Anthropic |
-| `ag/claude-opus-4-5-thinking` | Claude Opus 4.5 Thinking | Razonamiento complejo |
+| `ag/claude-sonnet-4-6` | Claude Sonnet 4.5 | Calidad de Anthropic |
+| `ag/claude-opus-4-6-thinking` | Claude Opus 4.5 Thinking | Razonamiento complejo |
 
 ### Pro Tips
 
@@ -293,7 +293,7 @@ Model: ag/gemini-3-pro-high
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [desde el dashboard de 9router]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 ### Crear combo (Recomendado)
@@ -304,7 +304,7 @@ Dashboard → Combos → Create New
 Name: premium-coding
 Models:
   1. gc/gemini-3-flash-preview (GRATIS, usar primero)
-  2. cc/claude-opus-4-5-20251101 (Suscripción)
+  2. cc/claude-opus-5 (Suscripción)
   3. cx/gpt-5.2-codex (Respaldo de suscripción)
 
 Usar en CLI: premium-coding
@@ -357,9 +357,9 @@ Prioridad:
 ```
 Ejemplo de combo:
 1. gc/gemini-3-flash-preview (GRATIS principal)
-2. cc/claude-opus-4-5 (Tareas complejas)
+2. cc/claude-opus-5 (Tareas complejas)
 3. glm/glm-4.7 (Respaldo barato)
-4. if/kimi-k2-thinking (Fallback GRATIS)
+4. if/kimi-k2 (Fallback GRATIS)
 ```
 
 ### 4. Optimiza por tiempo
@@ -392,8 +392,8 @@ Madrugada: Nivel barato/gratis
 
 **Solución:**
 - Cuota de suscripción agotada
-- Agrega fallback: `cc/claude-opus → glm/glm-4.7`
-- Usa el nivel gratis: `if/kimi-k2-thinking`
+- Agrega fallback: `cc/claude-opus-5 → glm/glm-4.7`
+- Usa el nivel gratis: `if/kimi-k2`
 
 ---
 

@@ -29,7 +29,7 @@
     {
       "title": "9Router - Claude Opus",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     }
@@ -44,7 +44,7 @@
     {
       "title": "9Router - Claude Opus (Best)",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key-from-dashboard",
       "apiBase": "http://localhost:20128/v1"
     },
@@ -94,7 +94,7 @@
 ## 可用模型
 
 ### Claude 模型(Anthropic)
-- `cc/claude-opus-4-5-20251101` - 最强,适合复杂任务
+- `cc/claude-opus-5` - 最强,适合复杂任务
 - `cc/claude-sonnet-4-20250514` - 性能与速度平衡
 - `cc/claude-haiku-4-20250514` - 最快,适合简单任务
 
@@ -160,7 +160,7 @@
     {
       "title": "9Router - Creative Writer",
       "provider": "openai",
-      "model": "cc/claude-opus-4-5-20251101",
+      "model": "cc/claude-opus-5",
       "apiKey": "your-api-key",
       "apiBase": "http://localhost:20128/v1",
       "temperature": 0.9,
@@ -228,7 +228,7 @@
 ### 模型选择策略
 - **快速编辑**:使用 `cc/claude-haiku-4-20250514`
 - **代码生成**:使用 `cx/deepseek-chat`
-- **复杂重构**:使用 `cc/claude-opus-4-5-20251101`
+- **复杂重构**:使用 `cc/claude-opus-5`
 - **问题求解**:使用 `cx/deepseek-reasoner`
 
 ### 上下文管理

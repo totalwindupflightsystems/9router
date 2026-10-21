@@ -37,7 +37,7 @@ API Key: your-api-key-from-dashboard
 Choose from available 9Router models:
 
 **Claude Models:**
-- `cc/claude-opus-4-5-20251101` - Most capable
+- `cc/claude-opus-5` - Most capable
 - `cc/claude-sonnet-4-20250514` - Balanced
 - `cc/claude-haiku-4-20250514` - Fast
 
@@ -81,7 +81,7 @@ Model: cx/deepseek-reasoner
 
 - **Quick tasks**: Use `cc/claude-haiku-4-20250514` or `glm/glm-4-flash`
 - **Balanced performance**: Use `cc/claude-sonnet-4-20250514` or `cx/deepseek-chat`
-- **Complex reasoning**: Use `cc/claude-opus-4-5-20251101` or `cx/deepseek-reasoner`
+- **Complex reasoning**: Use `cc/claude-opus-5` or `cx/deepseek-reasoner`
 - **Cost optimization**: Use DeepSeek or GLM models
 
 ## Troubleshooting
@@ -109,7 +109,7 @@ You can create shortcuts for frequently used models in Roo settings:
 
 ```
 Alias: "fast" → cc/claude-haiku-4-20250514
-Alias: "smart" → cc/claude-opus-4-5-20251101
+Alias: "smart" → cc/claude-opus-5
 Alias: "code" → cx/deepseek-chat
 ```
 

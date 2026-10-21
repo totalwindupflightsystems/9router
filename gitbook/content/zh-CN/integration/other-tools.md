@@ -32,7 +32,7 @@ Model: 任意 9Router 模型(cc/*, cx/*, glm/*, 等)
 ## 可用模型
 
 ### Claude 模型(Anthropic)
-- `cc/claude-opus-4-5-20251101`
+- `cc/claude-opus-5`
 - `cc/claude-sonnet-4-20250514`
 - `cc/claude-haiku-4-20250514`
 
@@ -348,7 +348,7 @@ Error: Invalid API key
 
 **问题:** 404 Model not found
 ```
-Error: Model 'cc/claude-opus' not found
+Error: Model 'cc/claude-opus-5' not found
 ```
 
 **方案:**

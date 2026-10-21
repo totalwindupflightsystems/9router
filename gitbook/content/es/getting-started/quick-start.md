@@ -44,7 +44,7 @@ Dashboard → Providers → Connect [Provider]
 1. Clic en "Connect Claude Code"
 2. Inicia sesión con tu cuenta de Claude
 3. Autoriza 9Router
-4. ✅ ¡Listo! Usa el modelo: `cc/claude-opus-4-5-20251101`
+4. ✅ ¡Listo! Usa el modelo: `cc/claude-opus-5`
 
 #### Opción B: API Key (Proveedores baratos)
 
@@ -77,7 +77,7 @@ Dashboard → Providers → Connect [Free Provider]
 1. Clic en "Connect iFlow"
 2. Inicia sesión con tu cuenta de iFlow
 3. Autoriza
-4. ✅ ¡Listo! Usa 8 modelos: `if/kimi-k2-thinking`, `if/qwen3-coder-plus`, etc.
+4. ✅ ¡Listo! Usa 15 modelos: `if/kimi-k2`, `if/qwen3-coder-plus`, etc.
 
 ---
 
@@ -91,17 +91,26 @@ Apunta tu herramienta de codificación a 9Router:
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [desde el dashboard de 9router]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
-### Claude Desktop
+### Claude Code / Claude Desktop
 
-Edita `~/.claude/config.json`:
+Set environment variables (Claude Code reads `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`):
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+```
+
+Or persist them in `~/.claude/settings.json`:
 
 ```json
 {
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key"
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-9router-api-key"
+  }
 }
 ```
 
@@ -111,7 +120,7 @@ Edita `~/.claude/config.json`:
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [desde el dashboard]
-Model: cc/claude-opus-4-5-20251101
+Model: cc/claude-opus-5
 ```
 
 ### Codex CLI
@@ -134,9 +143,9 @@ Dashboard → Combos → Create New
 
 Name: premium-coding
 Models:
-  1. cc/claude-opus-4-5-20251101 (Suscripción principal)
+  1. cc/claude-opus-5 (Suscripción principal)
   2. glm/glm-4.7 (Respaldo barato, $0.6/1M)
-  3. if/kimi-k2-thinking (Fallback gratis)
+  3. if/kimi-k2 (Respaldo de pago, OAuth)
 
 Usar en CLI: premium-coding
 ```
@@ -144,7 +153,7 @@ Usar en CLI: premium-coding
 **Cómo funciona:**
 1. Intenta primero Claude Opus (tu suscripción)
 2. Si la cuota se agota → GLM-4.7 (ultra-barato)
-3. Si llega al límite de presupuesto → iFlow (gratis)
+3. Si llega al límite de presupuesto → iFlow (de pago, OAuth)
 4. ¡Cero tiempo de inactividad, cambio automático!
 
 ---
@@ -154,8 +163,8 @@ Usar en CLI: premium-coding
 ### Modelos de suscripción (Maximiza primero)
 
 **Claude Code (`cc/`)** - Suscripción Pro/Max:
-- `cc/claude-opus-4-5-20251101` - Claude 4.5 Opus
-- `cc/claude-sonnet-4-5-20250929` - Claude 4.5 Sonnet
+- `cc/claude-opus-5` - Claude 4.5 Opus
+- `cc/claude-sonnet-5` - Claude 4.5 Sonnet
 - `cc/claude-haiku-4-5-20251001` - Claude 4.5 Haiku
 
 **Codex (`cx/`)** - Suscripción Plus/Pro:
@@ -168,7 +177,7 @@ Usar en CLI: premium-coding
 
 **GitHub Copilot (`gh/`)** - Suscripción:
 - `gh/gpt-5` - GPT-5
-- `gh/claude-4.5-sonnet` - Claude 4.5 Sonnet
+- `gh/claude-sonnet-4.5` - Claude 4.5 Sonnet
 
 ### Modelos baratos (Respaldo)
 
@@ -181,10 +190,10 @@ Usar en CLI: premium-coding
 **Kimi (`kimi/`)** - $9/mes (10M tokens):
 - `kimi/kimi-latest` - Kimi Latest
 
-### Modelos GRATIS (Emergencia)
+### Planes de pago (iFlow) — respaldo de emergencia
 
-**iFlow (`if/`)** - 8 modelos GRATIS:
-- `if/kimi-k2-thinking` - Kimi K2 Thinking
+**iFlow (`if/`)** - 15 modelos (planes de pago, OAuth):
+- `if/kimi-k2` - Kimi K2
 - `if/qwen3-coder-plus` - Qwen3 Coder Plus
 - `if/glm-4.7` - GLM 4.7
 - `if/deepseek-r1` - DeepSeek R1
@@ -207,7 +216,7 @@ Usar en CLI: premium-coding
 1. Usa el nivel gratis de Gemini CLI (180K/mes) para tareas rápidas
 2. Usa la cuota de suscripción de Claude Code al máximo (ya pagas)
 3. Fallback a GLM ($0.6/1M) cuando se agote la cuota
-4. Emergencia: MiniMax M2.1 ($0.20/1M) o iFlow (gratis)
+4. Emergencia: MiniMax M2.1 ($0.20/1M) o iFlow (de pago, OAuth)
 
 Ejemplo real (100M tokens/mes):
   60M vía Gemini CLI: $0 (nivel gratis)
@@ -224,7 +233,7 @@ Rutina diaria:
 1. Mañana: Cuota fresca de Claude Code (reinicio 5h)
 2. Tarde: Cambia a Gemini CLI (1K/día)
 3. Noche: Cuota diaria de GLM (reinicio 10AM del día siguiente)
-4. Madrugada: MiniMax (rolling 5h) o iFlow (gratis)
+4. Madrugada: MiniMax (rolling 5h) o iFlow (de pago, OAuth)
 
 → ¡Codifica 24/7 con costo extra mínimo!
 ```

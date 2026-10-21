@@ -44,7 +44,7 @@ Dashboard → Providers → Connect [Provider]
 1. Click "Connect Claude Code"
 2. Đăng nhập tài khoản Claude
 3. Cho phép 9Router
-4. ✅ Xong! Dùng model: `cc/claude-opus-4-5-20251101`
+4. ✅ Xong! Dùng model: `cc/claude-opus-5`
 
 #### Cách B: API Key (Cheap Provider)
 
@@ -63,21 +63,21 @@ Dashboard → Providers → Add API Key
 3. Dashboard → Add API Key → Provider: `glm` → Paste key
 4. ✅ Xong! Dùng model: `glm/glm-4.7`
 
-#### Cách C: Free Provider (Miễn phí)
+#### Option C: Free & Paid-OAuth Providers
 
 **Tốt nhất cho:** iFlow, Qwen, Kiro
 
 ```
 Dashboard → Providers → Connect [Free Provider]
 → Device code or OAuth
-→ Unlimited usage
+→ iFlow: paid plans (OAuth) · Kiro/Gemini CLI: free tiers
 ```
 
 **Ví dụ: iFlow**
 1. Click "Connect iFlow"
 2. Đăng nhập tài khoản iFlow
 3. Cho phép
-4. ✅ Xong! Dùng 8 model: `if/kimi-k2-thinking`, `if/qwen3-coder-plus`, v.v.
+4. ✅ Xong! Dùng 15 model: `if/kimi-k2`, `if/qwen3-coder-plus`, v.v.
 
 ---
 
@@ -91,17 +91,26 @@ Trỏ công cụ code của bạn tới 9Router:
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [from 9router dashboard]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
-### Claude Desktop
+### Claude Code / Claude Desktop
 
-Sửa `~/.claude/config.json`:
+Set environment variables (Claude Code reads `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`):
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+```
+
+Or persist them in `~/.claude/settings.json`:
 
 ```json
 {
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key"
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-9router-api-key"
+  }
 }
 ```
 
@@ -111,7 +120,7 @@ Sửa `~/.claude/config.json`:
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [from dashboard]
-Model: cc/claude-opus-4-5-20251101
+Model: cc/claude-opus-5
 ```
 
 ### Codex CLI
@@ -134,9 +143,9 @@ Dashboard → Combos → Create New
 
 Name: premium-coding
 Models:
-  1. cc/claude-opus-4-5-20251101 (Subscription primary)
+  1. cc/claude-opus-5 (Subscription primary)
   2. glm/glm-4.7 (Cheap backup, $0.6/1M)
-  3. if/kimi-k2-thinking (Free fallback)
+  3. if/kimi-k2 (Paid fallback, OAuth)
 
 Use in CLI: premium-coding
 ```
@@ -144,7 +153,7 @@ Use in CLI: premium-coding
 **Cách hoạt động:**
 1. Thử Claude Opus trước (subscription của bạn)
 2. Nếu hết quota → GLM-4.7 (siêu rẻ)
-3. Nếu hết budget → iFlow (miễn phí)
+3. Nếu hết budget → iFlow (trả phí, OAuth)
 4. Zero downtime, chuyển đổi tự động!
 
 ---
@@ -154,8 +163,8 @@ Use in CLI: premium-coding
 ### Subscription Models (Dùng đầu tiên)
 
 **Claude Code (`cc/`)** - Subscription Pro/Max:
-- `cc/claude-opus-4-5-20251101` - Claude 4.5 Opus
-- `cc/claude-sonnet-4-5-20250929` - Claude 4.5 Sonnet
+- `cc/claude-opus-5` - Claude 4.5 Opus
+- `cc/claude-sonnet-5` - Claude 4.5 Sonnet
 - `cc/claude-haiku-4-5-20251001` - Claude 4.5 Haiku
 
 **Codex (`cx/`)** - Subscription Plus/Pro:
@@ -168,7 +177,7 @@ Use in CLI: premium-coding
 
 **GitHub Copilot (`gh/`)** - Subscription:
 - `gh/gpt-5` - GPT-5
-- `gh/claude-4.5-sonnet` - Claude 4.5 Sonnet
+- `gh/claude-sonnet-4.5` - Claude 4.5 Sonnet
 
 ### Cheap Models (Backup)
 
@@ -181,10 +190,10 @@ Use in CLI: premium-coding
 **Kimi (`kimi/`)** - $9/tháng (10M tokens):
 - `kimi/kimi-latest` - Kimi Latest
 
-### Model MIỄN PHÍ (Khẩn cấp)
+### Paid Plans (iFlow) — Emergency Backup
 
-**iFlow (`if/`)** - 8 models MIỄN PHÍ:
-- `if/kimi-k2-thinking` - Kimi K2 Thinking
+**iFlow (`if/`)** - 15 models (paid plans, OAuth):
+- `if/kimi-k2` - Kimi K2
 - `if/qwen3-coder-plus` - Qwen3 Coder Plus
 - `if/glm-4.7` - GLM 4.7
 - `if/deepseek-r1` - DeepSeek R1
@@ -207,7 +216,7 @@ Use in CLI: premium-coding
 1. Use Gemini CLI free tier (180K/month) for quick tasks
 2. Use Claude Code subscription quota fully (you already pay)
 3. Fallback to GLM ($0.6/1M) when quota out
-4. Emergency: MiniMax M2.1 ($0.20/1M) or iFlow (free)
+4. Emergency: MiniMax M2.1 ($0.20/1M) or iFlow (paid, OAuth)
 
 Real example (100M tokens/month):
   60M via Gemini CLI: $0 (free tier)
@@ -224,7 +233,7 @@ Daily routine:
 1. Morning: Fresh Claude Code quota (5h reset)
 2. Afternoon: Switch to Gemini CLI (1K/day)
 3. Evening: GLM daily quota (reset 10AM next day)
-4. Late night: MiniMax (5h rolling) or iFlow (free)
+4. Late night: MiniMax (5h rolling) or iFlow (paid, OAuth)
 
 → Code 24/7 with minimal extra cost!
 ```

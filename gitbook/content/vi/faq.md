@@ -41,8 +41,8 @@ Nó định tuyến request thông minh qua nhiều provider AI bằng hệ th�
 
 **Mục tiêu:** Rẻ hơn 90% so với ChatGPT API ($20/1M)!
 
-### Tier 3: Free (Khẩn cấp)
-- **iFlow**: 8 model MIỄN PHÍ (Kimi K2, Qwen3, GLM, MiniMax...)
+### Tier 3: Backup (iFlow paid plans, Kiro free)
+- **iFlow**: 15 model (trả phí, OAuth) (Kimi K2, Qwen3, GLM, MiniMax...)
 - **Qwen**: 3 model MIỄN PHÍ (Qwen3 Coder Plus/Flash, Vision)
 - **Kiro**: 2 model MIỄN PHÍ (Claude Sonnet 4.5, Haiku 4.5)
 
@@ -56,11 +56,11 @@ Nó định tuyến request thông minh qua nhiều provider AI bằng hệ th�
 
 **Provider free tier có sẵn:**
 - **Gemini CLI** - 180K completions/tháng (MIỄN PHÍ tài khoản Google)
-- **iFlow** - 8 model không giới hạn (MIỄN PHÍ OAuth)
+- **iFlow** - 15 model (trả phí, OAuth)
 - **Qwen** - 3 model không giới hạn (MIỄN PHÍ OAuth)
 - **Kiro** - Claude Sonnet/Haiku (MIỄN PHÍ AWS Builder ID)
 
-**Bạn có thể code MIỄN PHÍ mãi mãi chỉ dùng provider free tier!**
+**Bạn có thể code MIỄN PHÍ mãi mãi chỉ dùng provider budget tier!**
 
 **Provider trả phí tùy chọn:**
 - Dịch vụ subscription bạn có thể đã có (Claude Code, Codex, Copilot)
@@ -84,7 +84,7 @@ Nó định tuyến request thông minh qua nhiều provider AI bằng hệ th�
 - **OpenRouter** - Passthrough đến mọi model OpenRouter
 
 ### Free Providers
-- **iFlow** - 8 models (Kimi K2, Qwen3, GLM, MiniMax, DeepSeek...)
+- **iFlow** - 15 models (Kimi K2, Qwen3, GLM, MiniMax, DeepSeek...)
 - **Qwen** - 3 models (Qwen3 Coder Plus/Flash, Vision)
 - **Kiro** - 2 models (Claude Sonnet 4.5, Haiku 4.5)
 
@@ -102,9 +102,9 @@ Xem [tài liệu providers](providers/subscription.md) để biết chi tiết.
 
 ```
 Example combo: "premium-coding"
-1. cc/claude-opus-4-5 (Subscription primary)
+1. cc/claude-opus-5 (Subscription primary)
 2. glm/glm-4.7 (Cheap backup)
-3. if/kimi-k2 (Free emergency)
+3. if/kimi-k2 (Paid emergency, OAuth)
 
 → Auto-switches when quota exhausted
 → Never stops coding
@@ -166,7 +166,7 @@ Xem [tài liệu quota tracking](features/quota-tracking.md) để biết chi ti
 Cursor Settings → Models → Advanced:
   OpenAI API Base URL: https://9router.com/v1
   OpenAI API Key: [from dashboard]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 **Thay thế:** Self-host trên VPS với domain công khai:

@@ -12,7 +12,7 @@
 ```
 コンボ名: premium-coding
 モデル:
-  1. cc/claude-opus-4-5-20251101 (最初に試行)
+  1. cc/claude-opus-5 (最初に試行)
   2. glm/glm-4.7 (#1のクォータ消費時)
   3. minimax/MiniMax-M2.1 (#2のクォータ消費時)
 ```
@@ -30,15 +30,15 @@ Model: premium-coding
 
 ### 1. サブスクリプション価値を最大化
 ```
-cc/claude-opus → glm/glm-4.7 → if/kimi-k2-thinking
+cc/claude-opus-5 → glm/glm-4.7 → if/kimi-k2
 
-→ サブスクリプション優先、低価格バックアップ、無料緊急時
+→ サブスクリプション優先、低価格バックアップ、有料プラン・緊急時
 → すでに支払っているサブスクリプションから完全な価値を得る
 ```
 
 ### 2. コストを最小化
 ```
-glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
+glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2
 
 → 最安の有料オプションから開始 (100万あたり$0.60)
 → さらに安いものへフォールバック (100万あたり$0.20)
@@ -48,7 +48,7 @@ glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
 
 ### 3. 24時間可用性を確保
 ```
-cc/claude-opus → cx/gpt-5.2-codex → glm/glm-4.7 → if/kimi-k2-thinking
+cc/claude-opus-5 → cx/gpt-5.2-codex → glm/glm-4.7 → if/kimi-k2
 
 → 最後に常に無料階層を含める
 → クォータ切れにならない
@@ -57,7 +57,7 @@ cc/claude-opus → cx/gpt-5.2-codex → glm/glm-4.7 → if/kimi-k2-thinking
 
 ### 4. 品質に最適化
 ```
-cc/claude-opus-4-5 → cx/gpt-5.2-codex → gc/gemini-3-pro
+cc/claude-opus-5 → cx/gpt-5.2-codex → gc/gemini-3-pro
 
 → 最高のモデルが最初
 → 他のプレミアムモデルへフォールバック
@@ -90,12 +90,12 @@ premium-coding
 
 **説明(任意):**
 ```
-サブスクリプション優先、低価格バックアップ、無料緊急時
+サブスクリプション優先、低価格バックアップ、有料プラン・緊急時
 ```
 
 **モデルを選択:**
 ```
-1. cc/claude-opus-4-5-20251101
+1. cc/claude-opus-5
 2. glm/glm-4.7
 3. minimax/MiniMax-M2.1
 ```
@@ -129,7 +129,7 @@ Dashboard → Combos → Create New
 
 Name: premium-coding
 Models:
-  1. cc/claude-opus-4-5-20251101
+  1. cc/claude-opus-5
   2. glm/glm-4.7
   3. minimax/MiniMax-M2.1
 ```
@@ -143,7 +143,7 @@ Cursor IDE:
 **動作:**
 ```
 朝 (新鮮なクォータ):
-  Request → cc/claude-opus-4-5 ✅
+  Request → cc/claude-opus-5 ✅
 
 午後 (Claudeクォータ切れ):
   Request → glm/glm-4.7 ✅ (自動切替)
@@ -175,7 +175,7 @@ Name: budget-combo
 Models:
   1. glm/glm-4.7
   2. minimax/MiniMax-M2.1
-  3. if/kimi-k2-thinking
+  3. if/kimi-k2
 ```
 
 **使用法:**
@@ -191,7 +191,7 @@ Cline:
 Request → glm/glm-4.7
   ✅ 日次クォータ利用可 → GLMを使用 (100万あたり$0.60)
   ❌ クォータ消費 → MiniMaxを試行 (100万あたり$0.20)
-  ❌ MiniMaxクォータ切れ → iFlowを使用 (無料)
+  ❌ MiniMaxクォータ切れ → iFlowを使用 (有料プラン)
 ```
 
 **月コスト (1億トークン):**
@@ -213,9 +213,9 @@ iFlow経由で1000万: $0
 ```
 Dashboard → Combos → Create New
 
-Name: free-combo
+Name: budget-combo
 Models:
-  1. if/kimi-k2-thinking
+  1. if/kimi-k2
   2. qw/qwen3-coder-plus
   3. kr/claude-sonnet-4.5
 ```
@@ -223,12 +223,12 @@ Models:
 **使用法:**
 ```
 Claude Desktop:
-  Model: free-combo
+  Model: budget-combo
 ```
 
 **動作:**
 ```
-Request → if/kimi-k2-thinking
+Request → if/kimi-k2
   ✅ 利用可 → iFlowを使用
   ❌ エラー → Qwenを試行
   ❌ エラー → Kiroを試行
@@ -253,7 +253,7 @@ Dashboard → Combos → Create New
 
 Name: quality-first
 Models:
-  1. cc/claude-opus-4-5-20251101
+  1. cc/claude-opus-5
   2. cx/gpt-5.2-codex
   3. gc/gemini-3-pro-preview
 ```
@@ -267,7 +267,7 @@ Codex CLI:
 
 **動作:**
 ```
-Request → cc/claude-opus-4-5
+Request → cc/claude-opus-5
   ❌ クォータ切れ → cx/gpt-5.2-codex
   ❌ クォータ切れ → gc/gemini-3-pro-preview
   ❌ すべて切れ → エラーを返す (低価格フォールバックなし)
@@ -287,11 +287,11 @@ Dashboard → Combos → Create New
 Name: multi-sub
 Models:
   1. gc/gemini-3-flash-preview (月18万無料)
-  2. cc/claude-opus-4-5-20251101 (Proサブスクリプション)
+  2. cc/claude-opus-5 (Proサブスクリプション)
   3. cx/gpt-5.2-codex (Plusサブスクリプション)
   4. gh/gpt-5 (Copilotサブスクリプション)
   5. glm/glm-4.7 (低価格バックアップ)
-  6. if/kimi-k2-thinking (無料緊急時)
+  6. if/kimi-k2 (緊急時(有料プラン))
 ```
 
 **月コスト (2億トークン):**
@@ -318,11 +318,11 @@ Dashboard → Combos → Create New
 
 Name: reset-optimized
 Models:
-  1. cc/claude-opus-4-5 (5時間リセット、朝に使用)
+  1. cc/claude-opus-5 (5時間リセット、朝に使用)
   2. gc/gemini-3-flash (1K/日、午後に使用)
   3. glm/glm-4.7 (毎日午前10時リセット、夕方に使用)
   4. minimax/MiniMax-M2.1 (5時間ローリング、夜に使用)
-  5. if/kimi-k2-thinking (無制限、緊急時)
+  5. if/kimi-k2 (無制限、緊急時)
 ```
 
 **日課:**
@@ -348,14 +348,24 @@ Settings → Models → Advanced:
   Model: premium-coding
 ```
 
-### Claude Desktop
+### Claude Code / Claude Desktop
 
-`~/.claude/config.json`を編集:
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+
+# use a combo by model name:
+claude --model budget-combo
+```
+
+Or persist the connection in `~/.claude/settings.json`:
+
 ```json
 {
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key",
-  "model": "budget-combo"
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-9router-api-key"
+  }
 }
 ```
 
@@ -374,7 +384,7 @@ codex --model quality-first "your prompt"
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [ダッシュボードから取得]
-Model: free-combo
+Model: budget-combo
 ```
 
 ### APIリクエスト
@@ -400,10 +410,10 @@ curl http://localhost:20128/v1/chat/completions \
 
 ```
 ✅ 良い:
-cc/claude-opus → glm/glm-4.7 → if/kimi-k2-thinking
+cc/claude-opus-5 → glm/glm-4.7 → if/kimi-k2
 
 ❌ 悪い:
-cc/claude-opus → glm/glm-4.7
+cc/claude-opus-5 → glm/glm-4.7
 (無料フォールバックなし、クォータ切れの可能性)
 ```
 
@@ -413,10 +423,10 @@ cc/claude-opus → glm/glm-4.7
 
 ```
 ✅ 良い:
-glm/glm-4.7 → minimax/MiniMax-M2.1 → cc/claude-opus
+glm/glm-4.7 → minimax/MiniMax-M2.1 → cc/claude-opus-5
 
 ❌ 悪い:
-cc/claude-opus → glm/glm-4.7
+cc/claude-opus-5 → glm/glm-4.7
 (シンプルなタスクにサブスクリプションクォータを浪費)
 ```
 
@@ -426,23 +436,23 @@ cc/claude-opus → glm/glm-4.7
 
 ```
 本番コードの場合:
-cc/claude-opus → cx/gpt-5.2-codex → glm/glm-4.7
+cc/claude-opus-5 → cx/gpt-5.2-codex → glm/glm-4.7
 
 クイックタスクの場合:
-glm/glm-4.7 → if/kimi-k2-thinking
+glm/glm-4.7 → if/kimi-k2
 
 実験用:
-if/kimi-k2-thinking → qw/qwen3-coder-plus
+if/kimi-k2 → qw/qwen3-coder-plus
 ```
 
 ### 4. クォータリセット時間を考慮
 
 ```
 朝のコンボ (新鮮なクォータ):
-cc/claude-opus → cx/gpt-5.2-codex
+cc/claude-opus-5 → cx/gpt-5.2-codex
 
 夕方のコンボ (クォータが消費されている可能性):
-glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
+glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2
 ```
 
 ### 5. 異なるユースケース用に複数のコンボを作成
@@ -450,7 +460,7 @@ glm/glm-4.7 → minimax/MiniMax-M2.1 → if/kimi-k2-thinking
 ```
 premium-coding: 複雑なタスク用
 budget-combo: シンプルなタスク用
-free-combo: 実験用
+budget-combo: 実験用
 quality-first: 本番コード用
 ```
 
@@ -486,9 +496,9 @@ Dashboard → Combos → Edit → Budget:
 
 ```
 Dashboard → Combos → Edit → Models:
-  ✅ cc/claude-opus-4-5 (有効)
+  ✅ cc/claude-opus-5 (有効)
   ❌ glm/glm-4.7 (一時的に無効)
-  ✅ if/kimi-k2-thinking (有効)
+  ✅ if/kimi-k2 (有効)
 ```
 
 **ユースケース**: コンボを削除せずに高価なモデルを一時的に無効化。

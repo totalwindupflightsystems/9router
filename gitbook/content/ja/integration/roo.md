@@ -37,7 +37,7 @@ API Key: your-api-key-from-dashboard
 利用可能な9Routerモデルから選択:
 
 **Claudeモデル:**
-- `cc/claude-opus-4-5-20251101` - 最も高性能
+- `cc/claude-opus-5` - 最も高性能
 - `cc/claude-sonnet-4-20250514` - バランス
 - `cc/claude-haiku-4-20250514` - 高速
 
@@ -81,7 +81,7 @@ Model: cx/deepseek-reasoner
 
 - **クイックタスク**: `cc/claude-haiku-4-20250514` または `glm/glm-4-flash` を使用
 - **バランスのとれたパフォーマンス**: `cc/claude-sonnet-4-20250514` または `cx/deepseek-chat` を使用
-- **複雑な推論**: `cc/claude-opus-4-5-20251101` または `cx/deepseek-reasoner` を使用
+- **複雑な推論**: `cc/claude-opus-5` または `cx/deepseek-reasoner` を使用
 - **コスト最適化**: DeepSeekまたはGLMモデルを使用
 
 ## トラブルシューティング
@@ -109,7 +109,7 @@ Roo設定で頻繁に使うモデルのショートカットを作成:
 
 ```
 エイリアス: "fast" → cc/claude-haiku-4-20250514
-エイリアス: "smart" → cc/claude-opus-4-5-20251101
+エイリアス: "smart" → cc/claude-opus-5
 エイリアス: "code" → cx/deepseek-chat
 ```
 

@@ -44,7 +44,7 @@ Dashboard → Providers → Connect [Provider]
 1. 「Connect Claude Code」をクリック
 2. Claudeアカウントでログイン
 3. 9Routerを認可
-4. ✅ 完了! モデルを使用: `cc/claude-opus-4-5-20251101`
+4. ✅ 完了! モデルを使用: `cc/claude-opus-5`
 
 #### オプションB: APIキー(低価格プロバイダー)
 
@@ -63,7 +63,7 @@ Dashboard → Providers → Add API Key
 3. Dashboard → Add API Key → Provider: `glm` → キーを貼り付け
 4. ✅ 完了! モデルを使用: `glm/glm-4.7`
 
-#### オプションC: 無料プロバイダー(コストなし)
+#### オプション C: 無料・有料(OAuth)プロバイダ
 
 **最適:** iFlow、Qwen、Kiro
 
@@ -77,7 +77,7 @@ Dashboard → Providers → Connect [Free Provider]
 1. 「Connect iFlow」をクリック
 2. iFlowアカウントでログイン
 3. 認可
-4. ✅ 完了! 8モデルを使用: `if/kimi-k2-thinking`、`if/qwen3-coder-plus`など
+4. ✅ 完了! 15モデルを使用: `if/kimi-k2`、`if/qwen3-coder-plus`など
 
 ---
 
@@ -91,17 +91,26 @@ Dashboard → Providers → Connect [Free Provider]
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [9routerダッシュボードから取得]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
-### Claude Desktop
+### Claude Code / Claude Desktop
 
-`~/.claude/config.json`を編集:
+Set environment variables (Claude Code reads `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`):
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+export ANTHROPIC_AUTH_TOKEN="your-9router-api-key"
+```
+
+Or persist them in `~/.claude/settings.json`:
 
 ```json
 {
-  "anthropic_api_base": "http://localhost:20128/v1",
-  "anthropic_api_key": "your-9router-api-key"
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "your-9router-api-key"
+  }
 }
 ```
 
@@ -111,7 +120,7 @@ Settings → Models → Advanced:
 Provider: OpenAI Compatible
 Base URL: http://localhost:20128/v1
 API Key: [ダッシュボードから取得]
-Model: cc/claude-opus-4-5-20251101
+Model: cc/claude-opus-5
 ```
 
 ### Codex CLI
@@ -134,9 +143,9 @@ Dashboard → Combos → Create New
 
 Name: premium-coding
 Models:
-  1. cc/claude-opus-4-5-20251101 (サブスクリプション優先)
+  1. cc/claude-opus-5 (サブスクリプション優先)
   2. glm/glm-4.7 (低価格バックアップ、100万あたり$0.6)
-  3. if/kimi-k2-thinking (無料フォールバック)
+  3. if/kimi-k2 (有料フォールバック(OAuth))
 
 CLIで使用: premium-coding
 ```
@@ -144,7 +153,7 @@ CLIで使用: premium-coding
 **動作:**
 1. 最初にClaude Opusを試行(サブスクリプション)
 2. クォータ消費時 → GLM-4.7(超低価格)
-3. 予算上限時 → iFlow(無料)
+3. 予算上限時 → iFlow(有料プラン)
 4. ダウンタイムゼロ、自動切替!
 
 ---
@@ -154,8 +163,8 @@ CLIで使用: premium-coding
 ### サブスクリプションモデル(最初に最大化)
 
 **Claude Code (`cc/`)** - Pro/Maxサブスクリプション:
-- `cc/claude-opus-4-5-20251101` - Claude 4.5 Opus
-- `cc/claude-sonnet-4-5-20250929` - Claude 4.5 Sonnet
+- `cc/claude-opus-5` - Claude 4.5 Opus
+- `cc/claude-sonnet-5` - Claude 4.5 Sonnet
 - `cc/claude-haiku-4-5-20251001` - Claude 4.5 Haiku
 
 **Codex (`cx/`)** - Plus/Proサブスクリプション:
@@ -168,7 +177,7 @@ CLIで使用: premium-coding
 
 **GitHub Copilot (`gh/`)** - サブスクリプション:
 - `gh/gpt-5` - GPT-5
-- `gh/claude-4.5-sonnet` - Claude 4.5 Sonnet
+- `gh/claude-sonnet-4.5` - Claude 4.5 Sonnet
 
 ### 低価格モデル(バックアップ)
 
@@ -181,10 +190,10 @@ CLIで使用: premium-coding
 **Kimi (`kimi/`)** - 月$9(1000万トークン):
 - `kimi/kimi-latest` - Kimi Latest
 
-### 無料モデル(緊急時)
+### 有料プラン(iFlow)— 緊急時バックアップ
 
-**iFlow (`if/`)** - 8モデル無料:
-- `if/kimi-k2-thinking` - Kimi K2 Thinking
+**iFlow (`if/`)** - 15モデル(有料プラン、OAuth):
+- `if/kimi-k2` - Kimi K2
 - `if/qwen3-coder-plus` - Qwen3 Coder Plus
 - `if/glm-4.7` - GLM 4.7
 - `if/deepseek-r1` - DeepSeek R1
@@ -207,7 +216,7 @@ CLIで使用: premium-coding
 1. クイックタスクにGemini CLI無料プラン(月18万)を使用
 2. Claude Codeサブスクリプションのクォータを完全利用(すでに支払い済み)
 3. クォータ切れ時はGLM(100万あたり$0.6)へフォールバック
-4. 緊急時: MiniMax M2.1(100万あたり$0.20)またはiFlow(無料)
+4. 緊急時: MiniMax M2.1(100万あたり$0.20)またはiFlow(有料プラン)
 
 実例(月1億トークン):
   Gemini CLI経由で6000万: $0(無料プラン)
@@ -224,7 +233,7 @@ CLIで使用: premium-coding
 1. 朝: Claude Codeの新しいクォータ(5時間リセット)
 2. 午後: Gemini CLIへ切替(1K/日)
 3. 夕方: GLM日次クォータ(翌朝10時リセット)
-4. 深夜: MiniMax(5時間ローリング)またはiFlow(無料)
+4. 深夜: MiniMax(5時間ローリング)またはiFlow(有料プラン)
 
 → 最小の追加コストで24時間コーディング!
 ```

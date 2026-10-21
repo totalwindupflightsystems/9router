@@ -266,10 +266,10 @@ Dashboard → Combos → Create New
 
 Name: cheap-backup
 Models:
-  1. cc/claude-opus-4-5 (Subscription primary)
+  1. cc/claude-opus-5 (Subscription primary)
   2. glm/glm-4.7 (Cheap backup, daily reset)
   3. minimax/MiniMax-M2.1 (Cheapest fallback)
-  4. if/kimi-k2-thinking (FREE emergency)
+  4. if/kimi-k2 (Paid emergency, OAuth)
 
 Use in CLI: cheap-backup
 ```
@@ -319,7 +319,7 @@ Priority:
 2. Claude Code (subscription you already pay)
 3. GLM-4.7 (cheap backup, $0.6/1M)
 4. MiniMax M2.1 (cheapest, $0.2/1M)
-5. iFlow (FREE emergency)
+5. iFlow (Paid emergency, OAuth)
 
 Monthly cost example (100M tokens):
 - 60M via Gemini CLI: $0 (free)
@@ -409,7 +409,7 @@ Combo:
 1. gc/gemini-3-flash (FREE primary)
 2. glm/glm-4.7 (cheap backup)
 3. minimax/MiniMax-M2.1 (cheapest)
-4. if/kimi-k2-thinking (FREE emergency)
+4. if/kimi-k2 (Paid emergency, OAuth)
 
 Result: Minimize costs, maximize uptime
 ```

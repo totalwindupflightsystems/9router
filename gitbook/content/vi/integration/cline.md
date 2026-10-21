@@ -56,8 +56,8 @@ https://9router.com
 2. Tên model phổ biến:
    - `gpt-4`
    - `gpt-4o`
-   - `claude-opus-4-5`
-   - `claude-sonnet-4-5`
+   - `claude-opus-5`
+   - `claude-sonnet-5`
    - `gemini-2.0-flash`
 
 ### 6. Lưu Cấu hình
@@ -83,8 +83,8 @@ Bạn có thể dùng bất kỳ model nào đã cấu hình trong 9Router dashb
 |------------|----------|-------------|
 | `gpt-4` | OpenAI | GPT-4 Turbo |
 | `gpt-4o` | OpenAI | GPT-4 Optimized |
-| `claude-opus-4-5` | Anthropic | Claude Opus 4.5 |
-| `claude-sonnet-4-5` | Anthropic | Claude Sonnet 4.5 |
+| `claude-opus-5` | Anthropic | Claude Opus 4.5 |
+| `claude-sonnet-5` | Anthropic | Claude Sonnet 4.5 |
 | `gemini-2.0-flash` | Google | Gemini 2.0 Flash |
 
 ## Sử dụng

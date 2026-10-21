@@ -41,8 +41,8 @@
 
 **目標:** ChatGPT API(100万あたり$20)より90%安い!
 
-### Tier 3: 無料(緊急時)
-- **iFlow**: 8モデル無料(Kimi K2、Qwen3、GLM、MiniMax...)
+### Tier 3: バックアップ(iFlow有料プラン、Kiro無料)
+- **iFlow**: 15モデル(有料プラン)(Kimi K2、Qwen3、GLM、MiniMax...)
 - **Qwen**: 3モデル無料(Qwen3 Coder Plus/Flash、Vision)
 - **Kiro**: 2モデル無料(Claude Sonnet 4.5、Haiku 4.5)
 
@@ -56,7 +56,7 @@
 
 **利用可能な無料階層プロバイダー:**
 - **Gemini CLI** - 月18万コンプリーション(無料Googleアカウント)
-- **iFlow** - 8モデル無制限(無料OAuth)
+- **iFlow** - 15モデル(有料プラン、OAuth)
 - **Qwen** - 3モデル無制限(無料OAuth)
 - **Kiro** - Claude Sonnet/Haiku(無料AWS Builder ID)
 
@@ -84,7 +84,7 @@
 - **OpenRouter** - 任意のOpenRouterモデルへのパススルー
 
 ### 無料プロバイダー
-- **iFlow** - 8モデル(Kimi K2、Qwen3、GLM、MiniMax、DeepSeek...)
+- **iFlow** - 15モデル(Kimi K2、Qwen3、GLM、MiniMax、DeepSeek...)
 - **Qwen** - 3モデル(Qwen3 Coder Plus/Flash、Vision)
 - **Kiro** - 2モデル(Claude Sonnet 4.5、Haiku 4.5)
 
@@ -102,9 +102,9 @@
 
 ```
 コンボ例: "premium-coding"
-1. cc/claude-opus-4-5 (サブスクリプション優先)
+1. cc/claude-opus-5 (サブスクリプション優先)
 2. glm/glm-4.7 (低価格バックアップ)
-3. if/kimi-k2 (無料緊急時)
+3. if/kimi-k2 (緊急時(有料プラン))
 
 → クォータ消費時に自動切替
 → コーディングが止まらない
@@ -166,7 +166,7 @@ Dashboard → Providers → Quota Tracking
 Cursor Settings → Models → Advanced:
   OpenAI API Base URL: https://9router.com/v1
   OpenAI API Key: [ダッシュボードから取得]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 **代替案:** パブリックドメインでVPSにセルフホスト:

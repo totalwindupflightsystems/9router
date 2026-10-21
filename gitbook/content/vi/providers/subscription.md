@@ -46,8 +46,8 @@ Provider tier subscription là lựa chọn **chính** - bạn đã trả tiền
 **Bước 3: Dùng trong CLI**
 
 ```
-Model: cc/claude-opus-4-5-20251101
-       cc/claude-sonnet-4-5-20250929
+Model: cc/claude-opus-5
+       cc/claude-sonnet-5
        cc/claude-haiku-4-5-20251001
 ```
 
@@ -55,8 +55,8 @@ Model: cc/claude-opus-4-5-20251101
 
 | Model ID | Mô tả | Tốt nhất cho |
 |----------|-------------|----------|
-| `cc/claude-opus-4-5-20251101` | Claude 4.5 Opus | Task phức tạp, kiến trúc |
-| `cc/claude-sonnet-4-5-20250929` | Claude 4.5 Sonnet | Cân bằng tốc độ/chất lượng |
+| `cc/claude-opus-5` | Claude 4.5 Opus | Task phức tạp, kiến trúc |
+| `cc/claude-sonnet-5` | Claude 4.5 Sonnet | Cân bằng tốc độ/chất lượng |
 | `cc/claude-haiku-4-5-20251001` | Claude 4.5 Haiku | Phản hồi nhanh |
 
 ### Mẹo Pro
@@ -202,7 +202,7 @@ Model: gc/gemini-3-flash-preview
 ```
 Model: gh/gpt-5
        gh/gpt-5.1-codex-max
-       gh/claude-4.5-sonnet
+       gh/claude-sonnet-4.5
        gh/gemini-3-pro
 ```
 
@@ -212,7 +212,7 @@ Model: gh/gpt-5
 |----------|-------------|----------|
 | `gh/gpt-5` | GPT-5 | Model OpenAI mới nhất |
 | `gh/gpt-5.1-codex-max` | GPT-5.1 Codex Max | Context tối đa |
-| `gh/claude-4.5-sonnet` | Claude 4.5 Sonnet | Chất lượng Anthropic |
+| `gh/claude-sonnet-4.5` | Claude 4.5 Sonnet | Chất lượng Anthropic |
 | `gh/gemini-3-pro` | Gemini 3 Pro | Chất lượng Google |
 
 ### Mẹo Pro
@@ -251,8 +251,8 @@ Model: gh/gpt-5
 
 ```
 Model: ag/gemini-3-pro-high
-       ag/claude-sonnet-4-5
-       ag/claude-opus-4-5-thinking
+       ag/claude-sonnet-4-6
+       ag/claude-opus-4-6-thinking
 ```
 
 ### Model có sẵn
@@ -260,8 +260,8 @@ Model: ag/gemini-3-pro-high
 | Model ID | Mô tả | Tốt nhất cho |
 |----------|-------------|----------|
 | `ag/gemini-3-pro-high` | Gemini 3 Pro High | Phản hồi chất lượng cao |
-| `ag/claude-sonnet-4-5` | Claude Sonnet 4.5 | Chất lượng Anthropic |
-| `ag/claude-opus-4-5-thinking` | Claude Opus 4.5 Thinking | Reasoning phức tạp |
+| `ag/claude-sonnet-4-6` | Claude Sonnet 4.5 | Chất lượng Anthropic |
+| `ag/claude-opus-4-6-thinking` | Claude Opus 4.5 Thinking | Reasoning phức tạp |
 
 ### Mẹo Pro
 
@@ -293,7 +293,7 @@ Model: ag/gemini-3-pro-high
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [from 9router dashboard]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 ### Tạo Combo (Khuyên dùng)
@@ -304,7 +304,7 @@ Dashboard → Combos → Create New
 Name: premium-coding
 Models:
   1. gc/gemini-3-flash-preview (FREE, use first)
-  2. cc/claude-opus-4-5-20251101 (Subscription)
+  2. cc/claude-opus-5 (Subscription)
   3. cx/gpt-5.2-codex (Subscription backup)
 
 Use in CLI: premium-coding
@@ -357,9 +357,9 @@ Priority:
 ```
 Example combo:
 1. gc/gemini-3-flash-preview (FREE primary)
-2. cc/claude-opus-4-5 (Complex tasks)
+2. cc/claude-opus-5 (Complex tasks)
 3. glm/glm-4.7 (Cheap backup)
-4. if/kimi-k2-thinking (FREE fallback)
+4. if/kimi-k2 (FREE fallback)
 ```
 
 ### 4. Tối ưu theo Thời gian
@@ -392,8 +392,8 @@ Night: Cheap/free tier
 
 **Giải pháp:**
 - Hết quota subscription
-- Thêm fallback: `cc/claude-opus → glm/glm-4.7`
-- Dùng free tier: `if/kimi-k2-thinking`
+- Thêm fallback: `cc/claude-opus-5 → glm/glm-4.7`
+- Dùng free tier: `if/kimi-k2`
 
 ---
 

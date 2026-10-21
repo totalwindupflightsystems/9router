@@ -46,8 +46,8 @@
 **ステップ3: CLIで使用**
 
 ```
-Model: cc/claude-opus-4-5-20251101
-       cc/claude-sonnet-4-5-20250929
+Model: cc/claude-opus-5
+       cc/claude-sonnet-5
        cc/claude-haiku-4-5-20251001
 ```
 
@@ -55,8 +55,8 @@ Model: cc/claude-opus-4-5-20251101
 
 | モデルID | 説明 | 最適用途 |
 |----------|-------------|----------|
-| `cc/claude-opus-4-5-20251101` | Claude 4.5 Opus | 複雑なタスク、アーキテクチャ |
-| `cc/claude-sonnet-4-5-20250929` | Claude 4.5 Sonnet | バランスのとれた速度/品質 |
+| `cc/claude-opus-5` | Claude 4.5 Opus | 複雑なタスク、アーキテクチャ |
+| `cc/claude-sonnet-5` | Claude 4.5 Sonnet | バランスのとれた速度/品質 |
 | `cc/claude-haiku-4-5-20251001` | Claude 4.5 Haiku | 高速応答 |
 
 ### プロのヒント
@@ -202,7 +202,7 @@ Model: gc/gemini-3-flash-preview
 ```
 Model: gh/gpt-5
        gh/gpt-5.1-codex-max
-       gh/claude-4.5-sonnet
+       gh/claude-sonnet-4.5
        gh/gemini-3-pro
 ```
 
@@ -212,7 +212,7 @@ Model: gh/gpt-5
 |----------|-------------|----------|
 | `gh/gpt-5` | GPT-5 | 最新OpenAIモデル |
 | `gh/gpt-5.1-codex-max` | GPT-5.1 Codex Max | 最大コンテキスト |
-| `gh/claude-4.5-sonnet` | Claude 4.5 Sonnet | Anthropic品質 |
+| `gh/claude-sonnet-4.5` | Claude 4.5 Sonnet | Anthropic品質 |
 | `gh/gemini-3-pro` | Gemini 3 Pro | Google品質 |
 
 ### プロのヒント
@@ -251,8 +251,8 @@ Model: gh/gpt-5
 
 ```
 Model: ag/gemini-3-pro-high
-       ag/claude-sonnet-4-5
-       ag/claude-opus-4-5-thinking
+       ag/claude-sonnet-4-6
+       ag/claude-opus-4-6-thinking
 ```
 
 ### 利用可能なモデル
@@ -260,8 +260,8 @@ Model: ag/gemini-3-pro-high
 | モデルID | 説明 | 最適用途 |
 |----------|-------------|----------|
 | `ag/gemini-3-pro-high` | Gemini 3 Pro High | 高品質応答 |
-| `ag/claude-sonnet-4-5` | Claude Sonnet 4.5 | Anthropic品質 |
-| `ag/claude-opus-4-5-thinking` | Claude Opus 4.5 Thinking | 複雑な推論 |
+| `ag/claude-sonnet-4-6` | Claude Sonnet 4.5 | Anthropic品質 |
+| `ag/claude-opus-4-6-thinking` | Claude Opus 4.5 Thinking | 複雑な推論 |
 
 ### プロのヒント
 
@@ -293,7 +293,7 @@ Model: ag/gemini-3-pro-high
 Settings → Models → Advanced:
   OpenAI API Base URL: http://localhost:20128/v1
   OpenAI API Key: [9routerダッシュボードから取得]
-  Model: cc/claude-opus-4-5-20251101
+  Model: cc/claude-opus-5
 ```
 
 ### コンボを作成 (推奨)
@@ -304,7 +304,7 @@ Dashboard → Combos → Create New
 Name: premium-coding
 Models:
   1. gc/gemini-3-flash-preview (無料、最初に使用)
-  2. cc/claude-opus-4-5-20251101 (サブスクリプション)
+  2. cc/claude-opus-5 (サブスクリプション)
   3. cx/gpt-5.2-codex (サブスクリプションバックアップ)
 
 CLIで使用: premium-coding
@@ -357,9 +357,9 @@ Claude Code Pro
 ```
 コンボ例:
 1. gc/gemini-3-flash-preview (無料プライマリ)
-2. cc/claude-opus-4-5 (複雑なタスク)
+2. cc/claude-opus-5 (複雑なタスク)
 3. glm/glm-4.7 (低価格バックアップ)
-4. if/kimi-k2-thinking (無料フォールバック)
+4. if/kimi-k2 (有料フォールバック(OAuth))
 ```
 
 ### 4. 時間別に最適化
@@ -392,8 +392,8 @@ Claude Code Pro
 
 **解決策:**
 - サブスクリプションクォータ切れ
-- フォールバックを追加: `cc/claude-opus → glm/glm-4.7`
-- 無料階層を使用: `if/kimi-k2-thinking`
+- フォールバックを追加: `cc/claude-opus-5 → glm/glm-4.7`
+- 無料階層を使用: `if/kimi-k2`
 
 ---
 

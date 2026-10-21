@@ -37,7 +37,7 @@ API Key: your-api-key-from-dashboard
 Elige entre los modelos disponibles de 9Router:
 
 **Modelos Claude:**
-- `cc/claude-opus-4-5-20251101` - El más capaz
+- `cc/claude-opus-5` - El más capaz
 - `cc/claude-sonnet-4-20250514` - Equilibrado
 - `cc/claude-haiku-4-20250514` - Rápido
 
@@ -81,7 +81,7 @@ Modelo: cx/deepseek-reasoner
 
 - **Tareas rápidas**: Usa `cc/claude-haiku-4-20250514` o `glm/glm-4-flash`
 - **Rendimiento equilibrado**: Usa `cc/claude-sonnet-4-20250514` o `cx/deepseek-chat`
-- **Razonamiento complejo**: Usa `cc/claude-opus-4-5-20251101` o `cx/deepseek-reasoner`
+- **Razonamiento complejo**: Usa `cc/claude-opus-5` o `cx/deepseek-reasoner`
 - **Optimización de costos**: Usa modelos DeepSeek o GLM
 
 ## Solución de problemas
@@ -109,7 +109,7 @@ Puedes crear atajos para modelos usados con frecuencia en la configuración de R
 
 ```
 Alias: "fast" → cc/claude-haiku-4-20250514
-Alias: "smart" → cc/claude-opus-4-5-20251101
+Alias: "smart" → cc/claude-opus-5
 Alias: "code" → cx/deepseek-chat
 ```
 
