@@ -2601,7 +2601,7 @@ disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 # guarantees it; the subshell pin below leaves the outer PATH untouched for
 # every other consumer and is a no-op when the file is absent). The same pin
 # rides the native leg above.
-( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
 if [ -n "\${nat_rc:-}" ] && [ "\$nat_rc" -ne 0 ] 2>/dev/null; then cell chaos-disconnect UNVERIFIED "ci-pass native suite FAILED first (nat_rc=\$nat_rc) — the disconnect verdict is not derivable from a failing suite; fix the ci-pass failure before reading this cell (QA-HERMES-DAGGER-26); disconnect probe rc=\$disc_rc: \$(head -2 \$LOGD/disc.log)"
 elif vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
