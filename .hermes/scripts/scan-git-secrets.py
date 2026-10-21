@@ -455,6 +455,17 @@ FP_PATTERNS = [
     # Narrow by construction: the body must SPELL a placeholder word immediately after the
     # `sk-or-v1-` prefix. Real key material is random base62 and never contains those words.
     re.compile(r'(?i)sk-or-v1-(?:redacted|example|placeholder|dummy|sample|fake)(?:[-_][a-z0-9]+)*'),
+    # ── crier DF-* browser/unit-test fixtures (scan #145, 2026-10-21) ──
+    # `crier/scripts/chat-authority-truth.cjs:139` (carrier 60c91c0) exercises the shipped
+    # table renderer with a value that NAMES ITSELF `fixture-only-private` and asserts the
+    # value is withheld. `crier/scripts/chat-authority-view-browser.cjs:47` (DF-CRIER-384,
+    # carrier 2f68709) sets `df-crier-384-fixture-token-value` and SHA-256s it in-file for a
+    # fingerprint assertion. Both are test-only and hash-compared against the live .env set
+    # (no match). Narrow by construction: the value must SPELL 'fixture'; real key material
+    # is random base62/hex and never does. Do NOT widen to '/fixture' path rules — those
+    # match production fixture dirs that have carried real keys.
+    re.compile(r'(?i)\bfixture-only-private\b'),
+    re.compile(r'(?i)\bdf-crier-\d+-fixture-token-value\b'),
 ]
 
 # Repos to ALWAYS scan (the active dev + config repos)
