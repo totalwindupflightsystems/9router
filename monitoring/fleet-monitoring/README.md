@@ -1,41 +1,140 @@
 # fleet-monitoring
 
-Operator entrypoints for the fleet monitoring stack (Prometheus, Loki, Grafana,
-Alloy, Alertmanager, alert-router, cost-exporter). `make help` lists all
-targets; `make verify` is the real gate, not `make up`.
+The fleet's **metrics + logs + alerts** plane. One place that answers *what is happening on every
+host right now*, keeps the history in object storage, and — the part that makes it more than a
+dashboard — **routes alerts into agents** so a fired alert becomes a board row on the lane that
+owns the thing that broke.
 
-## Fresh-machine bootstrap
+Not to be confused with `~/observability`, which is the **profiling** stack (Pyroscope + eBPF
+flame graphs). Different question, different data, different repo. This one is about
+*"is it up, is it slow, is the disk filling, did a unit restart"*; that one is about
+*"which function burned the CPU"*.
 
-The repo is self-contained for the config path: everything the documented
-sequence needs is vendored (MON-REVIEW-003), so a bare clone needs nothing
-scp'd out of band.
+## Shape
 
-Vendored in-repo (present from clone):
+```
+                    ┌──────────────── monitoring host (outbound-only, Tailscale) ─────────────┐
+every fleet host ──►│  Alloy  ──metrics──► Prometheus ──► Alertmanager ──► alert-router ──► agent│
+ (Alloy agent)      │         ──logs─────► Loki                                             │
+                    │         ──traces──►  Tempo (OTLP 4317 gRPC / 4318 HTTP, query :3200)      │
+                    │  Grafana (dashboards, provisioned from files in this repo)            │
+                    └───────────────────────────┬──────────────────────────────────────────┘
+                                                │
+                                    S3 (karahermes-hel/monitoring/)
+                                    Loki chunks · Prometheus snapshots · Grafana backups · git bundle
+```
 
-- `scripts/` — `check-env.sh`, `render-configs.sh`, `lint-configs.sh`,
-  `verify.sh` (called by `check-env`, `config`, `verify`)
-- `.env.example` — copyable with dev-default dummy secrets; `check-env`
-  accepts them with a "DEV DEFAULT" warning so a clean machine can boot
-  without real credentials
-- `stack/docker-compose.yml` plus component configs under `stack/`
-  (prometheus, loki with a local-storage fallback, alertmanager, alloy,
-  alert-router, cost-exporter, provisioning)
+- **Transport is a Tailscale tailnet.** No public inbound beyond UDP 41641 (WireGuard). The
+  firewall has *no* open service ports — see `terraform/firewall.tf` and
+  `docs/architecture.md#firewall`.
+- **Nothing is configured by clicking.** Datasources, dashboards and alert rules are files under
+  `stack/`, `dashboards/` and `alerts/`, mounted read-only. A rebuild comes up already correct.
+- **Alerts become work.** `alert-router` maps an alert's `lane` label to a project board and
+  appends a row, so the alert lands in the queue the foreman already reads.
 
-`make env && make config` therefore works from a clean clone:
-`env` creates `.env` from the example, `check-env` passes on the dev
-defaults, and `config` validates compose + component configs without
-starting containers. `make up` then boots the stack in local-storage mode.
+## Quickstart (on the monitoring host)
 
-Still NOT in the repo — must come from the live host or your secret store:
+```sh
+git clone <remote> fleet-monitoring && cd fleet-monitoring
+cp .env.example .env          # set GRAFANA_PASSWORD and TAILSCALE_AUTHKEY; see storage note below
+make bootstrap                # host prep: docker, dirs, sysctls, tailscale up
+make up                       # bring the stack up
+make verify                   # proves DATA is arriving, not just that containers run
+```
 
-- Real `.env` values: `GRAFANA_PASSWORD`, `ALERT_ROUTER_TOKEN`,
-  `RENDERER_TOKEN` (replace the dev dummies with `openssl rand -base64 24`
-  before serving anything real)
-- S3 credentials (`S3_ACCESS_KEY` / `S3_SECRET_KEY`) and a
-  `LOKI_STORAGE=s3` setting for durable log storage — without them the
-  stack runs Loki in local-storage mode (fine for a test box, not durable)
-- `TAILSCALE_AUTHKEY`, `HCLOUD_TOKEN`, `MONITORING_SERVER_ID` — only
-  needed when provisioning a new server (cloud-init / terraform paths)
+Fresh clones default to `LOKI_STORAGE=local`, so Loki does not try to authenticate with
+placeholder S3 credentials. Logs remain on the `loki-data` Docker volume and will not survive
+loss of that host. To enable durable S3 storage, enter valid S3 credentials and explicitly set
+`LOKI_STORAGE=s3` before `make up`; invalid credentials are not a local-mode signal and Loki
+will fail hard rather than silently pretending the data is durable.
 
-Pre-existing live-host state (Grafana dashboards, Prometheus snapshots,
-existing S3 backups) is migrated via `make restore`, not the bootstrap.
+`ALERT_ROUTER_HOST_PORT` controls the host-side alert-router port (default `18089`); its
+container listener stays on `8089`. Change the host port in `.env` if it is already occupied.
+
+`make verify` is the real gate. Green containers with an empty label set is the default failure
+mode of every observability stack ever built — the collector starts, finds nothing it can ship,
+and reports success. `verify.sh` asserts on samples in Prometheus, streams in Loki, and datasources
+answering in Grafana.
+
+## Deploying to a fresh host
+
+```sh
+make tf-plan                  # firewall + (optional) server, hcloud provider
+make tf-apply
+make cloud-init               # render cloud-init/user-data.yaml for the new instance
+```
+
+First boot runs `cloud-init/user-data.yaml`: hardened base, docker, tailscale up, clone, `make up`.
+
+### Fresh-host requirements (learned the hard way — dogfood run 7)
+
+Before `make up` on a bare host:
+
+- **Docker Compose v2 plugin is required** (not part of base docker on Debian/Ubuntu).
+  `bootstrap.sh` fails fast if it is missing; install it to `~/.docker/cli-plugins/` first.
+- **Rootless docker cannot create `/var/lib/fleet-monitoring/{spool,node-exporter-textfile}`.**
+  Run `make bootstrap` (as root or with sudo) so the bind-mount sources exist with the right
+  owner before the first `make up`; on a rootless-only host, remap these to user-writable
+  paths via a compose override (`COMPOSE_EXTRA=stack/docker-compose.override.yml`).
+- A stale `/run/user/$UID/dockerd-rootless/lock` from a killed rootless daemon blocks
+  restarts — kill leftover rootlesskit processes and `rm` the pid/lock, then
+  `systemctl --user reset-failed docker`.
+- The alert-router image builds from `stack/alert-router/Dockerfile`, which is committed;
+  if `make up` fails with "failed to read dockerfile" you are running a checkout older
+  than the run-7 fixes.
+
+## Fleet agents
+
+Every host that should be monitored gets the Alloy agent:
+
+```sh
+make agent-install HOST=dedi-2        # ansible: docker + alloy unit
+make agent-install-all                # every host in ansible/inventory.yml
+```
+
+The agent's config is `stack/alloy/config.alloy`, shipped with the stack — one file, both
+`metrics` and `logs` pipelines, so host and collector config never drift apart.
+
+## Alert → agent routing
+
+`alerts/rules/*.yml` carry a `lane` label naming the project that owns the alert:
+
+```yaml
+- alert: DiskWillFillIn24h
+  expr: predict_linear(node_filesystem_avail_bytes[6h], 86400) < 0
+  labels: { severity: warning, lane: monitoring }
+```
+
+Alertmanager posts to `alert-router`, which appends a board row to that lane's
+`.coding-hermes/board/tasks.jsonl` (idempotent per alert fingerprint + day) and optionally
+messages the lane. Details and the label taxonomy: `docs/alerting-to-agents.md`.
+
+## Backups / S3 backend
+
+```sh
+make backup        # loki chunks + prometheus snapshot + grafana db + git bundle -> S3
+make restore-check # verifies the newest backup is readable (not just present)
+```
+
+Bucket/prefix is `karahermes-hel/monitoring/` by default (`S3_BUCKET` / `S3_PREFIX`). In S3 mode,
+Loki writes its chunks there directly, so logs survive the host being rebuilt. The backup script
+uses `COMPOSE_PROJECT_NAME` to locate the matching Prometheus and Grafana volumes (default
+`fleet-monitoring`).
+
+## Rebuilding the whole thing
+
+`docs/rebuild.md` is the runbook: new host → firewall → bootstrap → up → verify → restore history.
+It is written to be followed by someone who has never seen this repo.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `stack/` | docker compose + component configs (prometheus, loki, alloy, alertmanager, grafana provisioning, **tempo**) |
+| `dashboards/` | Grafana dashboard JSON, provisioned on boot |
+| `alerts/` | Prometheus alert rules, lane-labelled |
+| `terraform/` | hcloud: outbound-only firewall, optional server, ssh key |
+| `ansible/` | fleet host prep + agent rollout |
+| `cloud-init/` | first-boot config for a fresh instance |
+| `scripts/` | bootstrap, deploy, verify, backup, restore, agent install |
+| `docs/` | architecture, rebuild runbook, alerting, decisions |

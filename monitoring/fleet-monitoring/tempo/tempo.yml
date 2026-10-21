@@ -1,0 +1,31 @@
+# Tempo config — default distribution for mon-tempo.
+# OTLP receivers on :4317 (gRPC) and :4318 (HTTP), query on :3200.
+# Pinned to match Grafana 13.2.2 → Tempo 2.6.1 compatibility.
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+
+compactor:
+  compaction:
+    compaction_window: 24h
+    block_retention: 720h
+
+ingester:
+  lifecycler:
+    ring:
+      replication_factor: 1

@@ -62,7 +62,7 @@ groups:
           description: "Memory above 92% for 15m. Check for a container sizing change or a leak."
 
       - alert: OOMKillsOccurring
-        expr: increase(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+        expr: delta(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
         for: 0m
         labels:
           severity: critical
@@ -73,7 +73,7 @@ groups:
             {{ $value }} OOM kill(s) in the last 15m with MemAvailable <15%. This looks like a real
             host-level memory exhaustion — find the victim before the next one takes down a service.
       - alert: OOMKillsLowPressure
-        expr: increase(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) >= 0.15
+        expr: delta(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) >= 0.15
         for: 0m
         labels:
           severity: warning
@@ -95,3 +95,34 @@ groups:
         annotations:
           summary: "{{ $labels.host }} clock is skewed by {{ $value | printf \"%.1f\" }}s"
           description: "Skew >2s breaks token validation, TLS and log correlation. Check chrony/ntpd."
+      # MON-MONITORING-LOGIND-20261014: bunker hosts can be up (disk OK, RAM OK, API
+      # answering) while systemd-logind is wedged — every agent spawn dies at
+      # "enable linger". bunker-health.sh textfile exporter publishes logind liveness
+      # and the 30m spawn-failure count from the bunkerd journal.
+      - alert: BunkerLogindWedge
+        expr: bunker_logind_up == 0
+        for: 5m
+        labels:
+          severity: critical
+          lane: monitoring
+        annotations:
+          summary: "{{ $labels.host }} systemd-logind D-Bus is wedged"
+          description: |
+            busctl introspect org.freedesktop.login1 timed out on {{ $labels.host }}.
+            All agent spawns fail at "enable linger" even though the host looks healthy.
+            Fix: ssh {{ $labels.host }} "systemctl restart systemd-logind" (verified 2026-10-14).
+          runbook: docs/runbook.md#bunkerlogindwedge
+
+      - alert: BunkerSpawnFailures
+        expr: bunker_spawn_failures_30m > 0
+        for: 0m
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "{{ $labels.host }} had {{ $value }} spawn failures in 30m"
+          description: |
+            bunkerd logged "enable linger"/"spawn failed" lines in the last 30m window.
+            Early signal for the logind wedge class: check bunker_logind_up on the same
+            host; if 0, restart systemd-logind (MON-MONITORING-LOGIND-20261014).
+          runbook: docs/runbook.md#bunkerspawnfailures

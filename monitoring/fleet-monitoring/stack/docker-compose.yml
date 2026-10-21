@@ -35,6 +35,7 @@ services:
       - --web.enable-admin-api
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/probe-targets.json:/etc/prometheus/probe-targets.json:ro
       # mount the RULES DIRECTORY itself, not its parent: mounting ../alerts puts the files at
       # /etc/prometheus/rules/rules/*.yml while rule_files globs /etc/prometheus/rules/*.yml,
       # so Prometheus starts happily with ZERO rules loaded — no error, no alerts, ever.
@@ -44,21 +45,16 @@ services:
       - "${BIND_IP:-0.0.0.0}:9090:9090"
     networks: [mon]
 
-  cost-exporter:
+  blackbox-exporter:
     <<: *safe
-    image: python:3.13-slim
-    container_name: mon-cost-exporter
-    command: [python, /app/exporter.py]
-    environment:
-      HERMES_STATE_DB: /state/state.db
-      PORT: "9108"
-      PYTHONDONTWRITEBYTECODE: "1"
+    image: prom/blackbox-exporter:v0.27.0
+    container_name: mon-blackbox
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
     volumes:
-      - ./cost-exporter:/app:ro
-      - ${HERMES_STATE_DB_PATH:-/home/kara/.hermes/state.db}:/state/state.db:ro
-    read_only: true
-    tmpfs: [/tmp]
-    expose: ["9108"]
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    ports:
+      - "127.0.0.1:9115:9115"
     networks: [mon]
 
   alertmanager:
@@ -91,10 +87,6 @@ services:
       - -config.file=/etc/loki/loki-config.yml
       - -config.expand-env=true
     environment:
-      # QA-MONITORING-001/MON-REVIEW-003: local-storage mode legitimately has no S3
-      # creds — check-env enforces them only when LOKI_STORAGE resolves to s3, so
-      # compose must not hard-fail on them. Empty defaults keep s3 mode safe
-      # (render-configs/loki only consume them in s3 mode).
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
@@ -102,7 +94,7 @@ services:
       S3_REGION: ${S3_REGION:-hel1}
       LOKI_RETENTION: ${LOKI_RETENTION:-720h}
     volumes:
-      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./loki/loki-config.active.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     ports:
       - "${BIND_IP:-0.0.0.0}:3100:3100"
@@ -135,7 +127,7 @@ services:
       GF_RENDERING_CALLBACK_URL: http://grafana:3000/
       GF_RENDERING_RENDERER_TOKEN: ${RENDERER_TOKEN:?set RENDERER_TOKEN in .env}
       # Dashboard-only kiosk rendering: no menu chrome in captures
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-cost.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-overview.json
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -143,7 +135,7 @@ services:
       GF_SERVER_ROOT_URL: "http://localhost:3000"
       GF_INSTALL_PLUGINS: ""
     volumes:
-      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ../dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
@@ -169,14 +161,10 @@ services:
       # lane boards, read for existing ids and appended to when WRITE=1
       - ${BOARD_ROOT:-/tmp/boards}:${BOARD_ROOT:-/boards}
       # bind the host spool dir (drained by the fleet side over rsync) - a named
-      # volume here is root-owned and the container runs as uid 10001.
-      # HOST-side paths are env-remappable so a rootless host (agent user cannot
-      # mkdir /var/lib/*) can point them at $HOME dirs it creates itself.
-      # Compose list-merge APPENDS overrides, so the base list must already use
-      # the remaps — a plain COMPOSE_EXTRA override cannot remove these.
-      - ${SPOOL_HOST_DIR:-/var/lib/fleet-monitoring/spool}:/spool
+      # volume here is root-owned and the container runs as uid 10001
+      - /var/lib/fleet-monitoring/spool:/spool
     ports:
-      - "127.0.0.1:8089:8089"
+      - "127.0.0.1:${ALERT_ROUTER_HOST_PORT:-18089}:8089"
     networks: [mon]
 
   # The monitoring host ships its own metrics+logs like any other host.
@@ -211,9 +199,8 @@ services:
       # "couldn't get dbus connection" and node_systemd_unit_state never appears
       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
       - /run/systemd/private:/run/systemd/private
-      # textfile collector: the way a host publishes facts about itself (backup freshness).
-      # TEXTFILE_HOST_DIR remap: a rootless host cannot mkdir /var/lib/* (MON-DOGFOOD-035).
-      - ${TEXTFILE_HOST_DIR:-/var/lib/fleet-monitoring/node-exporter-textfile}:/var/lib/node_exporter/textfile:ro
+      # textfile collector: the way a host publishes facts about itself (backup freshness)
+      - /var/lib/fleet-monitoring/node-exporter-textfile:/var/lib/node_exporter/textfile:ro
       - alloy-data:/var/lib/alloy/data
     ports:
       - "127.0.0.1:12345:12345"
@@ -236,6 +223,24 @@ services:
       AUTH_TOKEN: ${RENDERER_TOKEN:?set RENDERER_TOKEN in .env}
     ports:
       - "127.0.0.1:8081:8081"
+    networks: [mon]
+
+  # Traces: OTLP receiver + trace store. Pinned to 2.6.1 (same Grafana image version).
+  # OTLP gRPC on :4317, OTLP HTTP on :4318, query API on :3200 (loopback).
+  tempo:
+    <<: *safe
+    image: grafana/tempo:2.6.1
+    container_name: mon-tempo
+    command:
+      - -config.file=/etc/tempo.yml
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
+    ports:
+      # OTLP gRPC + HTTP for trace ingestion; query API on 3200 (loopback only)
+      - "${BIND_IP:-0.0.0.0}:4317:4317"
+      - "${BIND_IP:-0.0.0.0}:4318:4318"
+      - "127.0.0.1:3200:3200"
     networks: [mon]
 
   cadvisor:
@@ -269,3 +274,4 @@ volumes:
   loki-data:
   grafana-data:
   alloy-data:
+  tempo-data:

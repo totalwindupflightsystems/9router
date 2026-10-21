@@ -247,3 +247,12 @@ tasks:
   status: complete
   created_at: '2026-10-16T16:00:01.295679+00:00'
   completed_at: '2026-10-16T16:12:58.263437+00:00'
+- id: MON-GAP-029
+  title: Repoint stale standby-cx53-01-2147 probe target to the live slot IP
+  criteria:
+  - probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002
+    AND a live Prometheus query shows probe_success=1 for both new targets AND zero
+    TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision
+    note blocks regeneration from the stale generator
+  status: in_progress
+  created_at: '2026-10-21T21:01:30.111968+00:00'

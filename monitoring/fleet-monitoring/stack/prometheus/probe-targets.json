@@ -1,0 +1,90 @@
+[
+  {
+    "targets": [
+      "100.122.57.93:10001"
+    ],
+    "labels": {
+      "host": "standby-cx53-01-2147",
+      "inventory_alias": "standby-cx53-01-2147",
+      "service_port": "10001",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.122.57.93:10002"
+    ],
+    "labels": {
+      "host": "standby-cx53-01-2147",
+      "inventory_alias": "standby-cx53-01-2147",
+      "service_port": "10002",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.66.160.77:10001"
+    ],
+    "labels": {
+      "host": "standby-cx53-02-2147",
+      "inventory_alias": "standby-cx53-02-2147",
+      "service_port": "10001",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.66.160.77:10002"
+    ],
+    "labels": {
+      "host": "standby-cx53-02-2147",
+      "inventory_alias": "standby-cx53-02-2147",
+      "service_port": "10002",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.100.29.114:10001"
+    ],
+    "labels": {
+      "host": "standby-cx53-03-2204",
+      "inventory_alias": "standby-cx53-03-2204",
+      "service_port": "10001",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.100.29.114:10002"
+    ],
+    "labels": {
+      "host": "standby-cx53-03-2204",
+      "inventory_alias": "standby-cx53-03-2204",
+      "service_port": "10002",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.106.74.73:10001"
+    ],
+    "labels": {
+      "host": "standby-cx53-04-2220",
+      "inventory_alias": "standby-cx53-04-2220",
+      "service_port": "10001",
+      "probe_module": "tcp_connect"
+    }
+  },
+  {
+    "targets": [
+      "100.106.74.73:10002"
+    ],
+    "labels": {
+      "host": "standby-cx53-04-2220",
+      "inventory_alias": "standby-cx53-04-2220",
+      "service_port": "10002",
+      "probe_module": "tcp_connect"
+    }
+  }
+]
