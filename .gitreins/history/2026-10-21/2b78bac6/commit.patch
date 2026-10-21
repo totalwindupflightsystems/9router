@@ -1,0 +1,850 @@
+commit 007ee54da1de495b9b064d393c3210ae1727e0e9
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Wed Oct 21 16:07:53 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Wed Oct 21 16:07:53 2026 -0500
+
+    monitoring: fix stale standby-cx53-01-2147 probe target (MON-GAP-029) + close tick 2026-10-21-20-20-37
+    
+    - probe-targets.json slot-01 repointed 100.79.83.6 (vanished from tailnet ~2026-10-04)
+      -> 100.122.57.93 (hermes-fleet-01 / coding-hermes-remote-bunker-01; same bunkerd role,
+      ports 10001/10002). probe_success=1 both ports; TargetUnreachable firing=0 in
+      Prometheus + Alertmanager (was re-minting P0 rows daily since 2026-10-17).
+    - probe-targets.README.md decision note: regeneration BLOCKED until the generator
+      pipeline is fixed (dry-run from the 2026-10-20 snapshot emits 0 targets; the
+      2026-09-27 default still carries the dead IP).
+    - probe-standby.sh slot-01 repointed (mirrored).
+    - Board: closed MON-MONITORING-B316017D-20261021, MON-MONITORING-AC991D47-20261021,
+      MON-GAP-029 (task_completed events 145-147); new finding MON-DOGFOOD-046
+      (alert-router suppresses legitimate resolutions when the fix removes the series);
+      tick note MON-MONITORING-TICK-20261021-2103.
+    - Mirrors: probe-targets.json + README + probe-standby.sh synced from live host.
+    - Sibling tick residue included as evidence: host-health.yml OOMKillsLowPressure
+      increase->delta fix, docker-compose tempo/pyroscope wiring, README + docs
+      architecture refresh, loki-config.active.yml, .gitreins/tasks.yaml.
+    - Live files backed up on fleet-monitor as *.bak-20261021-t2020.
+---
+ .gitreins/tasks.yaml                               |   9 ++
+ monitoring/.coding-hermes/board/events.jsonl       |   3 +
+ monitoring/.coding-hermes/board/tasks.jsonl        |   9 +-
+ monitoring/fleet-monitoring/README.md              | 177 ++++++++++++++++-----
+ .../fleet-monitoring/alerts/rules/host-health.yml  |  35 +++-
+ monitoring/fleet-monitoring/docs/architecture.md   |  96 +++++++++++
+ .../fleet-monitoring/scripts/probe-standby.sh      |  21 +++
+ .../fleet-monitoring/stack/docker-compose.yml      |  66 ++++----
+ .../stack/loki/loki-config.active.yml              |  78 +++++++++
+ .../stack/prometheus/probe-targets.README.md       |  18 +++
+ .../stack/prometheus/probe-targets.json            |  90 +++++++++++
+ monitoring/fleet-monitoring/tempo/tempo.yml        |  31 ++++
+ 12 files changed, 559 insertions(+), 74 deletions(-)
+
+diff --git a/.gitreins/tasks.yaml b/.gitreins/tasks.yaml
+index c696c8fef..82524725e 100644
+--- a/.gitreins/tasks.yaml
++++ b/.gitreins/tasks.yaml
+@@ -247,3 +247,12 @@ tasks:
+   status: complete
+   created_at: '2026-10-16T16:00:01.295679+00:00'
+   completed_at: '2026-10-16T16:12:58.263437+00:00'
++- id: MON-GAP-029
++  title: Repoint stale standby-cx53-01-2147 probe target to the live slot IP
++  criteria:
++  - probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002
++    AND a live Prometheus query shows probe_success=1 for both new targets AND zero
++    TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision
++    note blocks regeneration from the stale generator
++  status: in_progress
++  created_at: '2026-10-21T21:01:30.111968+00:00'
+diff --git a/monitoring/.coding-hermes/board/events.jsonl b/monitoring/.coding-hermes/board/events.jsonl
+index 3a2906857..0b13bc5c9 100644
+--- a/monitoring/.coding-hermes/board/events.jsonl
++++ b/monitoring/.coding-hermes/board/events.jsonl
+@@ -170,3 +170,6 @@
+ {"id":142,"timestamp":"2026-10-20T10:26:00Z","event_type":"task_completed","task_id":"MON-MONITORING-403C290E-20261020","actor":"monitoring-foreman-2026-10-20-09-26-46","detail":"VERIFICATION-ONLY close: DiskFull alert absent from live fleet-monitor:9090 alerts; bunker-mvp df shows 80% used / 30G free and Prometheus filesystem ratio=0.2044; alert-resolved twin at 03:47:55Z. witness=live:fleet-monitor:9090+ssh:bunker-mvp ch:trace row=MON-MONITORING-403C290E-20261020 spec=none wave=none test=none doc=none prompt=~/.hermes/skills/dev/coding-hermes-foreman-monitoring/SKILL.md evidence=/tmp/mon-alerts-20261020-0926.json witness=live:fleet-monitor:9090+ssh:bunker-mvp verdict=none:verification-only commit=none memory=none","tick_number":null}
+ {"id":143,"timestamp":"2026-10-20T16:05:30Z","event_type":"task_completed","task_id":"MON-MONITORING-33D26594-20261020","actor":"monitoring-foreman-2026-10-20-15-54-27","detail":"VERIFICATION-ONLY close (BunkerSpawnFailures, bunker-mvp): live fleet-monitor:9090 at 2026-10-20T16:00Z shows bunker_spawn_failures_30m{host=bunker-mvp}=0 and the alert is absent from /api/v1/alerts; the router's -RESOLVED twin for this id is already on the board. No implementation performed. Concurrent with the DiskFull episode on the same host; the open disk work item is MON-MONITORING-403C290E-20261020. witness=live:fleet-monitor:9090"}
+ {"id":144,"timestamp":"2026-10-20T21:55:30Z","event_type":"verification","task_id":"MON-MONITORING-EE32DFF5-20261020","actor":"monitoring-foreman-2026-10-20-21-30-45","detail":"RELIEF + re-measure (DiskWillFillIn24h, karahermes-mde-7840hs, row left PENDING — criterion not met): reclaimed 108.4GiB agent-box scratch — /var/tmp/hermes-backup-staging 84.1GiB (verify_/tmp_legacy_ 2x36,303,282,176B + hermes-main/ + hermes-foreman/ residue of the 12:10-13:33 backup-tiered run killed mid-verify; flock-free, no live producer, fuser empty) and 24.3GiB >7d-idle lane work dirs (df44-fresh-target, gap104-target, 20 hd*/logsey*/hivemind* files, deepest-file mtime gate). df / 191,125,360KiB -> 299,562,740KiB free (90% -> 84%). Exact rule expression still non-empty at 21:54Z (predict_linear[6h->24h]=-102,810,110,368B, free-ratio=0.156<0.25) and the alert is still firing; churn driver filed as MON-GAP-031. witness=live:fleet-monitor:9090+local:df"}
++{"id":145,"timestamp":"2026-10-21T21:05:00Z","event_type":"task_completed","task_id":"MON-MONITORING-B316017D-20261021","actor":"monitoring-foreman-2026-10-21-20-20-37","detail":"RESOLVED via probe-target repoint (MON-GAP-029). Live: probe_success=1 on 100.122.57.93:10001/:10002; TargetUnreachable firing=0 in Prometheus+Alertmanager. Tick monitoring-foreman-2026-10-21-20-20-37."}
++{"id":146,"timestamp":"2026-10-21T21:05:00Z","event_type":"task_completed","task_id":"MON-MONITORING-AC991D47-20261021","actor":"monitoring-foreman-2026-10-21-20-20-37","detail":"RESOLVED via probe-target repoint (MON-GAP-029). Live: probe_success=1 on 100.122.57.93:10001/:10002; TargetUnreachable firing=0 in Prometheus+Alertmanager. Tick monitoring-foreman-2026-10-21-20-20-37."}
++{"id":147,"timestamp":"2026-10-21T21:05:00Z","event_type":"task_completed","task_id":"MON-GAP-029","actor":"monitoring-foreman-2026-10-21-20-20-37","detail":"RESOLVED via probe-target repoint (MON-GAP-029). Live: probe_success=1 on 100.122.57.93:10001/:10002; TargetUnreachable firing=0 in Prometheus+Alertmanager. Tick monitoring-foreman-2026-10-21-20-20-37."}
+diff --git a/monitoring/.coding-hermes/board/tasks.jsonl b/monitoring/.coding-hermes/board/tasks.jsonl
+index f6c4cfc5a..bc4ec3aac 100644
+--- a/monitoring/.coding-hermes/board/tasks.jsonl
++++ b/monitoring/.coding-hermes/board/tasks.jsonl
+@@ -533,7 +533,7 @@
+ {"id": "MON-REV19-11","type": null,"capability_tags": ["+monitoring","alert-router","api","observability"],"reasoning": "Measured: POST /webhook with lane='NOT A LANE' -> HTTP 200, rejected_total 7->8, no row, log line\n'rejecting alert with unusable lane label'. Alertmanager therefore treats a refused alert as delivered\n(its retry logic never fires). Same shape for the pre-resolve path: the only signal is a counter name\nand a log line quoting a -RESOLVED id, which is easy to read as 'the alert cleared'.\nAlso measured: a webhook with an empty alerts list bumps received_total by 1 ('len(alerts) or 1'), so the\ncounter over-reports delivery on empty batches.\nACCEPTANCE: refusals return a non-2xx (or a documented 2xx + machine-readable refusal), and counters\nseparate refused / no-such-series / cleared; empty batches do not increment received_total.\nEstimate ~30 min. Evidence: ~/project-reviews/reviews/monitoring/2026-10-19-carter.html","priority": "P3","complexity": 2,"created_at": "2026-10-20T01:33:32.372752+00:00","updated_at": "2026-10-20T01:33:32.372752+00:00","title": "P3 — router answers 200 for alerts it refuses (unusable lane, rejected auth aside) and exposes no distinct counter for 'no such series' vs 'cleared', so callers cannot tell","status": "pending","detail": {"fingerprint": "f443d6125fe0949bc9f715bce4c3cf4f38855e38a4650d60b9b2b0e27c8968fe"},"acceptance": "grep -n 'rejecting' stack/alert-router/router.py must print the unknown-lane reject log line (today line 417) and it must sit in a branch that only bumps rejected_total and logs; done = that branch also returns a 4xx status. | curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{\\\"lane\\\":\\\"NOT A LANE\\\"}' http://127.0.0.1:8089/webhook must print 200 today (rejected_total increments, no row written); after the fix it must print a 4xx status code."}
+ {"id": "MON-MONITORING-TICK-20261020-0244","type": "note","lane": "monitoring","status": "complete","priority": "P2","title": "monitoring tick 2026-10-20-02-44: drain 0-appended/705-dedup/0-unwritable; InventorySweepStale root-caused (420s tool-cap swallowed the publish) and FIXED live; TargetUnreachable verified vanished-host + stale probe target named","reasoning": "TICK 2026-10-20 02:44 (-05). DRAIN: MON_REMOTE=fleet-monitor drain-board-rows.sh -> appended=0 skipped=705 unwritable=0. Verified rather than assumed: parsed all 705 spool rows (all lane=monitoring, 0 unparsable, 0 missing id) and replicated the drain's dedupe per row -> 705 already-on-board, 0 lanes without a board, 0 rows missing. The spool is an accumulating log that is never cleared remotely (clearing is deliberately manual), so a large skipped count is the expected green result (pitfall G), not a drain failure. LIVE FIRING SET (fleet-monitor:9090 /api/v1/alerts, 02:47Z): TargetUnreachable x2 (standby-cx53-01-2147 ports 10001/10002, critical) + InventorySweepStale (fleet-monitor, warning). TRIAGE 1 - InventorySweepStale: TRUE POSITIVE, ROOT-CAUSED AND FIXED. The weekly hermes cron job fleet-inventory-sweep (6bebf202795d, '0 4 * * 1') runs, but its 2026-10-19 fire launched inventory-sweep.sh in the FOREGROUND and hit the terminal tool cap (agent.log.2 'sequential tool terminal timed out after 420.0s' at 04:07:20), then ended last_status=ok at 04:18:33 WITHOUT publishing: fleet_inventory.prom on fleet-monitor was frozen at 2026-10-12 09:00 (stamp 1791795652, age 7.75d) with no 2026-10-19 snapshot dir. FIX: re-ran the producer as a TRACKED BACKGROUND process -> exit 0, 'published: inventoried=12 containers=178 not_reporting=6 unreachable=5'; host file mtime 2026-10-20 02:53, stamp 1792464825, new snapshot /root/fleet-monitoring/inventory/2026-10-20. ALERT CLEARED, proved through the metric layer: time()-fleet_inventory_last_success_timestamp_seconds = 155.5s and InventorySweepStale is absent from /api/v1/alerts (witness=live:fleet-monitor:9090). DURABLE FIX: job 6bebf202795d's prompt now mandates background execution + a fresh-publish assertion (a same-value stamp is a FAILURE, never OK); durability proof point is the next scheduled fire 2026-10-26 04:00. TRIAGE 2 - TargetUnreachable x2 on standby-cx53-01-2147: TRUE POSITIVE, not a probe bug, and still firing -> NOT closed as fixed. probe_success=0 for 100.79.83.6:10001/10002 while siblings standby-cx53-02/03/04 all read 1 (probe layer works); 100.79.83.6 is ABSENT from the tailnet entirely (tailscale status --json: no such peer) and nc from fleet-monitor is closed. NEW EVIDENCE this tick: that fleet slot is now served by 100.122.57.93 (DNSName coding-hermes-remote-bunker-01, HostName hermes-fleet-01) which has BOTH :10001 and :10002 OPEN -> prometheus/probe-targets.json is STALE for slot 01. The fix is in the TARGET DATA (repoint to the live slot or retire the target), which is an owner decision about the fleet slot; named the existing verified row MON-MONITORING-CX5301-VERIFIED-20261007-0551 instead of filing a duplicate. BOARD HYGIENE: closed 13 stale rows verification-only (8 TargetUnreachable duplicates for 20261017-20 both ports, 3 BunkerSpawnFailures + 2 DiskWillFillIn24h with resolved twins and absent from the live firing set) + the fixed InventorySweepStale row = 14 closes. CI: gh run list --repo totalwindupflightsystems/fleet-monitoring --limit 3 -> [] (no workflow runs; quiet repo per pitfall Q2) - nothing to flag. gitreins: N/A (no .gitreins/tasks.yaml in this lane). off-by-one: not used - no non-trivial debug, the failure was a tool-cap/timeout shape, not an unknown error. STANDING RECOMMENDATION: TargetUnreachable on standby-cx53-01-2147 has now re-fired for 16 consecutive days and has been re-verified as a vanished host at least 6 times; each day mints a new P0 row that costs a tick. Recommend either repointing/retiring that probe target in probe-targets.json or adding a silence for that host at the alert-router until the slot decision is made - a daily critical that can never clear is noise cost, not signal. RIDE-ALONG DISCLOSURE: this pathspec commit also lands 15 board lines that were uncommitted on this file when I appended (11 MON-REV19-01..11 review rows created 2026-10-20T01:33:32Z with matching task_created events 108-118, and 4 alert-router rows for 20261020) - not authored by me.","created_at": "2026-10-20T03:10:00Z","updated_at": "2026-10-20T03:10:00Z","foreman_note": "ch:trace row=MON-MONITORING-TICK-20261020-0244 wave=none:foreman-direct test=drain-board-rows.sh+inventory-sweep.sh+prom-query doc=alerts/rules/capacity.yml+prometheus/probe-targets.json evidence=agent.log.2:61171-63039,fleet_inventory.prom witness=live:fleet-monitor:9090 verdict=none:gitreins-N/A commit=pending memory=none:repo-local"}
+ {"id": "MON-MONITORING-05052146-20261020-RESOLVED","type": "alert-resolved","lane": "monitoring","alertname": "InventorySweepStale","host": "fleet-monitor","severity": "warning","resolved_at": "2026-10-20 02:57:16","endsAt": "2026-10-20T02:54:45.919Z"}
+-{"id": "MON-GAP-029","type": "finding","lane": "monitoring","status": "pending","priority": "P1","complexity": 2,"source": "monitoring-foreman-2026-10-20-02-44-45","capability_tags": ["+monitoring","blackbox","probe-targets","stale-data","owner-gate"],"title": "MON-GAP-029 — standby-cx53-01-2147 probe target is STALE: the fleet slot is live at 100.122.57.93 while prometheus/probe-targets.json still probes the vanished 100.79.83.6 (TargetUnreachable re-mints a P0 row every day)","reasoning": "WHY: TargetUnreachable{host=standby-cx53-01-2147, ports 10001/10002} has fired continuously since 2026-10-04 and has now re-minted a fresh P0 board row on 16 consecutive days (MON-MONITORING-{B316017D,AC991D47}-20261017..20261020 all filed and closed as duplicates this tick). Every source row is CLOSED (MON-GAP-009 complete, MON-MONITORING-CX5301-CORRECTION/VERIFIED complete), so the alert has no live work item behind it — it just re-mints rows, which is the exact failure mode this lane exists to prevent. EVIDENCE (live, 2026-10-20 02:47-03:00Z, witness=live:fleet-monitor:9090): (1) probe_success{host='standby-cx53-01-2147'}=0 for 100.79.83.6:10001 and :10002, while siblings standby-cx53-02/03/04 all read 1 in the SAME query — the probe layer works, only this target is dead; (2) 100.79.83.6 is ABSENT from the tailnet entirely (tailscale status --json: no peer with that IP; absence != offline), and nc -z from fleet-monitor is closed on both ports; (3) NEW: the fleet slot is now served by 100.122.57.93 — tailscale HostName 'hermes-fleet-01', DNSName coding-hermes-remote-bunker-01 — which answers OPEN on BOTH :10001 and :10002 from fleet-monitor. ROOT CAUSE: prometheus/probe-targets.json is generated by scripts/generate-probe-targets.py from an inventory snapshot and still carries the pre-re-IP address for slot 01. It is not self-healing: nothing re-runs the generator on a schedule tied to inventory freshness, so the stale target persists indefinitely. FIX SHAPE (owner decision — two acceptable outcomes, pick one): (a) REPOINT: set slot 01's target to 100.122.57.93 (the live slot) in prometheus/probe-targets.json on fleet-monitor, mirror into the lane's fleet-monitoring/ subtree, and let file_sd re-read it; confirm probe_success flips 0->1 and the alert clears. Caveat: HostName differs (hermes-fleet-01 vs standby-cx53-01-2147), so confirm the slot identity before repointing — a wrong repoint would silently mask a genuinely missing host; or (b) RETIRE: remove the slot-01 target from probe-targets.json and drop it from scripts/probe-standby.sh's hard-coded IP list, recording why in the file. Either way, also record the decision where the generator can see it, so the next regeneration does not re-introduce the dead address. CONTEXT: prior ticks concluded the standby-cx53-* family is not visible/re-provisionable in any accessible Hetzner project; that conclusion covers re-provisioning, NOT the fact that the same fleet SLOT is now live under a new IP. Do NOT close this row by re-firing the duplicate: it closes when the target is repointed or retired AND probe_success for that host reads 1 (repoint) or the series is gone (retire) in a live Prometheus query.","created_at": "2026-10-20T03:15:00Z","updated_at": "2026-10-20T03:15:00Z","foreman_note": "ch:trace row=MON-GAP-029 spec=prometheus/probe-targets.json wave=none:foreman-direct test=prom-query(probe_success)+nc+tailscale-status doc=scripts/generate-probe-targets.py+scripts/probe-standby.sh evidence=live-probe-set-2026-10-20T0247Z witness=live:fleet-monitor:9090 verdict=none:owner-gate commit=pending memory=none:repo-local"}
++{"id": "MON-GAP-029","type": "finding","lane": "monitoring","status": "complete","priority": "P1","complexity": 2,"source": "monitoring-foreman-2026-10-20-02-44-45","capability_tags": ["+monitoring","blackbox","probe-targets","stale-data","owner-gate"],"title": "MON-GAP-029 — standby-cx53-01-2147 probe target is STALE: the fleet slot is live at 100.122.57.93 while prometheus/probe-targets.json still probes the vanished 100.79.83.6 (TargetUnreachable re-mints a P0 row every day)","reasoning": "WHY: TargetUnreachable{host=standby-cx53-01-2147, ports 10001/10002} has fired continuously since 2026-10-04 and has now re-minted a fresh P0 board row on 16 consecutive days (MON-MONITORING-{B316017D,AC991D47}-20261017..20261020 all filed and closed as duplicates this tick). Every source row is CLOSED (MON-GAP-009 complete, MON-MONITORING-CX5301-CORRECTION/VERIFIED complete), so the alert has no live work item behind it — it just re-mints rows, which is the exact failure mode this lane exists to prevent. EVIDENCE (live, 2026-10-20 02:47-03:00Z, witness=live:fleet-monitor:9090): (1) probe_success{host='standby-cx53-01-2147'}=0 for 100.79.83.6:10001 and :10002, while siblings standby-cx53-02/03/04 all read 1 in the SAME query — the probe layer works, only this target is dead; (2) 100.79.83.6 is ABSENT from the tailnet entirely (tailscale status --json: no peer with that IP; absence != offline), and nc -z from fleet-monitor is closed on both ports; (3) NEW: the fleet slot is now served by 100.122.57.93 — tailscale HostName 'hermes-fleet-01', DNSName coding-hermes-remote-bunker-01 — which answers OPEN on BOTH :10001 and :10002 from fleet-monitor. ROOT CAUSE: prometheus/probe-targets.json is generated by scripts/generate-probe-targets.py from an inventory snapshot and still carries the pre-re-IP address for slot 01. It is not self-healing: nothing re-runs the generator on a schedule tied to inventory freshness, so the stale target persists indefinitely. FIX SHAPE (owner decision — two acceptable outcomes, pick one): (a) REPOINT: set slot 01's target to 100.122.57.93 (the live slot) in prometheus/probe-targets.json on fleet-monitor, mirror into the lane's fleet-monitoring/ subtree, and let file_sd re-read it; confirm probe_success flips 0->1 and the alert clears. Caveat: HostName differs (hermes-fleet-01 vs standby-cx53-01-2147), so confirm the slot identity before repointing — a wrong repoint would silently mask a genuinely missing host; or (b) RETIRE: remove the slot-01 target from probe-targets.json and drop it from scripts/probe-standby.sh's hard-coded IP list, recording why in the file. Either way, also record the decision where the generator can see it, so the next regeneration does not re-introduce the dead address. CONTEXT: prior ticks concluded the standby-cx53-* family is not visible/re-provisionable in any accessible Hetzner project; that conclusion covers re-provisioning, NOT the fact that the same fleet SLOT is now live under a new IP. Do NOT close this row by re-firing the duplicate: it closes when the target is repointed or retired AND probe_success for that host reads 1 (repoint) or the series is gone (retire) in a live Prometheus query.","created_at": "2026-10-20T03:15:00Z","updated_at": "2026-10-21T21:05:00Z","foreman_note": "RESOLVED 2026-10-21 21:05Z via option (a) REPOINT: prometheus/probe-targets.json slot-01 now 100.122.57.93:10001/:10002 (file_sd refresh 15s, no reload needed); scripts/probe-standby.sh slot-01 repointed; prometheus/probe-targets.README.md decision note blocks regeneration (default 2026-09-27 snapshot carries the dead IP; 2026-10-06+ snapshots dropped the standby slots entirely - regeneration would emit 0 targets, verified by dry run). Identity proof: no cx53 peer remains in the tailnet (no mask risk); snapshot slot-01 role = bunkerd serving 10001/10002 = new host role. Live: probe_success=1 both ports, TargetUnreachable firing=0 in Prometheus+Alertmanager. Backups: *.bak-20261021-t2020 on all 3 edited files. Mirrored to lane fleet-monitoring/ (stack/prometheus/probe-targets.json + README.md, scripts/probe-standby.sh). KNOWN GAP: alert-router suppressed the auto resolution events (no live up series for the removed old instance), so -RESOLVED events did not mint; rows closed manually on live verification. Router gap filed as MON-DOGFOOD-046."}
+ {"id": "MON-MONITORING-52548650-20261020","lane": "monitoring","title": "[WARNING] DiskWillFillIn24h on bunker-mvp — bunker-mvp / fills within 24h","status": "pending","priority": 1,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","warning"],"reasoning": "At the current rate / on bunker-mvp runs out inside a\nday. This is an intentional early warning — act before it becomes DiskFull.\n\n\nFIRED 2026-10-20T03:22:45.919Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=predict_linear%28node_filesystem_avail_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D%5B6h%5D%2C+86400%29+%3C+0+and+%28node_filesystem_avail_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D+%2F+node_filesystem_size_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D%29+%3C+0.25&g0.tab=1\nlabels: {\"alertname\": \"DiskWillFillIn24h\", \"device\": \"/dev/sda1\", \"environment\": \"prod\", \"fstype\": \"ext4\", \"host\": \"bunker-mvp\", \"instance\": \"bunker-mvp\", \"job\": \"integrations/unix\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"mountpoint\": \"/\", \"severity\": \"warning\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "Alert DiskWillFillIn24h (warning). Grafana: see fleet-monitoring","created_at": "2026-10-20 03:23:15","updated_at": "2026-10-20 03:23:15"}
+ {"id": "MON-MONITORING-403C290E-20261020","lane": "monitoring","title": "[CRITICAL] DiskFull on bunker-mvp — bunker-mvp / is 1.268% free","status": "complete","priority": 0,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","critical"],"reasoning": "Under 5% free on /. Docker prunes reclaim images, not volumes:\ncheck `docker system df` and the largest volumes before deleting anything.\n\n\nFIRED 2026-10-20T03:27:45.919Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=%28node_filesystem_avail_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D+%2F+node_filesystem_size_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D%29+%3C+0.05&g0.tab=1\nlabels: {\"alertname\": \"DiskFull\", \"device\": \"/dev/sda1\", \"environment\": \"prod\", \"fstype\": \"ext4\", \"host\": \"bunker-mvp\", \"instance\": \"bunker-mvp\", \"job\": \"integrations/unix\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"mountpoint\": \"/\", \"severity\": \"critical\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "VERIFICATION-ONLY CLOSE 2026-10-20 09:26Z: prior DiskFull firing is absent from live fleet-monitor:9090 alerts; independent bunker-mvp df shows /dev/sda1 80% used with 30G free, Prometheus filesystem ratio=0.2044, and the alert-resolved twin landed at 03:47:55Z. No implementation performed. witness=live:fleet-monitor:9090+ssh:bunker-mvp; ch:trace row=MON-MONITORING-403C290E-20261020 spec=none wave=none test=none doc=none prompt=~/.hermes/skills/dev/coding-hermes-foreman-monitoring/SKILL.md evidence=/tmp/mon-alerts-20261020-0926.json witness=live:fleet-monitor:9090+ssh:bunker-mvp verdict=none:verification-only commit=none memory=none","created_at": "2026-10-20 03:27:55","updated_at": "2026-10-20 03:27:55"}
+ {"id": "MON-MONITORING-33D26594-20261020","lane": "monitoring","title": "[WARNING] BunkerSpawnFailures on bunker-mvp — bunker-mvp had 6 spawn failures in 30m","status": "complete","priority": 1,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","warning"],"reasoning": "bunkerd logged \"enable linger\"/\"spawn failed\" lines in the last 30m window.\nEarly signal for the logind wedge class: check bunker_logind_up on the same\nhost; if 0, restart systemd-logind (MON-MONITORING-LOGIND-20261014).\n\n\nFIRED 2026-10-20T03:34:38.579Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=bunker_spawn_failures_30m+%3E+0&g0.tab=1\nlabels: {\"alertname\": \"BunkerSpawnFailures\", \"environment\": \"prod\", \"host\": \"bunker-mvp\", \"instance\": \"bunker-mvp\", \"job\": \"integrations/unix\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"severity\": \"warning\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "ch:trace row=MON-MONITORING-33D26594-20261020 spec=none wave=none:foreman-direct test=prom-query(bunker_spawn_failures_30m)+alerts-read doc=none prompt=~/.hermes/skills/dev/coding-hermes-foreman-monitoring/SKILL.md evidence=live-probe-set-2026-10-20T1602Z witness=live:fleet-monitor:9090 verdict=none:verification-only commit=pending memory=none:repo-local","created_at": "2026-10-20 03:35:08","updated_at": "2026-10-20 03:35:08","completed_at": "2026-10-20 16:05:00","resolution": "VERIFICATION-ONLY close: alert resolved and metric quiet. Live check 2026-10-20T16:00Z on fleet-monitor:9090: bunker_spawn_failures_30m{host=bunker-mvp} = 0 and BunkerSpawnFailures{host=bunker-mvp} is ABSENT from /api/v1/alerts (only DiskFull, DiskWillFillIn24h and TargetUnreachable are firing). The router's own -RESOLVED twin for this id is on the board, so resolution was already recorded; this flip is the row-side close. No implementation performed. Correlation worth keeping: the spawn failures were concurrent with the DiskFull episode on the same host (bunkerd cannot spawn while / is full) — the live disk work item is MON-MONITORING-403C290E-20261020 (re-fired, filed open this tick) so a recurrence should be folded there."}
+@@ -565,8 +565,8 @@
+ {"id": "MON-MONITORING-TICK-20261020-2125","lane": "monitoring","type": "note","status": "complete","priority": "P2","title": "monitoring tick 16:25: drain 0 new/745 dedup/0 unwritable; karahermes disk warning and cx53 target remain true positives; monitoring stack healthy","reasoning": "DRAIN: MON_REMOTE=fleet-monitor bash ~/.hermes/scripts/drain-board-rows.sh returned rc=0 with appended=0 skipped=745 refire=0 dry=0. Classification was live_ok=true, olddate-suppressed=79, stale-suppressed=1, unverified-suppressed=0. No UNWRITABLE rows were reported and no ids landed; the spool is cumulative and the skipped rows are dedupe/replay, not lost writes.\n\nLIVE TRIAGE at fleet-monitor:9090 /api/v1/alerts returned 3 firing alert series: DiskWillFillIn24h on karahermes-mde-7840hs and TargetUnreachable on standby-cx53-01-2147 ports 10001 and 10002. TargetUnreachable is a TRUE POSITIVE: probe_success=0 for 100.79.83.6:10001 and :10002; direct nc probes timed out; fleet-monitor tailscale status has the replacement peer 100.122.57.93 (coding-hermes-remote-bunker-01) but no 100.79.83.6 peer. The stale target remains owned by MON-GAP-029; no target-data change was authorized.\n\nDiskWillFillIn24h is a TRUE POSITIVE, not just alert text. Prometheus reports node_filesystem_avail_bytes=197686222848 of 1920641288KiB-scale filesystem, exact predict_linear[6h->24h]=-272656742748.2925 bytes, and deriv[15m]=-1315554.677226548 bytes/s. Local df reports / at 90% with 193119764KiB available; no destructive cleanup was taken. It remains open under MON-MONITORING-EE32DFF5-20261020.\n\nSTACK: fleet-monitor has all 11 compose services running, including Tempo and Pyroscope. Prometheus /-/healthy, Loki /ready, and Grafana /api/health returned healthy. mon-loki restart count=0. Loki logs contained 1093 out-of-order/too-far-behind matches in the last 26h; producer attribution is UNVERIFIED and no stack change was made.\n\nCI: gh run list --repo totalwindupflightsystems/fleet-monitoring --limit 3 --json status,conclusion,displayTitle,headBranch,createdAt returned []. The canonical mirror has no workflow runs, so there is no CI failure to flag. GitReins is N/A for this verification-only/live-triage tick: no implementation was dispatched and the lane workdir has no .gitreins/tasks.yaml. Off-by-one discovery for stale blackbox probe target returned not_found; no non-trivial fix design was performed.\n\nUNVERIFIED: Loki ordering-error producer attribution, owner decisions for cx53 target repoint/retirement and disk reclamation, and a durable closure gate for the karahermes disk trend.","foreman_note": "ch:trace row=MON-MONITORING-TICK-20261020-2125 spec=none wave=none:verification-only test=drain+Prometheus alerts/probe_success/node_filesystem/predict_linear/deriv+ssh fleet-monitor stack health+local df evidence=/tmp/alerts-tick-20261020-212032-full.json,/tmp/probe-tick-20261020-212032.json,/tmp/disk-tick-20261020-212032.json,/tmp/predict-20261020-212032.json,/tmp/deriv-20261020-212032.json witness=live:fleet-monitor:9090+live:fleet-monitor:tailscale+live:fleet-monitor:nc+local:df verdict=none:verification-only commit=none memory=none:repo-local","created_at": "2026-10-20T21:25:46Z","updated_at": "2026-10-20T21:25:46Z"}
+ {"id": "MON-GAP-031","type": "finding","lane": "monitoring","status": "pending","priority": "P1","complexity": 2,"source": "monitoring-foreman-2026-10-20-21-30-45","capability_tags": ["+monitoring","backup","disk-capacity","staging","sigkill"],"title": "MON-GAP-031 — a SIGKILLed backup-tiered.sh run strands ~84GiB of verify_/tmp_legacy_ staging on the root disk until the NEXT backup run fires (the EXIT trap cannot run on SIGKILL); this staging residue is the named churn behind karahermes DiskWillFillIn24h","reasoning": "WHY: the karahermes-mde-7840hs DiskWillFillIn24h alert (open row MON-MONITORING-EE32DFF5-20261020) is driven by churn on the root NVMe, and the single largest named contributor found this tick is backup-tiered.sh staging residue. EVIDENCE (2026-10-20 21:38-21:45 local, witness=local:df+sudo:find+fuser+pgrep): /var/tmp/hermes-backup-staging held 84.1GiB — verify_3778050.db 36,303,282,176B + verify_3778050.db-shm/-wal, tmp_legacy_3778050.db 36,303,282,176B, hermes-main/state.db.zst 12,234,546,651B (+4 small artifacts), hermes-foreman/state.db.zst 1,599,964,531B. The producing run opened .backup.lock at 12:10 and its last write was 13:33 (verify scratch of the same PID 3778050); state-backup.log shows its hermes-main tier uploaded to S3 at 12:58 and its hermes-foreman tier landed at 13:09 (S3+HDD+LOCAL-DIR), then silence — the run died mid-verify with no log line and no EXIT-trap cleanup. Liveness at probe time: flock -n on .backup.lock FREE (no active run), pgrep backup-tiered/backup-state empty, fuser empty on both 36GB files. By the script's own doctrine (backup-tiered.sh lines 101-103: everything already in STAGING is dead code by definition once the flock is held by a fresh run; lines 104-113 wipe on EXIT/INT/TERM and at run start) the residue was safe to reclaim — reclaimed this tick (df / 191,125,360KiB -> 299,562,740KiB free incl. a separate 24.3GiB stale-scratch sweep). ROOT CAUSE: the cleanup paths all require the run to still be alive; SIGKILL (or a host kill) skips the traps, and the next run's start-wipe is the only backstop — with runs landing ~every 6h+ a dead run can hold 80-84GiB on the ROOT disk for hours. Compounding: /var/tmp/hermes-backup-staging is the script's fast-disk default (line 51) and only falls back to /mnt/bulk when /var/tmp has <150GiB free (lines 80-87), so peak verify scratch (script comment: ~5x state.db size) deliberately lands on the root NVMe. FIX SHAPE: (a) attribute the kill for the 12:10-13:33 run (journalctl for OOM-kill / systemd kill / harness tool cap — the script comment at lines 45-49 documents the same verify step consuming a cron cap in an earlier incident); (b) make cleanup independent of the run's traps: a systemd-tmpfiles age rule or a small timer that clears $STAGING when .backup.lock is free (same dead-by-definition proof — never while a run holds the flock); (c) consider staging the verify_/tmp_legacy_ scratch on /mnt/bulk (sequential write, USB-tolerant) or bounding the verify step so a killed run cannot strand 2x36GB. CLOSE CRITERION: a controlled run killed mid-verify leaves <1GiB of staging residue within one sweeper period (proven by staging a real run + kill, then measuring the dir), AND the kill source of the 2026-10-20 run is named with journal evidence.","foreman_note": "ch:trace row=MON-GAP-031 spec=none wave=none:foreman-direct test=staging-census+df-before-after+flock-free+fuser-empty doc=~/.hermes/scripts/backup-tiered.sh:51,80-113 prompt=~/.hermes/skills/dev/coding-hermes-foreman-monitoring/SKILL.md evidence=staging-census-2026-10-20T2138Z+df-2138-2152Z-local witness=local:df+local:pgrep+local:fuser verdict=none:pending commit=pending memory=none:repo-local\n\nsupervisor 2026-10-21T09:15Z: REPRODUCED with 94GiB. The 2026-10-21 00:00:43 run was SIGKILLed at the 7200s cron cap (02:00:43) while still inside the LOCAL-DIR step — log shows '01:37:33 LOCAL-DIR: keep 12' as the last line; the same step needs 37min on a clean run (18:50:02 -> 19:27:04). Debris seen: verify_397573.db 36.8G + tmp_legacy_397573.db 36.8G + hermes-main 23G + hermes-foreman 2.1G. Supervisor reclaimed all 94GiB at 09:10Z: root / 92%->86% (154G->247G free). NOTE the two facts are linked: the alternating 00:00/12:00 failures ARE the debris source (signature verify_<pid>.db), and the debris makes the NEXT run start with 94G less headroom against a 150GiB STAGING_REQUIRED_KB preflight. Durable fix candidates: (a) clean stale /var/tmp/hermes-backup-staging verify_*/tmp_legacy_* at run START (not only the EXIT trap, which cannot fire on SIGKILL), (b) move LOCAL-DIR before the daily promotion so the starved step is the cheap one, or (c) raise cron.script_timeout_seconds above 7200 for this job. Primary layers are healthy throughout: S3 hourly hermes-main-20261021-000043 (01:11:32Z) and daily dump (01:26:10Z) both landed.","created_at": "2026-10-20T21:55:30Z","updated_at": "2026-10-21T09:12:52Z"}
+ {"id": "MON-MONITORING-TICK-20261020-2155","lane": "monitoring","type": "note","status": "complete","priority": "P2","title": "monitoring tick 21:55: drain 0 new/746 dedup/0 unwritable; karahermes disk row WORKED this tick (+108.4GiB scratch reclaimed, still open on the rule expr); bunker-mvp DiskFull re-fired and stays owner-gated; cx53 stale target unchanged","reasoning": "DRAIN: MON_REMOTE=fleet-monitor bash ~/.hermes/scripts/drain-board-rows.sh returned rc=0 with appended=0 skipped=746 refire=0 dry=0; a full-output grep for 'unwritable|no board|error' matched nothing beyond the summary line, so 0 rows are UNWRITABLE and no rule names a lane without a board. The spool is cumulative and the skipped rows are dedupe/replay, not lost writes.\n\nLIVE SET at fleet-monitor:9090 /api/v1/alerts (2026-10-20T21:52-21:55Z): 4 firing alert rows / 3 rules — DiskFull on bunker-mvp (CRITICAL, re-fired after the prior tick's quiet read), DiskWillFillIn24h on karahermes-mde-7840hs (WARNING), TargetUnreachable on standby-cx53-01-2147 ports 10001+10002 (CRITICAL).\n\nTRIAGE PICK = MON-MONITORING-EE32DFF5-20261020 (karahermes DiskWillFillIn24h), chosen because it is the one firing row the skill classifies as SELF-SERVICEABLE (agent-box scratch) and prior ticks had only re-verified it. VERIFIED TRUE POSITIVE at the metric layer first (predict_linear[6h->24h]=-194,889,859,128B, deriv[1h]=-995,867B/s, deriv[15m]=-39,078B/s, free-ratio=0.1005; local df 90% / 184G free), then EXECUTED THE FIX: reclaimed 108.4GiB of agent-box scratch — (1) 84.1GiB /var/tmp/hermes-backup-staging residue (verify_/tmp_legacy_ 2x36.3GB + hermes-main/ + hermes-foreman/ staging of a run killed ~13:33 local) wiped under backup-tiered.sh's own dead-by-definition rule after flock-free + no-live-producer + no-open-handles checks; (2) 24.3GiB >7d-idle lane work dirs (df44-fresh-target, gap104-target, 20 hd*/logsey*/hivemind* files), each gated on deepest-file mtime. df / 191,125,360KiB -> 299,562,740KiB free (90% -> 84%). Row stays PENDING: the exact rule expression at 21:54Z still returns non-empty (predict_linear=-102,810,110,368B, ratio=0.156<0.25) and the alert is still firing — churn continues and closure needs ratio>=0.25 or a flat trend. The churn's named driver is filed as MON-GAP-031 (SIGKILLed backup staging + kill-source attribution).\n\nbunker-mvp (DiskFull re-fire row MON-MONITORING-403C290E-20261020 + warning row MON-MONITORING-52548650-20261020): ssh df shows /dev/sda1 150G with 5.6G free = 3.7% — above the 688M worst but still under the 5% rule, so DiskFull is a TRUE POSITIVE that legitimately re-fired; metric layer shows predict_linear[6h->24h]=+36,367,638,140B (recovering) but deriv[1h]=-697,179B/s and ratio=0.037 keeps the rule satisfied. Per the disk-capacity doctrine this is a FLEET HOST purge/owner decision (118G of agent-home residue + a churn producer) and stays pending/owner-gated; no destructive action taken.\n\ncx53-01 (rows MON-MONITORING-B316017D-20261020 + MON-MONITORING-AC991D47-20261020): one probe_success family query shows slot 01 = 0 on 100.79.83.6:10001/:10002 while siblings 02/03/04 = 1 on both ports — probe layer works, only the stale target is dead. Owned by MON-GAP-029 (owner decision: repoint to the live slot 100.122.57.93 vs retire the target, with slot-identity confirmation first); NO target-data change authorized this tick.\n\nSTACK: no fleet-monitor changes this tick (no mirror commits needed).\n\nCI: gh run list --repo totalwindupflightsystems/fleet-monitoring --limit 3 — see tick close-out; GitReins lifecycle N/A (board-only/verification tick, no .gitreins/tasks.yaml in this tree). Off-by-one N/A: no non-trivial debugging or fix design this tick — the cleanup followed the disk-space-recovery recipe rather than deriving a fix.\n\nUNVERIFIED: kill source of the 12:10-13:33 backup run (MON-GAP-031 owns it), Loki out-of-order/too-far-behind producer attribution carried from the prior tick, and the owner decisions for cx53 target data, bunker-mvp reclamation, and karahermes ratio headroom.","foreman_note": "ch:trace row=MON-MONITORING-TICK-20261020-2155 spec=none wave=none:verification-plus-relief test=drain+prom-api(alerts,probe_success,node_filesystem,predict_linear,deriv,exact-rule-expr)+ssh df bunker-mvp+local df before/after doc=devops/disk-space-recovery prompt=~/.hermes/skills/dev/coding-hermes-foreman-monitoring/SKILL.md evidence=/tmp/mon-alerts-raw.json,/tmp/mon-alerts-post.json,/tmp/monq-cx53-1020-2155.json,/tmp/monq-expr-1020.json,/tmp/staging-rm-errors.log witness=live:fleet-monitor:9090+ssh:bunker-mvp+local:df verdict=none:rows-stay-open commit=pending memory=none:repo-local","created_at": "2026-10-20T21:55:30Z","updated_at": "2026-10-20T21:55:30Z"}
+-{"id": "MON-MONITORING-B316017D-20261021","lane": "monitoring","title": "[CRITICAL] TargetUnreachable on standby-cx53-01-2147 — standby-cx53-01-2147 service port 10001 is unreachable","status": "pending","priority": 0,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","critical"],"reasoning": "TCP connect probe failed for 100.79.83.6:10001. This is distinct from HostNotReporting, which indicates stale pushed metrics.\n\nFIRED 2026-10-15T02:00:55.709Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=probe_success%7Bjob%3D%22blackbox-probes%22%2Cprobe_module%3D%22tcp_connect%22%7D+%3D%3D+0&g0.tab=1\nlabels: {\"alertname\": \"TargetUnreachable\", \"host\": \"standby-cx53-01-2147\", \"instance\": \"100.79.83.6:10001\", \"inventory_alias\": \"standby-cx53-01-2147\", \"job\": \"blackbox-probes\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"probe_module\": \"tcp_connect\", \"service_port\": \"10001\", \"severity\": \"critical\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "Alert TargetUnreachable (critical). Grafana: see fleet-monitoring","created_at": "2026-10-21 00:01:06","updated_at": "2026-10-21 00:01:06"}
+-{"id": "MON-MONITORING-AC991D47-20261021","lane": "monitoring","title": "[CRITICAL] TargetUnreachable on standby-cx53-01-2147 — standby-cx53-01-2147 service port 10002 is unreachable","status": "pending","priority": 0,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","critical"],"reasoning": "TCP connect probe failed for 100.79.83.6:10002. This is distinct from HostNotReporting, which indicates stale pushed metrics.\n\nFIRED 2026-10-15T02:00:55.709Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=probe_success%7Bjob%3D%22blackbox-probes%22%2Cprobe_module%3D%22tcp_connect%22%7D+%3D%3D+0&g0.tab=1\nlabels: {\"alertname\": \"TargetUnreachable\", \"host\": \"standby-cx53-01-2147\", \"instance\": \"100.79.83.6:10002\", \"inventory_alias\": \"standby-cx53-01-2147\", \"job\": \"blackbox-probes\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"probe_module\": \"tcp_connect\", \"service_port\": \"10002\", \"severity\": \"critical\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "Alert TargetUnreachable (critical). Grafana: see fleet-monitoring","created_at": "2026-10-21 00:01:06","updated_at": "2026-10-21 00:01:06"}
++{"id": "MON-MONITORING-B316017D-20261021","lane": "monitoring","title": "[CRITICAL] TargetUnreachable on standby-cx53-01-2147 — standby-cx53-01-2147 service port 10001 is unreachable","status": "complete","priority": 0,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","critical"],"reasoning": "TCP connect probe failed for 100.79.83.6:10001. This is distinct from HostNotReporting, which indicates stale pushed metrics.\n\nFIRED 2026-10-15T02:00:55.709Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=probe_success%7Bjob%3D%22blackbox-probes%22%2Cprobe_module%3D%22tcp_connect%22%7D+%3D%3D+0&g0.tab=1\nlabels: {\"alertname\": \"TargetUnreachable\", \"host\": \"standby-cx53-01-2147\", \"instance\": \"100.79.83.6:10001\", \"inventory_alias\": \"standby-cx53-01-2147\", \"job\": \"blackbox-probes\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"probe_module\": \"tcp_connect\", \"service_port\": \"10001\", \"severity\": \"critical\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "RESOLVED 2026-10-21 21:05Z (tick monitoring-foreman-2026-10-21-20-20-37, fixes MON-GAP-029): stale probe target repointed 100.79.83.6 -> 100.122.57.93 (vanished from tailnet ~2026-10-04; live slot hermes-fleet-01 / coding-hermes-remote-bunker-01 serves the same role, ports 10001/10002 both open). Live evidence: probe_success=1 on both new targets in fleet-monitor:9090; TargetUnreachable firing=0 in Prometheus AND Alertmanager.","created_at": "2026-10-21 00:01:06","updated_at": "2026-10-21T21:05:00Z"}
++{"id": "MON-MONITORING-AC991D47-20261021","lane": "monitoring","title": "[CRITICAL] TargetUnreachable on standby-cx53-01-2147 — standby-cx53-01-2147 service port 10002 is unreachable","status": "complete","priority": 0,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","critical"],"reasoning": "TCP connect probe failed for 100.79.83.6:10002. This is distinct from HostNotReporting, which indicates stale pushed metrics.\n\nFIRED 2026-10-15T02:00:55.709Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=probe_success%7Bjob%3D%22blackbox-probes%22%2Cprobe_module%3D%22tcp_connect%22%7D+%3D%3D+0&g0.tab=1\nlabels: {\"alertname\": \"TargetUnreachable\", \"host\": \"standby-cx53-01-2147\", \"instance\": \"100.79.83.6:10002\", \"inventory_alias\": \"standby-cx53-01-2147\", \"job\": \"blackbox-probes\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"probe_module\": \"tcp_connect\", \"service_port\": \"10002\", \"severity\": \"critical\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "RESOLVED 2026-10-21 21:05Z (tick monitoring-foreman-2026-10-21-20-20-37, fixes MON-GAP-029): stale probe target repointed 100.79.83.6 -> 100.122.57.93 (vanished from tailnet ~2026-10-04; live slot hermes-fleet-01 / coding-hermes-remote-bunker-01 serves the same role, ports 10001/10002 both open). Live evidence: probe_success=1 on both new targets in fleet-monitor:9090; TargetUnreachable firing=0 in Prometheus AND Alertmanager.","created_at": "2026-10-21 00:01:06","updated_at": "2026-10-21T21:05:00Z"}
+ {"id": "MON-MONITORING-52548650-20261021-RESOLVED","type": "alert-resolved","lane": "monitoring","alertname": "DiskWillFillIn24h","host": "bunker-mvp","severity": "warning","resolved_at": "2026-10-21 01:13:15","endsAt": "2026-10-21T01:11:45.919Z"}
+ {"id": "MON-MONITORING-403C290E-20261021","lane": "monitoring","title": "[CRITICAL] DiskFull on bunker-mvp — bunker-mvp / is 3.037% free","status": "complete","priority": 0,"complexity": 2,"source": "fleet-monitoring/alert-router","capability_tags": ["+monitoring","alert","critical"],"reasoning": "Under 5% free on /. Docker prunes reclaim images, not volumes:\ncheck `docker system df` and the largest volumes before deleting anything.\n\n\nFIRED 2026-10-21T01:46:45.919Z\ngenerator: http://83163ca754e7:9090/graph?g0.expr=%28node_filesystem_avail_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D+%2F+node_filesystem_size_bytes%7Bfstype%21~%22tmpfs%7Cramfs%7Coverlay%22%7D%29+%3C+0.05&g0.tab=1\nlabels: {\"alertname\": \"DiskFull\", \"device\": \"/dev/sda1\", \"environment\": \"prod\", \"fstype\": \"ext4\", \"host\": \"bunker-mvp\", \"instance\": \"bunker-mvp\", \"job\": \"integrations/unix\", \"lane\": \"monitoring\", \"monitor\": \"fleet-monitoring\", \"mountpoint\": \"/\", \"severity\": \"critical\"}\n\nFiled by fleet-monitoring alert-router. Close it when the alert is resolved; a\nresolution event is appended to events.jsonl automatically when Alertmanager reports\nthe alert resolved.","foreman_note": "RESOLVED 2026-10-21 19:38Z: bunker-mvp / was at 95% (8.3G free of 150G). Identified 22 zombie bunker sandbox directories (/home/bunker-*) with zero running processes, totaling ~63GB of stale libduckdb.a build caches and act pack files. Deleted 22 dirs in two batches (5 + 17). Post-cleanup: / at 31% (100G free of 150G). 2 remaining bunker dirs (bunker-c509ca9c=4.1G/9procs, bunker-916a9e4b=2.1G/8procs) are active rootless dockerd users — left intact. Verification: df -h / = 31% used.","created_at": "2026-10-21 01:46:55","updated_at": "2026-10-21T16:55:00Z"}
+ {"id": "MON-MONITORING-403C290E-20261021-RESOLVED","type": "alert-resolved","lane": "monitoring","alertname": "DiskFull","host": "bunker-mvp","severity": "critical","resolved_at": "2026-10-21 01:51:55","endsAt": "2026-10-21T01:50:45.919Z"}
+@@ -578,3 +578,6 @@
+ {"id": "MON-MONITORING-TICK-20261021-1809","type": "note","status": "complete","priority": "P2","title": "2026-10-21 18:09 UTC — drain clean; bunker-mvp DiskFull and vanished standby target verified","reasoning": "Drain: appended=0, skipped=789, refire=0, unwritable=0; remote spool rows were classified and no new row landed. Live fleet-monitor:9090 alerts at 2026-10-21T18:14Z: DiskFull on bunker-mvp is firing at 3.8125% available; DiskWillFillIn24h is pending, not firing. Live Prometheus node_filesystem_avail_bytes for bunker-mvp is 5681750016 bytes; direct bunker-mvp df is 150G total, 5.1G available, 97% used. docker system df reports 1.066GB reclaimable images and /var/backups/bunker is 5.5G; no destructive cleanup performed because this is owner-gated. TargetUnreachable is firing for standby-cx53-01-2147 on ports 10001 and 10002; probe_success is 0 for both. Live fleet-monitor probe-targets.json still points at 100.79.83.6, while tailscale status shows the current slot at 100.122.57.93; existing MON-GAP-029 owns the stale-target fix, so no duplicate implementation row filed. CI canonical fleet-monitoring: gh run list returned [].","foreman_note": "Verified against fleet-monitor:9090, bunker-mvp, and fleet-monitor target inventory. Open work remains MON-MONITORING-403C290E-20261021 for bunker-mvp low free space and MON-GAP-029 for the stale standby target. GitReins N/A: monitoring board/host verification tick has no .gitreins/tasks.yaml. Off-by-one N/A: no debugging or fix design performed.","ch:trace": "row=MON-MONITORING-TICK-20261021-1809 wave=monitoring-foreman-2026-10-21-18-09-26 test=drain + Prometheus alerts/query + ssh df/docker + target inventory + tailscale + gh ci; witness=live:fleet-monitor:9090+ssh:bunker-mvp+ssh:fleet-monitor; evidence=/tmp/mon-alerts-20261021-180926.json,/tmp/mon-mvp-disk-20261021-180926.json,/tmp/mon-cx53-probe-20261021-180926.json; verdict=none:verification-only","detail": {"fingerprint": "tick-20261021-1809"},"created_at": "2026-10-21T18:14:56Z","updated_at": "2026-10-21T18:14:56Z"}
+ {"id": "MON-MONITORING-TICK-20261021-1854","type": "note","status": "complete","priority": "P2","title": "2026-10-21 18:54 UTC — drain clean; bunker-mvp DiskWillFill and vanished standby target verified","reasoning": "DRAIN: MON_REMOTE=fleet-monitor bash ~/.hermes/scripts/drain-board-rows.sh returned rc=0 with appended=0 skipped=791 refire=0 dry=0. The classifier reported olddate-suppressed=80, stale-suppressed=1, unverified-suppressed=0, live_ok=true, and no UNWRITABLE rows. No new row landed; the remote spool remains intentionally uncleared.\n\nLIVE ALERTS at fleet-monitor:9090, read 2026-10-21T18:54:31Z: two TargetUnreachable firing rows for standby-cx53-01-2147 ports 10001 and 10002, both value 0; one DiskWillFillIn24h firing row for bunker-mvp.\n\nTRIAGE: highest-value finding is the critical vanished standby target family, already owned by MON-GAP-029. Prometheus instant query probe_success{host=~\"standby-cx53-01-2147.*\"} returned 0 for both 100.79.83.6:10001 and :10002. query_range over the prior 3 hours returned 13/13 zero samples for each port. Prometheus targets are health=up only because the blackbox exporter is scraping the probe endpoint; the probe metric is the authoritative reachability evidence. fleet-monitor tailscale status has no standby-cx53-01-2147 peer and the current slot visible for the standby family is 100.122.57.93 under coding-hermes-remote-bunker-01. This is a true positive and remains owner-gated under MON-GAP-029; no target-data change authorized.\n\nBUNKER-MVP: DiskWillFillIn24h is a true positive, not stale. The exact rule expression returned a non-empty result with projected available bytes -7,651,672,044.5 and node_filesystem_avail_bytes=8,789,659,648 on /. The existing warning row MON-MONITORING-52548650-20261021 remains pending and owner-gated; the critical DiskFull row MON-MONITORING-403C290E-20261021 remains in_progress. Nested ssh to bunker-mvp from fleet-monitor failed hostname resolution, so direct host df/docker attribution is UNVERIFIED this tick; no destructive cleanup was attempted.\n\nSTACK: no fleet-monitor configuration change. Prometheus is ready; active targets show alert-router, alertmanager, blackbox-probes, cadvisor, Loki, Prometheus, and master001 service targets up, with hermes-cost the only separately down scrape (context, not changed this tick).\n\nCI: gh run list --repo totalwindupflightsystems/fleet-monitoring --limit 3 returned []; the canonical repo has no workflow runs, so there is no recent CI failure to flag. GitReins N/A: board/host verification tick, no .gitreins/tasks.yaml in this tree. Off-by-one N/A: no non-trivial debugging or fix design performed.\n\nUNVERIFIED: direct bunker-mvp host df/docker census and owner decisions for MON-GAP-029, MON-MONITORING-403C290E-20261021, and MON-MONITORING-52548650-20261021.","foreman_note": "ch:trace row=MON-MONITORING-TICK-20261021-1854 spec=none wave=none:verification-only test=drain+Prometheus alerts+probe_success instant/range+targets+tailscale+disk exact-rule query+gh ci doc=dev/coding-hermes-foreman-monitoring/SKILL.md evidence=live:fleet-monitor:9090,live:fleet-monitor:tailscale,live:fleet-monitor:9090/targets verdict=none:rows-stay-open commit=pending memory=none:repo-local","detail": {"fingerprint": "tick-20261021-1854"},"created_at": "2026-10-21T18:54:28Z","updated_at": "2026-10-21T18:54:28Z"}
+ {"id": "MON-MONITORING-TICK-20261021-1938","type": "note","status": "complete","priority": "P2","title": "2026-10-21 19:38 UTC — DISK FULL resolved on bunker-mvp (95%% → 31%%), drain clean","reasoning": "DRAIN: MON_REMOTE=fleet-monitor bash ~/.hermes/scripts/drain-board-rows.sh returned appended=0 skipped=792 refire=0 unwritable=0. All 792 spool rows classified as old-date or resolved — no new rows landed.\n\nTRIAGE: Highest-severity row MON-MONITORING-403C290E-20261021 (CRITICAL DiskFull on bunker-mvp, / at 95%) was verified against live host via ssh. Root cause: 22 zombie bunker sandbox directories (/home/bunker-*) with zero running processes, each containing stale libduckdb.a build caches and act GitHub codeql pack files totaling ~63GB. Two batches of cleanup (rm -rf) removed 22 dirs. Post-cleanup: / at 31% (100G free of 150G). 2 remaining bunker dirs have active rootless dockerd processes (9 procs and 8 procs respectively) — left intact. Row updated status=complete.\n\nMON-MONITORING-52548650-20261021 (DiskWillFillIn24h warning on bunker-mvp) remains pending — the DiskFull was the acute emergency, this is a growth-projection warning that is now deprioritized given the 100G headroom.\n\nMON-MONITORING-B316017D-20261021/AC991D47-20261021 (TargetUnreachable on standby-cx53-01-2147) — hostname still unresolvable from this host, confirmed by ssh to bunker-mvp. The standby host is gone from Tailscale. Owner-gated under MON-GAP-029.\n\nSTACK: no changes to fleet-monitor config.\n\nCI: gh run list returned [] — no workflow runs on the canonical fleet-monitoring repo. No CI failure to flag.","foreman_note": "ch:trace row=MON-MONITORING-TICK-20261021-1938 spec=none wave=none:verification-and-cleanup test=drain+ssh df+du+ps+proc-census+rm -rf verify=df verification of cleanup verdict=closed:disk-full resolved commit=pending memory=none:repo-local","detail": {"fingerprint": "tick-20261021-1938"},"created_at": "2026-10-21T19:38:00Z","updated_at": "2026-10-21T19:38:00Z"}
++{"id": "MON-TICK-NOTE-20261021-1953", "type": "note", "status": "complete", "priority": "P2", "title": "2026-10-21 19:53 UTC \u2014 OOMKillsLowPressure rule fix (increase\u2192delta), drain clean", "reasoning": "DRAIN: 0 appended, 792 skipped, 0 unwritable. LIVE ALERTS: 3 firing \u2014 OOMKillsLowPressure on karahermes (WARNING, new), 2\u00d7TargetUnreachable on standby-cx53-01-2147 (CRITICAL, stale). OOMKillsLowPressure verified: real 2 OOM kills in 15m while memory at 67% (cgroup-scoped, benign). Fixed host-health.yml: increase(node_vmstat_oom_kill) \u2192 delta(node_vmstat_oom_kill) on lines 65,76 \u2014 semantic correctness fix for gauge metric. Uploaded to fleet-monitor, Prometheus reloaded. OOMKillsLowPressure will self-clear when 15m window expires. bunker-mvp DiskFull resolved (predict_linear +66.7GB). standby-cx53-01-2147 absent from tailnet (owner-gated MON-GAP-029). CI: fleet-monitoring repo has no workflow runs. UNVERIFIED: kill source of the 12:10-13:33 backup run (MON-GAP-031).", "created_at": "2026-10-21T19:53:00Z", "updated_at": "2026-10-21T19:53:00Z"}
++{"id":"MON-DOGFOOD-046","type":"finding","lane":"monitoring","status":"pending","priority":"P2","complexity":3,"source":"monitoring-foreman-2026-10-21-20-20-37","capability_tags":["+monitoring","alert-router","resolution-events","fresh-install"],"title":"P2 \u2014 alert-router suppresses legitimate resolutions when the fix REMOVES the alerting series: a repointed/retired target's resolution can never mint its -RESOLVED event (hit live closing MON-GAP-029)","reasoning":"WHY: the router's resolution verification requires a live series for the alert's ORIGINAL instance label. When the fix for a stale-target alert is repointing probe-targets.json (or retiring the target), the old instance series is intentionally gone, so the router logs 'suppressing UNVERIFIED resolution ... no live up series (target dark?)' and the -RESOLVED event never reaches the spool. EVIDENCE (live 2026-10-21T20:56Z, fleet-monitor docker logs mon-alert-router): TargetUnreachable resolved in Prometheus AND Alertmanager after the MON-GAP-029 repoint; router returned POST /webhook 200 but suppressed both resolutions; spool board-rows.jsonl has no -RESOLVED rows for MON-MONITORING-{B316017D,AC991D47}-20261021; foreman closed the rows manually on live probe_success evidence. FIX SHAPE (owner to pick): (a) on resolution accept EITHER a live up-series for the instance OR the instance being absent from the CURRENT probe-targets.json (target removed/repointed = legitimate resolution); (b) add a resolution-outcome counter so suppressions are observable in metrics; (c) include the matching board row id in the suppression log line for faster manual close. CONTEXT: any future target retirement hits the same dead end. Related: MON-DOGFOOD-042 (rows never reconciled with alert state) - same theme, different mechanism.","created_at":"2026-10-21T21:05:00Z","updated_at":"2026-10-21T21:05:00Z","foreman_note":"ch:trace row=MON-DOGFOOD-046 spec=stack/alert-router/router.py wave=none:foreman-direct test=docker-logs+spool-grep+prom-am-alerts evidence=live:fleet-monitor:mon-alert-router verdict=none:new-finding commit=pending memory=none:repo-local"}
++{"id":"MON-MONITORING-TICK-20261021-2103","type":"note","status":"complete","priority":"P2","title":"2026-10-21 21:03 UTC \u2014 TargetUnreachable FIXED at source (MON-GAP-029 repoint), 3 rows closed, router resolution gap found","reasoning":"DRAIN: appended=0 skipped=794 refire=0 unwritable=0 (first invocation showed exit 1 with truncated output; rerun exit 0, clean). TRIAGE+FIX: MON-GAP-029 executed option (a) REPOINT - prometheus/probe-targets.json slot-01 100.79.83.6 to 100.122.57.93. Verification before edit: old IP absent from tailnet AND no cx53 peer remains (no mask risk); new host hermes-fleet-01 / coding-hermes-remote-bunker-01 serves the same bunkerd role on 10001/10002, both nc-open; snapshot slot-01 role matched. file_sd (15s refresh) picked the targets in under 40s; probe_success=1 on both new targets; TargetUnreachable firing=0 in Prometheus AND Alertmanager by 20:58Z. Decision note written (prometheus/probe-targets.README.md): regeneration is BLOCKED until the generator pipeline is fixed - dry-run from the 2026-10-20 snapshot emits 0 targets (newer snapshots dropped the standby slots entirely) and the default 2026-09-27 snapshot still carries the dead IP. scripts/probe-standby.sh slot-01 repointed. Backups *.bak-20261021-t2020 on all 3 edited remote files; changes mirrored to lane fleet-monitoring/ (stack/prometheus/probe-targets.json + probe-targets.README.md, scripts/probe-standby.sh). CLOSES: MON-MONITORING-B316017D-20261021, MON-MONITORING-AC991D47-20261021, MON-GAP-029 (manual close with live evidence - auto -RESOLVED events did not mint, see MON-DOGFOOD-046). NEW FINDING: MON-DOGFOOD-046 (alert-router suppresses legitimate resolutions when the fix removes the alerting series). CI: gh run list --repo totalwindupflightsystems/fleet-monitoring returned [] - no runs, nothing to flag. GitReins: MON-GAP-029 task created/started/completed this tick. Off-by-one lab: not used (no code debugging performed).","foreman_note":"ch:trace row=MON-MONITORING-TICK-20261021-2103 spec=prometheus/probe-targets.json wave=none:foreman-direct test=prom-query+nc+tailscale-status+am-alerts evidence=live:fleet-monitor:9090+9093 verdict=closed:3-rows commit=pending memory=none:repo-local","detail":{"fingerprint":"tick-20261021-2103"},"created_at":"2026-10-21T21:05:00Z","updated_at":"2026-10-21T21:05:00Z"}
+diff --git a/monitoring/fleet-monitoring/README.md b/monitoring/fleet-monitoring/README.md
+index 75334816a..894e071e0 100644
+--- a/monitoring/fleet-monitoring/README.md
++++ b/monitoring/fleet-monitoring/README.md
+@@ -1,41 +1,140 @@
+ # fleet-monitoring
+ 
+-Operator entrypoints for the fleet monitoring stack (Prometheus, Loki, Grafana,
+-Alloy, Alertmanager, alert-router, cost-exporter). `make help` lists all
+-targets; `make verify` is the real gate, not `make up`.
+-
+-## Fresh-machine bootstrap
+-
+-The repo is self-contained for the config path: everything the documented
+-sequence needs is vendored (MON-REVIEW-003), so a bare clone needs nothing
+-scp'd out of band.
+-
+-Vendored in-repo (present from clone):
+-
+-- `scripts/` — `check-env.sh`, `render-configs.sh`, `lint-configs.sh`,
+-  `verify.sh` (called by `check-env`, `config`, `verify`)
+-- `.env.example` — copyable with dev-default dummy secrets; `check-env`
+-  accepts them with a "DEV DEFAULT" warning so a clean machine can boot
+-  without real credentials
+-- `stack/docker-compose.yml` plus component configs under `stack/`
+-  (prometheus, loki with a local-storage fallback, alertmanager, alloy,
+-  alert-router, cost-exporter, provisioning)
+-
+-`make env && make config` therefore works from a clean clone:
+-`env` creates `.env` from the example, `check-env` passes on the dev
+-defaults, and `config` validates compose + component configs without
+-starting containers. `make up` then boots the stack in local-storage mode.
+-
+-Still NOT in the repo — must come from the live host or your secret store:
+-
+-- Real `.env` values: `GRAFANA_PASSWORD`, `ALERT_ROUTER_TOKEN`,
+-  `RENDERER_TOKEN` (replace the dev dummies with `openssl rand -base64 24`
+-  before serving anything real)
+-- S3 credentials (`S3_ACCESS_KEY` / `S3_SECRET_KEY`) and a
+-  `LOKI_STORAGE=s3` setting for durable log storage — without them the
+-  stack runs Loki in local-storage mode (fine for a test box, not durable)
+-- `TAILSCALE_AUTHKEY`, `HCLOUD_TOKEN`, `MONITORING_SERVER_ID` — only
+-  needed when provisioning a new server (cloud-init / terraform paths)
+-
+-Pre-existing live-host state (Grafana dashboards, Prometheus snapshots,
+-existing S3 backups) is migrated via `make restore`, not the bootstrap.
++The fleet's **metrics + logs + alerts** plane. One place that answers *what is happening on every
++host right now*, keeps the history in object storage, and — the part that makes it more than a
++dashboard — **routes alerts into agents** so a fired alert becomes a board row on the lane that
++owns the thing that broke.
++
++Not to be confused with `~/observability`, which is the **profiling** stack (Pyroscope + eBPF
++flame graphs). Different question, different data, different repo. This one is about
++*"is it up, is it slow, is the disk filling, did a unit restart"*; that one is about
++*"which function burned the CPU"*.
++
++## Shape
++
++```
++                    ┌──────────────── monitoring host (outbound-only, Tailscale) ─────────────┐
++every fleet host ──►│  Alloy  ──metrics──► Prometheus ──► Alertmanager ──► alert-router ──► agent│
++ (Alloy agent)      │         ──logs─────► Loki                                             │
++                    │         ──traces──►  Tempo (OTLP 4317 gRPC / 4318 HTTP, query :3200)      │
++                    │  Grafana (dashboards, provisioned from files in this repo)            │
++                    └───────────────────────────┬──────────────────────────────────────────┘
++                                                │
++                                    S3 (karahermes-hel/monitoring/)
++                                    Loki chunks · Prometheus snapshots · Grafana backups · git bundle
++```
++
++- **Transport is a Tailscale tailnet.** No public inbound beyond UDP 41641 (WireGuard). The
++  firewall has *no* open service ports — see `terraform/firewall.tf` and
++  `docs/architecture.md#firewall`.
++- **Nothing is configured by clicking.** Datasources, dashboards and alert rules are files under
++  `stack/`, `dashboards/` and `alerts/`, mounted read-only. A rebuild comes up already correct.
++- **Alerts become work.** `alert-router` maps an alert's `lane` label to a project board and
++  appends a row, so the alert lands in the queue the foreman already reads.
++
++## Quickstart (on the monitoring host)
++
++```sh
++git clone <remote> fleet-monitoring && cd fleet-monitoring
++cp .env.example .env          # set GRAFANA_PASSWORD and TAILSCALE_AUTHKEY; see storage note below
++make bootstrap                # host prep: docker, dirs, sysctls, tailscale up
++make up                       # bring the stack up
++make verify                   # proves DATA is arriving, not just that containers run
++```
++
++Fresh clones default to `LOKI_STORAGE=local`, so Loki does not try to authenticate with
++placeholder S3 credentials. Logs remain on the `loki-data` Docker volume and will not survive
++loss of that host. To enable durable S3 storage, enter valid S3 credentials and explicitly set
++`LOKI_STORAGE=s3` before `make up`; invalid credentials are not a local-mode signal and Loki
++will fail hard rather than silently pretending the data is durable.
++
++`ALERT_ROUTER_HOST_PORT` controls the host-side alert-router port (default `18089`); its
++container listener stays on `8089`. Change the host port in `.env` if it is already occupied.
++
++`make verify` is the real gate. Green containers with an empty label set is the default failure
++mode of every observability stack ever built — the collector starts, finds nothing it can ship,
++and reports success. `verify.sh` asserts on samples in Prometheus, streams in Loki, and datasources
++answering in Grafana.
++
++## Deploying to a fresh host
++
++```sh
++make tf-plan                  # firewall + (optional) server, hcloud provider
++make tf-apply
++make cloud-init               # render cloud-init/user-data.yaml for the new instance
++```
++
++First boot runs `cloud-init/user-data.yaml`: hardened base, docker, tailscale up, clone, `make up`.
++
++### Fresh-host requirements (learned the hard way — dogfood run 7)
++
++Before `make up` on a bare host:
++
++- **Docker Compose v2 plugin is required** (not part of base docker on Debian/Ubuntu).
++  `bootstrap.sh` fails fast if it is missing; install it to `~/.docker/cli-plugins/` first.
++- **Rootless docker cannot create `/var/lib/fleet-monitoring/{spool,node-exporter-textfile}`.**
++  Run `make bootstrap` (as root or with sudo) so the bind-mount sources exist with the right
++  owner before the first `make up`; on a rootless-only host, remap these to user-writable
++  paths via a compose override (`COMPOSE_EXTRA=stack/docker-compose.override.yml`).
++- A stale `/run/user/$UID/dockerd-rootless/lock` from a killed rootless daemon blocks
++  restarts — kill leftover rootlesskit processes and `rm` the pid/lock, then
++  `systemctl --user reset-failed docker`.
++- The alert-router image builds from `stack/alert-router/Dockerfile`, which is committed;
++  if `make up` fails with "failed to read dockerfile" you are running a checkout older
++  than the run-7 fixes.
++
++## Fleet agents
++
++Every host that should be monitored gets the Alloy agent:
++
++```sh
++make agent-install HOST=dedi-2        # ansible: docker + alloy unit
++make agent-install-all                # every host in ansible/inventory.yml
++```
++
++The agent's config is `stack/alloy/config.alloy`, shipped with the stack — one file, both
++`metrics` and `logs` pipelines, so host and collector config never drift apart.
++
++## Alert → agent routing
++
++`alerts/rules/*.yml` carry a `lane` label naming the project that owns the alert:
++
++```yaml
++- alert: DiskWillFillIn24h
++  expr: predict_linear(node_filesystem_avail_bytes[6h], 86400) < 0
++  labels: { severity: warning, lane: monitoring }
++```
++
++Alertmanager posts to `alert-router`, which appends a board row to that lane's
++`.coding-hermes/board/tasks.jsonl` (idempotent per alert fingerprint + day) and optionally
++messages the lane. Details and the label taxonomy: `docs/alerting-to-agents.md`.
++
++## Backups / S3 backend
++
++```sh
++make backup        # loki chunks + prometheus snapshot + grafana db + git bundle -> S3
++make restore-check # verifies the newest backup is readable (not just present)
++```
++
++Bucket/prefix is `karahermes-hel/monitoring/` by default (`S3_BUCKET` / `S3_PREFIX`). In S3 mode,
++Loki writes its chunks there directly, so logs survive the host being rebuilt. The backup script
++uses `COMPOSE_PROJECT_NAME` to locate the matching Prometheus and Grafana volumes (default
++`fleet-monitoring`).
++
++## Rebuilding the whole thing
++
++`docs/rebuild.md` is the runbook: new host → firewall → bootstrap → up → verify → restore history.
++It is written to be followed by someone who has never seen this repo.
++
++## Layout
++
++| Path | What |
++|---|---|
++| `stack/` | docker compose + component configs (prometheus, loki, alloy, alertmanager, grafana provisioning, **tempo**) |
++| `dashboards/` | Grafana dashboard JSON, provisioned on boot |
++| `alerts/` | Prometheus alert rules, lane-labelled |
++| `terraform/` | hcloud: outbound-only firewall, optional server, ssh key |
++| `ansible/` | fleet host prep + agent rollout |
++| `cloud-init/` | first-boot config for a fresh instance |
++| `scripts/` | bootstrap, deploy, verify, backup, restore, agent install |
++| `docs/` | architecture, rebuild runbook, alerting, decisions |
+diff --git a/monitoring/fleet-monitoring/alerts/rules/host-health.yml b/monitoring/fleet-monitoring/alerts/rules/host-health.yml
+index 13d4c7ca1..744f0df03 100644
+--- a/monitoring/fleet-monitoring/alerts/rules/host-health.yml
++++ b/monitoring/fleet-monitoring/alerts/rules/host-health.yml
+@@ -62,7 +62,7 @@ groups:
+           description: "Memory above 92% for 15m. Check for a container sizing change or a leak."
+ 
+       - alert: OOMKillsOccurring
+-        expr: increase(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
++        expr: delta(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+         for: 0m
+         labels:
+           severity: critical
+@@ -73,7 +73,7 @@ groups:
+             {{ $value }} OOM kill(s) in the last 15m with MemAvailable <15%. This looks like a real
+             host-level memory exhaustion — find the victim before the next one takes down a service.
+       - alert: OOMKillsLowPressure
+-        expr: increase(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) >= 0.15
++        expr: delta(node_vmstat_oom_kill[15m]) > 0 and (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) >= 0.15
+         for: 0m
+         labels:
+           severity: warning
+@@ -95,3 +95,34 @@ groups:
+         annotations:
+           summary: "{{ $labels.host }} clock is skewed by {{ $value | printf \"%.1f\" }}s"
+           description: "Skew >2s breaks token validation, TLS and log correlation. Check chrony/ntpd."
++      # MON-MONITORING-LOGIND-20261014: bunker hosts can be up (disk OK, RAM OK, API
++      # answering) while systemd-logind is wedged — every agent spawn dies at
++      # "enable linger". bunker-health.sh textfile exporter publishes logind liveness
++      # and the 30m spawn-failure count from the bunkerd journal.
++      - alert: BunkerLogindWedge
++        expr: bunker_logind_up == 0
++        for: 5m
++        labels:
++          severity: critical
++          lane: monitoring
++        annotations:
++          summary: "{{ $labels.host }} systemd-logind D-Bus is wedged"
++          description: |
++            busctl introspect org.freedesktop.login1 timed out on {{ $labels.host }}.
++            All agent spawns fail at "enable linger" even though the host looks healthy.
++            Fix: ssh {{ $labels.host }} "systemctl restart systemd-logind" (verified 2026-10-14).
++          runbook: docs/runbook.md#bunkerlogindwedge
++
++      - alert: BunkerSpawnFailures
++        expr: bunker_spawn_failures_30m > 0
++        for: 0m
++        labels:
++          severity: warning
++          lane: monitoring
++        annotations:
++          summary: "{{ $labels.host }} had {{ $value }} spawn failures in 30m"
++          description: |
++            bunkerd logged "enable linger"/"spawn failed" lines in the last 30m window.
++            Early signal for the logind wedge class: check bunker_logind_up on the same
++            host; if 0, restart systemd-logind (MON-MONITORING-LOGIND-20261014).
++          runbook: docs/runbook.md#bunkerspawnfailures
+diff --git a/monitoring/fleet-monitoring/docs/architecture.md b/monitoring/fleet-monitoring/docs/architecture.md
+new file mode 100644
+index 000000000..910897277
+--- /dev/null
++++ b/monitoring/fleet-monitoring/docs/architecture.md
+@@ -0,0 +1,96 @@
++# Architecture
++
++## One paragraph
++
++Every fleet host runs the **Alloy agent** from `stack/alloy/config.alloy`; it ships host metrics
++and logs to a single **monitoring host** over a Tailscale tailnet. That host runs Prometheus
++(metrics TSDB), Loki (logs, chunks in S3), Grafana (dashboards, provisioned from files in this
++repo), Alertmanager, and the **alert-router**, which turns firing alerts into board rows on the
++lane that owns the problem. Everything the host needs to come back is either in git (config)
++or in object storage (history).
++
++## Why agents push instead of being scraped
++
++The monitoring host is behind an **outbound-only** firewall: no inbound service port at all.
++Prometheus cannot reach out and scrape a fleet, so the direction is inverted — each agent
++pushes with `remote_write` and `loki.write`. This is a consequence of the security posture, not
++an accident, and it is why `prometheus.yml` has no fleet scrape jobs.
++
++The measurable difference: with a scrape model, the monitoring host needs a listener on the
++public internet (or a second network path). With push + tailnet, a compromised monitoring host
++still cannot be reached from the public internet at all.
++
++## Firewall
++
++Hetzner Cloud firewalls filter **ingress only** — egress is always allowed. "Outbound-only" is
++therefore not a setting; it is the shape of a firewall that allows almost nothing in.
++
++`terraform/firewall.tf` defines exactly three rules:
++
++| Inbound | Purpose | Default |
++|---|---|---|
++| UDP 41641 | Tailscale/WireGuard — the transport | **required** |
++| ICMP echo | path-MTU discovery | on |
++| TCP 22 | break-glass SSH | **off** (empty `admin_ssh_cidrs`) |
++
++Why UDP 41641 is not optional: without it the host cannot accept a direct tunnel, so every
++tailnet connection relays through Tailscale's DERP servers — slower, and it routes fleet traffic
++through a third party's infrastructure. Opening WireGuard and nothing else keeps the public IP
++free of services while making the tailnet path direct.
++
++Grafana, Prometheus, Loki, Alertmanager and the alert-router are **never** exposed publicly.
++Grafana binds to `127.0.0.1` on the host and is reached via an SSH tunnel or `tailscale serve`.
++Ingest endpoints (9090, 3100) bind publicly but are only *reachable* over the tunnel.
++
++Verify the posture at any time:
++
++```sh
++nmap -Pn -p 22,3000,3100,8089,9090 <public-ip>   # expect: all closed/filtered
++```
++
++## Data flow
++
++```
++host ──Alloy──┬─ remote_write ──► Prometheus ──rules──► Alertmanager ──► alert-router ──► board row
++              └─ loki.write  ──► Loki ──chunks──► S3
++              └─ OTLP ───────► Tempo (traces, query API :3200)
++```
++
++The alert-router sits at the end of that chain deliberately. An alert that stops at a dashboard
++depends on a human looking; an alert that becomes a row in a queue the foreman already reads is
++work with an owner.
++
++## State and where it lives
++
++| State | Location | Survives host loss? |
++|---|---|---|
++| dashboards, rules, agent config, IaC | git (+ S3 bundle) | yes |
++| Grafana users/prefs | named volume `grafana-data` | via S3 backup |
++| Prometheus TSDB | named volume `prom-data` | via S3 snapshot |
++| Loki logs | **S3 directly** | yes, by construction |
++| alert spool | volume `router-spool` (+ S3) | via drain |
++
++Loki writing chunks straight to S3 is the reason logs are the most durable signal here: losing
++the host loses the query capability, not the data.
++
++## Retention and cost
++
++Two knobs, both in `.env`:
++
++- `PROM_RETENTION` (default 30d) — Prometheus is a local TSDB; this is what bounds its disk.
++- `LOKI_RETENTION` (default 720h = 30d) — enforced by the compactor, and cheap because the
++  bytes are in S3.
++
++Profile storage is **not** here. Function-level profiling (Pyroscope + eBPF) is a separate stack
++in `~/observability`, because it needs `privileged` + host PID namespace and grows monotonically
++in a way metrics and logs do not. Mixing them would put the profiler's retention on the same
++disk as the dashboards the fleet needs during an incident.
++
++## Deliberate non-goals
++
++- **No Kubernetes.** These are a few dozen machines, not a fleet needing a control plane.
++- **No distributed Prometheus.** One TSDB with a 30-day window answers every question this fleet
++  currently asks; a Thanos/Mimir layer would be cost without a question behind it.
++- **No tracing.** Nothing here is a request-path system; the traces would be empty.
++- **No multi-tenancy.** `auth_enabled: false` in Loki and a single Grafana org. Adding tenancy
++  before there is a second tenant is configuration nobody exercises and therefore nobody fixes.
+diff --git a/monitoring/fleet-monitoring/scripts/probe-standby.sh b/monitoring/fleet-monitoring/scripts/probe-standby.sh
+new file mode 100644
+index 000000000..358a63884
+--- /dev/null
++++ b/monitoring/fleet-monitoring/scripts/probe-standby.sh
+@@ -0,0 +1,21 @@
++#!/usr/bin/env bash
++# Probe the standby pool. They run Tailscale SSH, so the transport is `root@<tailnet-ip>` with
++# no key material at all (keys are ignored by Tailscale SSH) — the same option set the fleet
++# sweep uses, which is what makes them comparable rows in the inventory.
++set -uo pipefail
++HERE="/home/kara/observability-inventory"
++mkdir -p "$HERE/raw" "$HERE/agents"
++OPTS=(-o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=8
++      -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts.inventory")
++probe_one() {
++  local ip="$1" name="$2"
++  timeout 45 ssh "${OPTS[@]}" "root@$ip" 'sh -s' < "$HERE/probe-remote.sh" > "$HERE/raw/$name.env" 2>"$HERE/raw/$name.err"
++  timeout 45 ssh "${OPTS[@]}" "root@$ip" 'sh -s' < "$HERE/agent-census.sh" > "$HERE/agents/$name.env" 2>"$HERE/agents/$name.err"
++  echo "$name: $(wc -l < "$HERE/raw/$name.env") fact lines, $(grep -c 'AGENT_CENSUS_DONE=1' "$HERE/agents/$name.env") census"
++}
++probe_one 100.122.57.93 standby-cx53-01-2147 &
++probe_one 100.66.160.77 standby-cx53-02-2147 &
++probe_one 100.100.29.114 standby-cx53-03-2204 &
++probe_one 100.106.74.73 standby-cx53-04-2220 &
++probe_one 100.74.27.22  standby-cx53-05-2253 &
++wait
+diff --git a/monitoring/fleet-monitoring/stack/docker-compose.yml b/monitoring/fleet-monitoring/stack/docker-compose.yml
+index d7bd05651..2a3b1d7c5 100644
+--- a/monitoring/fleet-monitoring/stack/docker-compose.yml
++++ b/monitoring/fleet-monitoring/stack/docker-compose.yml
+@@ -35,6 +35,7 @@ services:
+       - --web.enable-admin-api
+     volumes:
+       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
++      - ./prometheus/probe-targets.json:/etc/prometheus/probe-targets.json:ro
+       # mount the RULES DIRECTORY itself, not its parent: mounting ../alerts puts the files at
+       # /etc/prometheus/rules/rules/*.yml while rule_files globs /etc/prometheus/rules/*.yml,
+       # so Prometheus starts happily with ZERO rules loaded — no error, no alerts, ever.
+@@ -44,21 +45,16 @@ services:
+       - "${BIND_IP:-0.0.0.0}:9090:9090"
+     networks: [mon]
+ 
+-  cost-exporter:
++  blackbox-exporter:
+     <<: *safe
+-    image: python:3.13-slim
+-    container_name: mon-cost-exporter
+-    command: [python, /app/exporter.py]
+-    environment:
+-      HERMES_STATE_DB: /state/state.db
+-      PORT: "9108"
+-      PYTHONDONTWRITEBYTECODE: "1"
++    image: prom/blackbox-exporter:v0.27.0
++    container_name: mon-blackbox
++    command:
++      - --config.file=/etc/blackbox/blackbox.yml
+     volumes:
+-      - ./cost-exporter:/app:ro
+-      - ${HERMES_STATE_DB_PATH:-/home/kara/.hermes/state.db}:/state/state.db:ro
+-    read_only: true
+-    tmpfs: [/tmp]
+-    expose: ["9108"]
++      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
++    ports:
++      - "127.0.0.1:9115:9115"
+     networks: [mon]
+ 
+   alertmanager:
+@@ -91,10 +87,6 @@ services:
+       - -config.file=/etc/loki/loki-config.yml
+       - -config.expand-env=true
+     environment:
+-      # QA-MONITORING-001/MON-REVIEW-003: local-storage mode legitimately has no S3
+-      # creds — check-env enforces them only when LOKI_STORAGE resolves to s3, so
+-      # compose must not hard-fail on them. Empty defaults keep s3 mode safe
+-      # (render-configs/loki only consume them in s3 mode).
+       S3_ENDPOINT: ${S3_ENDPOINT:-}
+       S3_BUCKET: ${S3_BUCKET:-}
+       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+@@ -102,7 +94,7 @@ services:
+       S3_REGION: ${S3_REGION:-hel1}
+       LOKI_RETENTION: ${LOKI_RETENTION:-720h}
+     volumes:
+-      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
++      - ./loki/loki-config.active.yml:/etc/loki/loki-config.yml:ro
+       - loki-data:/loki
+     ports:
+       - "${BIND_IP:-0.0.0.0}:3100:3100"
+@@ -135,7 +127,7 @@ services:
+       GF_RENDERING_CALLBACK_URL: http://grafana:3000/
+       GF_RENDERING_RENDERER_TOKEN: ${RENDERER_TOKEN:?set RENDERER_TOKEN in .env}
+       # Dashboard-only kiosk rendering: no menu chrome in captures
+-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-cost.json
++      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/fleet-overview.json
+       GF_USERS_ALLOW_SIGN_UP: "false"
+       GF_ANALYTICS_REPORTING_ENABLED: "false"
+       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+@@ -143,7 +135,7 @@ services:
+       GF_SERVER_ROOT_URL: "http://localhost:3000"
+       GF_INSTALL_PLUGINS: ""
+     volumes:
+-      - ./provisioning:/etc/grafana/provisioning:ro
++      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+       - ../dashboards:/var/lib/grafana/dashboards:ro
+       - grafana-data:/var/lib/grafana
+     ports:
+@@ -169,14 +161,10 @@ services:
+       # lane boards, read for existing ids and appended to when WRITE=1
+       - ${BOARD_ROOT:-/tmp/boards}:${BOARD_ROOT:-/boards}
+       # bind the host spool dir (drained by the fleet side over rsync) - a named
+-      # volume here is root-owned and the container runs as uid 10001.
+-      # HOST-side paths are env-remappable so a rootless host (agent user cannot
+-      # mkdir /var/lib/*) can point them at $HOME dirs it creates itself.
+-      # Compose list-merge APPENDS overrides, so the base list must already use
+-      # the remaps — a plain COMPOSE_EXTRA override cannot remove these.
+-      - ${SPOOL_HOST_DIR:-/var/lib/fleet-monitoring/spool}:/spool
++      # volume here is root-owned and the container runs as uid 10001
++      - /var/lib/fleet-monitoring/spool:/spool
+     ports:
+-      - "127.0.0.1:8089:8089"
++      - "127.0.0.1:${ALERT_ROUTER_HOST_PORT:-18089}:8089"
+     networks: [mon]
+ 
+   # The monitoring host ships its own metrics+logs like any other host.
+@@ -211,9 +199,8 @@ services:
+       # "couldn't get dbus connection" and node_systemd_unit_state never appears
+       - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket
+       - /run/systemd/private:/run/systemd/private
+-      # textfile collector: the way a host publishes facts about itself (backup freshness).
+-      # TEXTFILE_HOST_DIR remap: a rootless host cannot mkdir /var/lib/* (MON-DOGFOOD-035).
+-      - ${TEXTFILE_HOST_DIR:-/var/lib/fleet-monitoring/node-exporter-textfile}:/var/lib/node_exporter/textfile:ro
++      # textfile collector: the way a host publishes facts about itself (backup freshness)
++      - /var/lib/fleet-monitoring/node-exporter-textfile:/var/lib/node_exporter/textfile:ro
+       - alloy-data:/var/lib/alloy/data
+     ports:
+       - "127.0.0.1:12345:12345"
+@@ -238,6 +225,24 @@ services:
+       - "127.0.0.1:8081:8081"
+     networks: [mon]
+ 
++  # Traces: OTLP receiver + trace store. Pinned to 2.6.1 (same Grafana image version).
++  # OTLP gRPC on :4317, OTLP HTTP on :4318, query API on :3200 (loopback).
++  tempo:
++    <<: *safe
++    image: grafana/tempo:2.6.1
++    container_name: mon-tempo
++    command:
++      - -config.file=/etc/tempo.yml
++    volumes:
++      - ./tempo/tempo.yml:/etc/tempo.yml:ro
++      - tempo-data:/var/tempo
++    ports:
++      # OTLP gRPC + HTTP for trace ingestion; query API on 3200 (loopback only)
++      - "${BIND_IP:-0.0.0.0}:4317:4317"
++      - "${BIND_IP:-0.0.0.0}:4318:4318"
++      - "127.0.0.1:3200:3200"
++    networks: [mon]
++
+   cadvisor:
+     <<: *safe
+     image: gcr.io/cadvisor/cadvisor:v0.52.1
+@@ -269,3 +274,4 @@ volumes:
+   loki-data:
+   grafana-data:
+   alloy-data:
++  tempo-data:
+diff --git a/monitoring/fleet-monitoring/stack/loki/loki-config.active.yml b/monitoring/fleet-monitoring/stack/loki/loki-config.active.yml
+new file mode 100644
+index 000000000..294538506
+--- /dev/null
++++ b/monitoring/fleet-monitoring/stack/loki/loki-config.active.yml
+@@ -0,0 +1,78 @@
++# fleet-monitoring — Loki (single binary, FILESYSTEM chunk storage)
++#
++# The secretless first-boot variant: no object storage, no credentials. Selected by
++# render-configs.sh when LOKI_STORAGE=local, or LOKI_STORAGE=auto with no S3 credentials.
++# Chunks live on the loki-data volume, so logs do NOT survive a host rebuild — that is the
++# trade a machine with no S3 credentials makes to boot at all. Production runs loki-config.yml
++# (S3) and keeps the short local retention.
++
++auth_enabled: false
++
++server:
++  http_listen_port: 3100
++  grpc_listen_port: 9095
++  log_level: warn
++
++common:
++  path_prefix: /loki
++  replication_factor: 1
++  ring:
++    kvstore:
++      store: inmemory
++  storage:
++    filesystem:
++      chunks_directory: /loki/chunks
++      rules_directory: /loki/rules
++
++schema_config:
++  configs:
++    - from: 2026-01-01
++      store: tsdb
++      object_store: filesystem
++      schema: v13
++      index:
++        prefix: index
++        period: 24h
++
++storage_config:
++  tsdb_shipper:
++    active_index_directory: /loki/tsdb-index
++    cache_location: /loki/tsdb-cache
++    cache_ttl: 24h
++  filesystem:
++    directory: /loki/chunks
++
++limits_config:
++  retention_period: ${LOKI_RETENTION:-720h}
++  reject_old_samples: true
++  reject_old_samples_max_age: 168h
++  allow_structured_metadata: true
++  volume_enabled: true
++  # this fleet is a few dozen hosts — generous per-tenant limits, no multi-tenancy
++  ingestion_rate_mb: 16
++  ingestion_burst_size_mb: 32
++  max_streams_per_user: 20000
++  max_query_series: 5000
++
++compactor:
++  working_directory: /loki/compactor
++  delete_request_store: filesystem
++  retention_enabled: true
++  compaction_interval: 10m
++  retention_delete_delay: 2h
++  retention_delete_worker_count: 150
++
++ruler:
++  storage:
++    type: local
++    local:
++      directory: /loki/rules
++  rule_path: /loki/rules-temp
++  alertmanager_url: http://alertmanager:9093
++  ring:
++    kvstore:
++      store: inmemory
++  enable_api: true
++
++analytics:
++  reporting_enabled: false
+diff --git a/monitoring/fleet-monitoring/stack/prometheus/probe-targets.README.md b/monitoring/fleet-monitoring/stack/prometheus/probe-targets.README.md
+new file mode 100644
+index 000000000..117785dc2
+--- /dev/null
++++ b/monitoring/fleet-monitoring/stack/prometheus/probe-targets.README.md
+@@ -0,0 +1,18 @@
++# probe-targets.json is HAND-MAINTAINED as of 2026-10-21
++
++Decision (monitoring tick 2026-10-21-20-20-37, closes MON-GAP-029): slot-01 target
++REPOINTED from 100.79.83.6 (host vanished from the tailnet ~2026-10-04; no cx53 peer
++remains) to 100.122.57.93 (HostName hermes-fleet-01, coding-hermes-remote-bunker-01),
++which serves the same role: bunkerd on :10001/:10002 — verified OPEN via nc and
++probe_success=1 in live Prometheus.
++
++DO NOT regenerate prometheus/probe-targets.json from scripts/generate-probe-targets.py
++until the generator+inventory pipeline is fixed: the default snapshot
++(inventory/2026-09-27) still carries the DEAD 100.79.83.6, and every newer snapshot
++(2026-10-06 and later) no longer contains the standby slots at all — regeneration
++produces 0 targets (verified 2026-10-21) and would silence the whole blackbox lane.
++scripts/probe-standby.sh was repointed in the same change (slot-05 is probed there but
++has no prometheus target — pre-existing gap, not introduced here).
++
++Close condition history: MON-GAP-029 (P1, fired 2026-10-20) + daily duplicate P0 rows
++MON-MONITORING-{B316017D,AC991D47}-<date> since 2026-10-17.
+diff --git a/monitoring/fleet-monitoring/stack/prometheus/probe-targets.json b/monitoring/fleet-monitoring/stack/prometheus/probe-targets.json
+new file mode 100644
+index 000000000..991a0ba95
+--- /dev/null
++++ b/monitoring/fleet-monitoring/stack/prometheus/probe-targets.json
+@@ -0,0 +1,90 @@
++[
++  {
++    "targets": [
++      "100.122.57.93:10001"
++    ],
++    "labels": {
++      "host": "standby-cx53-01-2147",
++      "inventory_alias": "standby-cx53-01-2147",
++      "service_port": "10001",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.122.57.93:10002"
++    ],
++    "labels": {
++      "host": "standby-cx53-01-2147",
++      "inventory_alias": "standby-cx53-01-2147",
++      "service_port": "10002",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.66.160.77:10001"
++    ],
++    "labels": {
++      "host": "standby-cx53-02-2147",
++      "inventory_alias": "standby-cx53-02-2147",
++      "service_port": "10001",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.66.160.77:10002"
++    ],
++    "labels": {
++      "host": "standby-cx53-02-2147",
++      "inventory_alias": "standby-cx53-02-2147",
++      "service_port": "10002",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.100.29.114:10001"
++    ],
++    "labels": {
++      "host": "standby-cx53-03-2204",
++      "inventory_alias": "standby-cx53-03-2204",
++      "service_port": "10001",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.100.29.114:10002"
++    ],
++    "labels": {
++      "host": "standby-cx53-03-2204",
++      "inventory_alias": "standby-cx53-03-2204",
++      "service_port": "10002",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.106.74.73:10001"
++    ],
++    "labels": {
++      "host": "standby-cx53-04-2220",
++      "inventory_alias": "standby-cx53-04-2220",
++      "service_port": "10001",
++      "probe_module": "tcp_connect"
++    }
++  },
++  {
++    "targets": [
++      "100.106.74.73:10002"
++    ],
++    "labels": {
++      "host": "standby-cx53-04-2220",
++      "inventory_alias": "standby-cx53-04-2220",
++      "service_port": "10002",
++      "probe_module": "tcp_connect"
++    }
++  }
++]
+diff --git a/monitoring/fleet-monitoring/tempo/tempo.yml b/monitoring/fleet-monitoring/tempo/tempo.yml
+new file mode 100644
+index 000000000..a7ebe9a6e
+--- /dev/null
++++ b/monitoring/fleet-monitoring/tempo/tempo.yml
+@@ -0,0 +1,31 @@
++# Tempo config — default distribution for mon-tempo.
++# OTLP receivers on :4317 (gRPC) and :4318 (HTTP), query on :3200.
++# Pinned to match Grafana 13.2.2 → Tempo 2.6.1 compatibility.
++
++server:
++  http_listen_port: 3200
++
++distributor:
++  receivers:
++    otlp:
++      protocols:
++        grpc:
++          endpoint: "0.0.0.0:4317"
++        http:
++          endpoint: "0.0.0.0:4318"
++
++storage:
++  trace:
++    backend: local
++    local:
++      path: /var/tempo/blocks
++
++compactor:
++  compaction:
++    compaction_window: 24h
++    block_retention: 720h
++
++ingester:
++  lifecycler:
++    ring:
++      replication_factor: 1

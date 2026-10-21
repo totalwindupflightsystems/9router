@@ -1,0 +1,112 @@
+{
+  "task_id": "MON-GAP-029",
+  "task_title": "Repoint stale standby-cx53-01-2147 probe target to the live slot IP",
+  "task_criteria": [
+    "probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002 AND a live Prometheus query shows probe_success=1 for both new targets AND zero TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision note blocks regeneration from the stale generator"
+  ],
+  "passed": false,
+  "worktree": "/home/kara",
+  "branch": "main",
+  "commit": "007ee54da1de495b9b064d393c3210ae1727e0e9",
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": false,
+      "any_failed": true,
+      "summary": "  \u2717 tests: scanners: nice=nice -n 10\n  \u2717 secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)\n  \u2717 lint: scanners: nice=nice -n 10",
+      "steps": [
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": false,
+          "output": "scanners: nice=nice -n 10\n\n> kara@1.0.0 test\n> echo \"Error: no test specified\" && exit 1\n\nError: no test specified\n",
+          "error": "",
+          "data": {
+            "exit_code": 1,
+            "guard_log": "/home/kara/.gitreins/logs/guard-20261021T170322.696639Z.log"
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": false,
+          "output": "secrets: harness state excluded from gitleaks scope (.gitreins/**)\nsecrets: scanners=gitleaks+builtin cross-check\nscanners: nice=nice -n 10\n4:08PM INF scanned ~3298828 bytes (3.30 MB) in 1.25s\n4:08PM WRN leaks found: 1\nsecrets: gitleaks: findings found (exit 1)\nsecrets: builtin cross-check: Scanned 135 files \u2014 clean (excluded harness state: .gitreins/**)\nsecrets: builtin cross-check status: clean\n",
+          "error": "",
+          "data": {
+            "exit_code": 1,
+            "guard_log": "/home/kara/.gitreins/logs/guard-20261021T170322.696639Z.log",
+            "secrets_scanners": [
+              "gitleaks",
+              "builtin"
+            ]
+          }
+        },
+        {
+          "id": "lint",
+          "type": "script",
+          "passed": false,
+          "output": "scanners: nice=nice -n 10\nnpm warn exec The following package was not found and will be installed: eslint@10.13.0\n\nOops! Something went wrong! :(\n\nESLint: 10.13.0\n\nESLint couldn't find an eslint.config.* file.\n\nFrom ESLint v9.0.0, the default configuration file is now eslint.config.*.\nIf you are using a .eslintrc.* file, please follow the migration guide\nto update your configuration file to the new format:\n\nhttps://eslint.org/docs/latest/use/configure/migration-guide\n\nIf you still have problems after following the migration guide, please stop by\nhttps://eslint.org/chat/help to chat with the team.\n\n",
+          "error": "",
+          "data": {
+            "exit_code": 2,
+            "guard_log": "/home/kara/.gitreins/logs/guard-20261021T170322.696639Z.log"
+          }
+        }
+      ],
+      "coverage": "secrets+lint+tests"
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002 AND a live Prometheus query shows probe_success=1 for both new targets AND zero TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision note blocks regeneration from the stale generator: (1) probe-targets.json slot-01 entries: commit 007ee54da:monitoring/fleet-monitoring/stack/prometheus/probe-targets.json has {\"targets\":[\"100.122.57.93:10001\"], labels.host=standby-cx53-01-2147} and {\"targets\":[\"100.122.57.93:10002\"], same host}; live file /root/fleet-monitoring/prometheus/probe-targets.json on fleet-monitor (100.122.154.108) matches exactly and `grep -c 100.79.83.6` = 0 (dead IP gone). (2) Live Prometheus query http://100.122.154.108:9090/api/v1/query?query=probe_success{host=\"standby-cx53-01-2147\"} returned 100.122.57.93:10001 = 1 and 100.122.57.93:10002 = 1. (3) Zero TargetUnreachable alerts: /api/v1/rules shows rule TargetUnreachable state=inactive, alerts=0; /api/v1/alerts total=0; Alertmanager (127.0.0.1:9093/api/v2/alerts on fleet-monitor) returned [] (count 0). (4) Decision note: probe-targets.README.md (repo + live /root/fleet-monitoring/prometheus/probe-targets.README.md) states 'DO NOT regenerate prometheus/probe-targets.json from scripts/generate-probe-targets.py until the generator+inventory pipeline is fixed'. Verified the block is justified: running the generator against the default snapshot inventory/2026-09-27 emits 8 targets including 2 occurrences of the dead 100.79.83.6, while inventory/2026-10-20 emits 0 targets \u2014 regeneration would reintroduce the stale IP or silence the blackbox lane. No test suite applies (config-only/monitoring-data change); verification was done via live Prometheus/Alertmanager API queries and generator dry-runs.\nSlot-01 probe targets repointed to 100.122.57.93:10001/:10002 with live probe_success=1 on both, zero TargetUnreachable alerts in Prometheus and Alertmanager, and a decision note that demonstrably blocks regeneration from the stale generator.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002 AND a live Prometheus query shows probe_success=1 for both new targets AND zero TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision note blocks regeneration from the stale generator: (1) probe-targets.json slot-01 entries: commit 007ee54da:monitoring/fleet-monitoring/stack/prometheus/probe-targets.json has {\"targets\":[\"100.122.57.93:10001\"], labels.host=standby-cx53-01-2147} and {\"targets\":[\"100.122.57.93:10002\"], same host}; live file /root/fleet-monitoring/prometheus/probe-targets.json on fleet-monitor (100.122.154.108) matches exactly and `grep -c 100.79.83.6` = 0 (dead IP gone). (2) Live Prometheus query http://100.122.154.108:9090/api/v1/query?query=probe_success{host=\"standby-cx53-01-2147\"} returned 100.122.57.93:10001 = 1 and 100.122.57.93:10002 = 1. (3) Zero TargetUnreachable alerts: /api/v1/rules shows rule TargetUnreachable state=inactive, alerts=0; /api/v1/alerts total=0; Alertmanager (127.0.0.1:9093/api/v2/alerts on fleet-monitor) returned [] (count 0). (4) Decision note: probe-targets.README.md (repo + live /root/fleet-monitoring/prometheus/probe-targets.README.md) states 'DO NOT regenerate prometheus/probe-targets.json from scripts/generate-probe-targets.py until the generator+inventory pipeline is fixed'. Verified the block is justified: running the generator against the default snapshot inventory/2026-09-27 emits 8 targets including 2 occurrences of the dead 100.79.83.6, while inventory/2026-10-20 emits 0 targets \u2014 regeneration would reintroduce the stale IP or silence the blackbox lane. No test suite applies (config-only/monitoring-data change); verification was done via live Prometheus/Alertmanager API queries and generator dry-runs.\nSlot-01 probe targets repointed to 100.122.57.93:10001/:10002 with live probe_success=1 on both, zero TargetUnreachable alerts in Prometheus and Alertmanager, and a decision note that demonstrably blocks regeneration from the stale generator.",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002 AND a live Prometheus query shows probe_success=1 for both new targets AND zero TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision note blocks regeneration from the stale generator",
+                "status": "PASS",
+                "detail": "(1) probe-targets.json slot-01 entries: commit 007ee54da:monitoring/fleet-monitoring/stack/prometheus/probe-targets.json has {\"targets\":[\"100.122.57.93:10001\"], labels.host=standby-cx53-01-2147} and {\"targets\":[\"100.122.57.93:10002\"], same host}; live file /root/fleet-monitoring/prometheus/probe-targets.json on fleet-monitor (100.122.154.108) matches exactly and `grep -c 100.79.83.6` = 0 (dead IP gone). (2) Live Prometheus query http://100.122.154.108:9090/api/v1/query?query=probe_success{host=\"standby-cx53-01-2147\"} returned 100.122.57.93:10001 = 1 and 100.122.57.93:10002 = 1. (3) Zero TargetUnreachable alerts: /api/v1/rules shows rule TargetUnreachable state=inactive, alerts=0; /api/v1/alerts total=0; Alertmanager (127.0.0.1:9093/api/v2/alerts on fleet-monitor) returned [] (count 0). (4) Decision note: probe-targets.README.md (repo + live /root/fleet-monitoring/prometheus/probe-targets.README.md) states 'DO NOT regenerate prometheus/probe-targets.json from scripts/generate-probe-targets.py until the generator+inventory pipeline is fixed'. Verified the block is justified: running the generator against the default snapshot inventory/2026-09-27 emits 8 targets including 2 occurrences of the dead 100.79.83.6, while inventory/2026-10-20 emits 0 targets \u2014 regeneration would reintroduce the stale IP or silence the blackbox lane. No test suite applies (config-only/monitoring-data change); verification was done via live Prometheus/Alertmanager API queries and generator dry-runs."
+              }
+            ],
+            "summary": "Slot-01 probe targets repointed to 100.122.57.93:10001/:10002 with live probe_success=1 on both, zero TargetUnreachable alerts in Prometheus and Alertmanager, and a decision note that demonstrably blocks regeneration from the stale generator."
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: MON-GAP-029\n\nStage tier1: FAIL\n    \u2717 tests: scanners: nice=nice -n 10\n  \u2717 secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)\n  \u2717 lint: scanners: nice=nice -n 10\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 probe-targets.json slot-01 entries name 100.122.57.93 for ports 10001 and 10002 AND a live Prometheus query shows probe_success=1 for both new targets AND zero TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision note blocks regeneration from the stale generator: (1) probe-targets.json slot-01 entries: commit 007ee54da:monitoring/fleet-monitoring/stack/prometheus/probe-targets.json has {\"targets\":[\"100.122.57.93:10001\"], labels.host=standby-cx53-01-2147} and {\"targets\":[\"100.122.57.93:10002\"], same host}; live file /root/fleet-monitoring/prometheus/probe-targets.json on fleet-monitor (100.122.154.108) matches exactly and `grep -c 100.79.83.6` = 0 (dead IP gone). (2) Live Prometheus query http://100.122.154.108:9090/api/v1/query?query=probe_success{host=\"standby-cx53-01-2147\"} returned 100.122.57.93:10001 = 1 and 100.122.57.93:10002 = 1. (3) Zero TargetUnreachable alerts: /api/v1/rules shows rule TargetUnreachable state=inactive, alerts=0; /api/v1/alerts total=0; Alertmanager (127.0.0.1:9093/api/v2/alerts on fleet-monitor) returned [] (count 0). (4) Decision note: probe-targets.README.md (repo + live /root/fleet-monitoring/prometheus/probe-targets.README.md) states 'DO NOT regenerate prometheus/probe-targets.json from scripts/generate-probe-targets.py until the generator+inventory pipeline is fixed'. Verified the block is justified: running the generator against the default snapshot inventory/2026-09-27 emits 8 targets including 2 occurrences of the dead 100.79.83.6, while inventory/2026-10-20 emits 0 targets \u2014 regeneration would reintroduce the stale IP or silence the blackbox lane. No test suite applies (config-only/monitoring-data change); verification was done via live Prometheus/Alertmanager API queries and generator dry-runs.\nSlot-01 probe targets repointed to 100.122.57.93:10001/:10002 with live probe_success=1 on both, zero TargetUnreachable alerts in Prometheus and Alertmanager, and a decision note that demonstrably blocks regeneration from the stale generator.\n\nOverall: FAIL \u2717",
+  "evaluated_at": "2026-10-21T21:09:27.366897",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-10-21T21:09:27.418976+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 94845,
+        "truncated": false,
+        "source": "git show 007ee54da1de"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 262176,
+        "truncated": true,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "MON-GAP-029"
+  }
+}

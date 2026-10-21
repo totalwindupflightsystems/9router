@@ -254,5 +254,6 @@ tasks:
     AND a live Prometheus query shows probe_success=1 for both new targets AND zero
     TargetUnreachable alerts remain in Prometheus and Alertmanager AND the decision
     note blocks regeneration from the stale generator
-  status: in_progress
+  status: complete
   created_at: '2026-10-21T21:01:30.111968+00:00'
+  completed_at: '2026-10-21T21:08:02.235081+00:00'
