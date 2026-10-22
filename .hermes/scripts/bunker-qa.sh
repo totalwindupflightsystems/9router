@@ -2482,7 +2482,7 @@ elif [ -f go.mod ] && ui_go_http_source; then
   ui_last_port_on_line() { # stdin → last plausible 4-5 digit number per line
     awk '{
       last = ""
-      while (match(\$0, /[0-9][0-9][0-9][0-9]?/)) {
+      while (match(\$0, /[0-9][0-9][0-9][0-9][0-9]*/)) {
         n = substr(\$0, RSTART, RLENGTH); n += 0
         if (n >= 1024 && n <= 65535) last = n
         \$0 = substr(\$0, RSTART + RLENGTH)
