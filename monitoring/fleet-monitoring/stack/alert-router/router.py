@@ -68,11 +68,6 @@ STATE_CHECK_BACKOFF = 30.0
 BOARD_DIR = ".coding-hermes/board"
 LANE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 SEVERITY_PRIORITY = {"critical": 0, "warning": 1, "info": 2}
-BENIGN_ALERTS = {
-    "OOMKillsLowPressure": [
-        (re.compile(r".*"), "CI-memcg: cgroup-scoped kills with >=15% MemAvailable"),
-    ],
-}
 
 _lock = threading.Lock()
 _prom_up_cache = {"ok": False, "ts": 0.0}
@@ -127,6 +122,30 @@ COUNTERS = {
     "rejected_total": 0,
     "errors_total": 0,
 }
+
+
+def is_target_absent_from_targets(instance):
+    """Check if instance is absent from current blackbox-probes scrape targets.
+
+    When a blackbox-probes target is retired or repointed, it won't appear in
+    Prometheus's active targets. A resolution for such a target should be accepted
+    even though prom_target_up returns False (the target is intentionally gone).
+
+    Queries Prometheus's /api/v1/targets to check if the instance is still
+    listed as a blackbox-probes scrape target.
+    """
+    try:
+        url = PROM_URL + "/api/v1/targets"
+        with urllib.request.urlopen(url, timeout=PROM_STATE_TIMEOUT) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace"))
+        active = (body.get("data") or {}).get("activeTargets") or []
+        for t in active:
+            if t.get("labels", {}).get("job") == "blackbox-probes" and \
+               t.get("labels", {}).get("instance") == instance:
+                return False  # target IS still active
+        return True  # target NOT found among blackbox-probes targets
+    except (ValueError, OSError, KeyError):
+        return False  # Can't read, default to NOT absent (preserve existing behavior)
 
 
 def bump(name, n=1):
@@ -392,23 +411,6 @@ def emit_resolution(event, directory):
         log("resolved spool failed: %s" % exc)
 
 
-def _is_benign_alert(alert):
-    """Return (True, reason) if this alert is known-benign and should be pre-resolved.
-
-    Matches on alertname regex + host regex. Returns (False, "") for all other alerts.
-    """
-    alertname = (alert.get("labels") or {}).get("alertname", "")
-    host = (alert.get("labels") or {}).get("host", "")
-    
-    for pattern_str, entries in BENIGN_ALERTS.items():
-        if not re.match(pattern_str, alertname):
-            continue
-        for host_re, reason in entries:
-            if re.match(host_re, host):
-                return True, reason
-    return False, ""
-
-
 def handle_alert(alert, when):
     labels = alert.get("labels") or {}
     lane = (labels.get("lane") or "monitoring").strip().lower()
@@ -416,27 +418,20 @@ def handle_alert(alert, when):
         bump("rejected_total")
         log("rejecting alert with unusable lane label: %r" % lane)
         return
-    directory = lane_dir(lane)
-
-    # MON-GAP-025: pre-resolve benign alerts before any state check or row write
-    is_benign, benign_reason = _is_benign_alert(alert)
-    if is_benign:
-        event = build_resolution(alert, lane, when)
-        event["note"] = "pre-resolved (benign): %s - no pending row written" % benign_reason
-        bump("resolved_suppressed_total")
-        log("pre-resolved (benign): %s - %s" % (event['id'], benign_reason))
-        # no emit_resolution: a resolution with no pending row is board noise;
-        # full suppression writes nothing (MON-GAP-025 live proof 2026-10-17)
-        return
-
     status = (alert.get("status") or "firing").lower()
+    directory = lane_dir(lane)
 
     if status == "resolved":
         # Guard against "absence looks like recovery" false resolutions: only
         # record a resolution if Prometheus still has a live `up` series for
-        # this target. A dead exporter must not close a firing alert.
         instance = labels.get("instance") or labels.get("host") or ""
-        if instance and not prom_target_up(instance, labels.get("job") or "integrations/unix"):
+        # this target. A dead exporter must not close a firing alert.
+        # For blackbox-probes: also accept resolution if target was legitimately
+        # retired (absent from probe-targets.json), not just dark.
+        job = labels.get("job") or "integrations/unix"
+        target_up = prom_target_up(instance, job)
+        target_absent = job == "blackbox-probes" and is_target_absent_from_targets(instance)
+        if instance and not target_up and not target_absent:
             bump("resolved_suppressed_total")
             log("suppressing UNVERIFIED resolution for %s/%s: no live up series (target dark?)"
                 % (labels.get("alertname"), instance))
