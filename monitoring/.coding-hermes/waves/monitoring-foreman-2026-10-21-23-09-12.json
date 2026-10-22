@@ -1,14 +1,20 @@
 {
   "tick": "monitoring-foreman-2026-10-21-23-09-12",
   "created_at": "2026-10-21T23:15:00Z",
+  "finished_at": "2026-10-22T00:20:00Z",
   "wave_budget": 3,
   "workers": 2,
   "tasks": [
     {
       "id": "MON-REV19-0234",
       "rows": ["MON-REV19-02", "MON-REV19-03", "MON-REV19-04"],
-      "worktree": "/home/kara/worktrees/fleet-monitoring-MON-REV19-0234",
-      "branch": "wt/MON-REV19-0234",
+      "outcome": "complete",
+      "commit": "8ba26b5617d570a0be517280cf0b7724147cd2cc",
+      "merge_commit": "b8a9170",
+      "published": "origin/main@0601651 (totalwindupflightsystems/fleet-monitoring)",
+      "gitreins": {"task": "MON-REV19-0234", "tier2": "PASS", "verdict": ".gitreins/history/2026-10-22/bab2d69c", "tier1_note": "lint/tests legs bare-timed-out at judge's 120s step budget; repo lint battery runs 155s — judge-config ceiling, foreman's direct make test green (0 check(s) failed)"},
+      "worktree": "/home/kara/worktrees/fleet-monitoring-MON-REV19-0234 (reaped)",
+      "branch": "wt/MON-REV19-0234 (deleted post-merge)",
       "base": "origin/main@232dd76",
       "repo": "/home/kara/fleet-monitoring",
       "files": ["stack/alert-router/router.py", "stack/alert-router/test_pre_resolve.py", "Makefile"]
@@ -16,12 +22,17 @@
     {
       "id": "MON-REV19-01",
       "rows": ["MON-REV19-01"],
-      "worktree": "/home/kara/worktrees/fleet-monitoring-MON-REV19-01",
+      "outcome": "complete",
+      "commit": "f0822d3df56a840bcee21330e753b11b848891b3",
+      "merge_commit": "906ffa3",
+      "published": "origin/main@0601651 (totalwindupflightsystems/fleet-monitoring)",
+      "gitreins": {"task": "MON-REV19-01", "tier2": "PASS (all 5 sub-checks)", "verdict": ".gitreins/history/2026-10-21/7288e096", "tier1_note": "same 120s step-budget timeout class"},
+      "worktree": "/home/kara/worktrees/fleet-monitoring-MON-REV19-01 (reaped)",
+      "branch": "wt/MON-REV19-01 (deleted post-merge)",
       "base": "origin/main@232dd76",
-      "branch": "wt/MON-REV19-01",
       "repo": "/home/kara/fleet-monitoring",
-      "files": ["stack/alertmanager/alertmanager.yml", "stack/docker-compose.yml", "scripts/render-configs.sh", "scripts/verify.sh", "Makefile"]
+      "files": ["stack/docker-compose.yml", "scripts/verify.sh"]
     }
   ],
-  "note": "REV19-02+03+04 batched into one worker (same seam stack/alert-router; 04 is the self-test of 02+03). REV19-01 file-disjoint (alertmanager token + verify gate). Makefile overlap is additive (04 wires the test target; 01 does not edit Makefile targets). Verified at merge gate."
+  "note": "REV19-02+03+04 batched into one worker (same seam stack/alert-router; 04 is the self-test of 02+03). REV19-01 file-disjoint (alertmanager token + verify gate). Trace markers recovered via chore(trace) commit 0601651 (workers printed markers in chat but did not commit them). Merged serially with per-merge gates; merged main make test green before and after the second merge."
 }
