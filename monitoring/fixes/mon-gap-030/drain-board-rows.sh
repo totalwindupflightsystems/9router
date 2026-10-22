@@ -146,16 +146,23 @@ def labels_of(row):
     return (obj.get("alertname") or "", obj.get("host") or obj.get("instance") or "")
 
 def board_rows(path):
-    out, ok = [], True
+    cached = _board_cache.get(path)
+    if cached is not None:
+        return cached
+    _board_cache[path] = []  # sentinel-present (distinguishes a cached miss from uncached)
     if not os.path.isfile(path):
         return None
+    out = []
     for raw in open(path, encoding="utf-8", errors="replace"):
         raw = raw.strip()
         if not raw:
             continue
-        obj = jload(raw)
-        out.append(obj)
-    return out
+        _board_cache[path].append(jload(raw))
+    return _board_cache[path]
+
+# PERF-1: the spool is cumulative with only ONE target board per lane — read each board
+# ONCE instead of once per spool line (796 reads of the same 1MB board dominated the run).
+_board_cache = {}
 
 # spool order, with 1-based line numbers inside one concatenated stream
 entries = []
@@ -251,7 +258,18 @@ for lineno, raw, obj in entries:
     refire_count += 1
 
 for lineno, raw, obj in entries:
-    print("%d\t%s" % (lineno, decisions.get(lineno, "skip")))
+    kind = decisions.get(lineno, "skip")
+    # PERF-1: emit routing metadata WITH the plan so the bash apply loop never spawns
+    # python3 per line (3 spawns x 796 lines dominated the second half of the cost).
+    if isinstance(obj, dict):
+        lane = str(obj.get("lane") or "").strip().lower() or "monitoring"
+        rtype = str(obj.get("type") or "").strip().lower()
+        rid = str(obj.get("id") or "")
+    else:
+        lane, rtype, rid = "monitoring", "", ""
+    # '|' (non-whitespace IFS char) so bash `read` preserves EMPTY fields exactly —
+    # a tab-separated plan collapses empty fields (IFS whitespace run) and shifts ids.
+    print("%d|%s|%s|%s|%s" % (lineno, kind, lane, rtype, rid))
 sys.stderr.write("plan: refire=%d olddate-suppressed=%d stale-suppressed=%d unverified-suppressed=%d live_ok=%s\n"
                  % (refire_count, olddate_suppressed, stale_suppressed, unverified_suppressed, live_ok))
 PY
@@ -268,30 +286,33 @@ fi
 # ------------------------------------------------------------------ apply the plan
 echo "== appending rows =="
 appended=0; skipped=0; refire=0
-while IFS=$'\t' read -r lineno kind; do
+SPOOL_LINES_TOTAL=$(cat "$SPOOL"/*.jsonl 2>/dev/null | wc -l)
+while IFS='|' read -r lineno kind lanef rtype ridf; do
   [ -n "${kind:-}" ] || continue
-  line=$(sed -n "${lineno}p" "$SPOOL"/board-rows.jsonl 2>/dev/null || true)
-  if [ -z "$line" ]; then
-    # concatenated stream across *.jsonl files: fall back to the same pass order
-    line=$(cat "$SPOOL"/*.jsonl 2>/dev/null | sed -n "${lineno}p")
+  if [ "$SPOOL_LINES_TOTAL" = "1" ]; then
+    line=$(cat "$SPOOL"/board-rows.jsonl 2>/dev/null || true)
+  else
+    line=$(sed -n "${lineno}p" "$SPOOL"/board-rows.jsonl 2>/dev/null || true)
+    if [ -z "$line" ]; then
+      # concatenated stream across *.jsonl files: same pass order fallback
+      line=$(cat "$SPOOL"/*.jsonl 2>/dev/null | sed -n "${lineno}p")
+    fi
   fi
-  lanef=$(printf '%s' "$line" | python3 -c 'import json,sys
-try: print((json.loads(sys.stdin.read()).get("lane") or "monitoring").strip().lower())
-except Exception: print("")')
-  ridf=$(printf '%s' "$line" | python3 -c 'import json,sys
-try: print(json.loads(sys.stdin.read()).get("id",""))
-except Exception: print("")')
   case "$kind" in
     append|refire)
-      board="$BOARD_ROOT/$lanef/.coding-hermes/board/tasks.jsonl"
+      if [ "$rtype" = "alert-resolved" ]; then
+        board="$BOARD_ROOT/$lanef/.coding-hermes/board/events.jsonl"
+      else
+        board="$BOARD_ROOT/$lanef/.coding-hermes/board/tasks.jsonl"
+      fi
       if [ ! -d "$(dirname "$board")" ]; then
         echo "  no board for lane '$lanef' — leaving spooled"; skipped=$((skipped+1)); continue
       fi
       if [ "$DRY" = "1" ]; then
-        echo "  DRY would $kind $ridf -> $board"
+        echo "  DRY would $kind $ridf -> $board [${rtype:-task}]"
       else
         python3 "$APPEND" "$board" "$line" >/dev/null
-        echo "  appended $ridf -> $lanef${kind:+ (${kind})}"
+        echo "  appended $ridf -> $lanef${kind:+ (${kind})} [${rtype:-task}]"
       fi
       appended=$((appended+1))
       [ "$kind" = "refire" ] && refire=$((refire+1))
