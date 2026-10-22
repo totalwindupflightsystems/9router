@@ -1,15 +1,15 @@
-=== SCHED-GAP-1756 live evidence 2026-10-22T08:54:15-05:00 ===
+=== SCHED-GAP-1756 live evidence 2026-10-22T09:04:49-05:00 ===
 -- fleet before: {"paused":false,"active_ticks":10}
 -- credential sources: -rw------- /home/kara/.hermes/scheduler-auth.env / /home/kara/.hermes/.env
 
 === §1 AC1 — one credential, live pause+resume pair ===
--- credential files: 700 /var/tmp/hermes-scratch/.sched-deploy-creds.TvgP53 600 /var/tmp/hermes-scratch/.sched-deploy-creds.TvgP53/bearer.curl 600 /var/tmp/hermes-scratch/.sched-deploy-creds.TvgP53/operator.curl 
-[08:54:15] pause attempt 1/2: X-Operator-Token (/home/kara/.hermes/scheduler-auth.env) -> HTTP 200 {"status":"paused"}
-[08:54:15]    credential RESOLVED: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env) — every later call uses this one
+-- credential files: 700 /var/tmp/hermes-scratch/.sched-deploy-creds.8ecxBJ 600 /var/tmp/hermes-scratch/.sched-deploy-creds.8ecxBJ/bearer.curl 600 /var/tmp/hermes-scratch/.sched-deploy-creds.8ecxBJ/operator.curl 
+[09:04:50] pause attempt 1/2: X-Operator-Token (/home/kara/.hermes/scheduler-auth.env) -> HTTP 200 {"status":"paused"}
+[09:04:50]    credential RESOLVED: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env) — every later call uses this one
 -- RESOLVE=0
 -- resolved: AUTH_MODE=operator label=X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env)
 -- status right after pause: {"paused":true,"active_ticks":10}
-[08:54:16] resume -> HTTP 200 {"status":"resumed"} (credential: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env))
+[09:04:50] resume -> HTTP 200 {"status":"resumed"} (credential: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env))
 -- RESUME=0
 -- status right after resume: {"paused":false,"active_ticks":10}
 -- RESUMED=1 PAUSED=0
@@ -17,50 +17,50 @@
 === §2 AC2 — forced abort (SIGTERM) mid-drain leaves paused=false ===
 -- fleet before the run: {"paused":false,"active_ticks":10}
 -- script log up to the kill:
-   | [08:54:16] === deploy start (log: /tmp/sgap1756-live.XAWEZB/script-ac2.log) ===
-   | [08:54:16] HEAD: 3cb8bd9b fix(scheduler): qa gets a 2h per-turn deadline — the 30m class ate 54% of the family. Addresses SCHED-GAP-1755.
-   | [08:54:17] live before: {"active_ticks":10,"build_sha":"8ec55a6f","build_time":"2026-10-22T13:14:01Z","clock":{"mode":"real","scale":1},"db":"connected","evaluation_age_seconds":116.928505042,"gateway_errors":2,"last_evaluation":"2026-10-22T13:52:20Z","scheduler_id":"karaHermes-mde-7840hs","spawns_exec":0,"spawns_http":19,"stall_census":{"coding-hermes":{"family":"coding-hermes","stalls_24h":15,"terminal_ticks_24h":273,"stall_rate_24h":0.054945054945054944,"turn_deadline":"","exempt_from_turn_deadline":false},"dogfood":{"family":"dogfood","stalls_24h":1,"terminal_ticks_24h":4,"stall_rate_24h":0.25,"turn_deadline":"","exempt_from_turn_deadline":false},"duckbrain-sync":{"family":"duckbrain-sync","stalls_24h":20,"terminal_ticks_24h":83,"stall_rate_24h":0.24096385542168675,"turn_deadline":"0s","exempt_from_turn_deadline":true},"perf":{"family":"perf","stalls_24h":1,"terminal_ticks_24h":1,"stall_rate_24h":1,"turn_deadline":"","exempt_from_turn_deadline":false},"pm":{"family":"pm","stalls_24h":10,"terminal_ticks_24h":19,"stall_rate_24h":0.5263157894736842,"turn_deadline":"","exempt_from_turn_deadline":false},"qa":{"family":"qa","stalls_24h":6,"terminal_ticks_24h":12,"stall_rate_24h":0.5,"turn_deadline":"2h","exempt_from_turn_deadline":false},"releases":{"family":"releases","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false},"review":{"family":"review","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false}},"status":"ok","uptime":"40m9.063800632s","version":"v1.12.0-566-g8ec55a6f"}
-   | [08:54:17] drain cap=1200s | daemon --tick-timeout=3h | mainpid=1581445
-   | [08:54:17] WARN: drain cap 1200s < tick timeout 3h — an in-flight tick can outlive the cap, so this run is BOUND to abort (exit 3) rather than restart; raise DRAIN_MAX or wait for a quiet window
-   | [08:54:17] pre-flight: paused=? (no inherited pause)
-   | [08:54:17] pause attempt 1/2: X-Operator-Token (/home/kara/.hermes/scheduler-auth.env) -> HTTP 200 {"status":"paused"}
-   | [08:54:17]    credential RESOLVED: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env) — every later call uses this one
-   | [08:54:17] paused at 2026-10-22T08:54:17-05:00 (paused=1)
+   | [09:04:51] === deploy start (log: /tmp/sgap1756-live.3EYaX8/script-ac2.log) ===
+   | [09:04:51] HEAD: 75eaaa73 docs: pause/resume need the operator credential; document the drain-restart ladder. Addresses SCHED-GAP-1756.
+   | [09:04:51] live before: {"active_ticks":10,"build_sha":"8ec55a6f","build_time":"2026-10-22T13:14:01Z","clock":{"mode":"real","scale":1},"db":"connected","evaluation_age_seconds":16.797476974,"gateway_errors":5,"last_evaluation":"2026-10-22T14:04:34Z","scheduler_id":"karaHermes-mde-7840hs","spawns_exec":0,"spawns_http":21,"stall_census":{"coding-hermes":{"family":"coding-hermes","stalls_24h":13,"terminal_ticks_24h":272,"stall_rate_24h":0.04779411764705882,"turn_deadline":"","exempt_from_turn_deadline":false},"dogfood":{"family":"dogfood","stalls_24h":1,"terminal_ticks_24h":4,"stall_rate_24h":0.25,"turn_deadline":"","exempt_from_turn_deadline":false},"duckbrain-sync":{"family":"duckbrain-sync","stalls_24h":19,"terminal_ticks_24h":82,"stall_rate_24h":0.23170731707317074,"turn_deadline":"0s","exempt_from_turn_deadline":true},"perf":{"family":"perf","stalls_24h":1,"terminal_ticks_24h":1,"stall_rate_24h":1,"turn_deadline":"","exempt_from_turn_deadline":false},"pm":{"family":"pm","stalls_24h":10,"terminal_ticks_24h":19,"stall_rate_24h":0.5263157894736842,"turn_deadline":"","exempt_from_turn_deadline":false},"qa":{"family":"qa","stalls_24h":6,"terminal_ticks_24h":12,"stall_rate_24h":0.5,"turn_deadline":"2h","exempt_from_turn_deadline":false},"releases":{"family":"releases","stalls_24h":0,"terminal_ticks_24h":5,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false},"review":{"family":"review","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false}},"status":"ok","uptime":"50m43.292701864s","version":"v1.12.0-566-g8ec55a6f"}
+   | [09:04:51] drain cap=1200s | daemon --tick-timeout=3h | mainpid=1581445
+   | [09:04:51] WARN: drain cap 1200s < tick timeout 3h — an in-flight tick can outlive the cap, so this run is BOUND to abort (exit 3) rather than restart; raise DRAIN_MAX or wait for a quiet window
+   | [09:04:51] pre-flight: paused=false (no inherited pause)
+   | [09:04:51] pause attempt 1/2: X-Operator-Token (/home/kara/.hermes/scheduler-auth.env) -> HTTP 200 {"status":"paused"}
+   | [09:04:51]    credential RESOLVED: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env) — every later call uses this one
+   | [09:04:51] paused at 2026-10-22T09:04:51-05:00 (paused=1)
 -- fleet state at kill time: {"paused":true,"active_ticks":10}  (active_ticks>0 is why it cannot restart)
--- sending SIGTERM to pid 2597123
+-- sending SIGTERM to pid 2893261
 -- script exit rc=143 (143 = TERM -> exit 143 -> EXIT trap)
 -- script log after the kill:
-   | [08:54:16] === deploy start (log: /tmp/sgap1756-live.XAWEZB/script-ac2.log) ===
-   | [08:54:16] HEAD: 3cb8bd9b fix(scheduler): qa gets a 2h per-turn deadline — the 30m class ate 54% of the family. Addresses SCHED-GAP-1755.
-   | [08:54:17] live before: {"active_ticks":10,"build_sha":"8ec55a6f","build_time":"2026-10-22T13:14:01Z","clock":{"mode":"real","scale":1},"db":"connected","evaluation_age_seconds":116.928505042,"gateway_errors":2,"last_evaluation":"2026-10-22T13:52:20Z","scheduler_id":"karaHermes-mde-7840hs","spawns_exec":0,"spawns_http":19,"stall_census":{"coding-hermes":{"family":"coding-hermes","stalls_24h":15,"terminal_ticks_24h":273,"stall_rate_24h":0.054945054945054944,"turn_deadline":"","exempt_from_turn_deadline":false},"dogfood":{"family":"dogfood","stalls_24h":1,"terminal_ticks_24h":4,"stall_rate_24h":0.25,"turn_deadline":"","exempt_from_turn_deadline":false},"duckbrain-sync":{"family":"duckbrain-sync","stalls_24h":20,"terminal_ticks_24h":83,"stall_rate_24h":0.24096385542168675,"turn_deadline":"0s","exempt_from_turn_deadline":true},"perf":{"family":"perf","stalls_24h":1,"terminal_ticks_24h":1,"stall_rate_24h":1,"turn_deadline":"","exempt_from_turn_deadline":false},"pm":{"family":"pm","stalls_24h":10,"terminal_ticks_24h":19,"stall_rate_24h":0.5263157894736842,"turn_deadline":"","exempt_from_turn_deadline":false},"qa":{"family":"qa","stalls_24h":6,"terminal_ticks_24h":12,"stall_rate_24h":0.5,"turn_deadline":"2h","exempt_from_turn_deadline":false},"releases":{"family":"releases","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false},"review":{"family":"review","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false}},"status":"ok","uptime":"40m9.063800632s","version":"v1.12.0-566-g8ec55a6f"}
-   | [08:54:17] drain cap=1200s | daemon --tick-timeout=3h | mainpid=1581445
-   | [08:54:17] WARN: drain cap 1200s < tick timeout 3h — an in-flight tick can outlive the cap, so this run is BOUND to abort (exit 3) rather than restart; raise DRAIN_MAX or wait for a quiet window
-   | [08:54:17] pre-flight: paused=? (no inherited pause)
-   | [08:54:17] pause attempt 1/2: X-Operator-Token (/home/kara/.hermes/scheduler-auth.env) -> HTTP 200 {"status":"paused"}
-   | [08:54:17]    credential RESOLVED: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env) — every later call uses this one
-   | [08:54:17] paused at 2026-10-22T08:54:17-05:00 (paused=1)
-   | [08:54:18] readback: paused=true
-   | [08:54:18] EXIT trap (rc=143): fleet is paused and the deploy did not complete — resuming so it is not left parked
-   | [08:54:18] resume -> HTTP 200 {"status":"resumed"} (credential: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env))
-   | [08:54:18] === exit rc=143 ===
+   | [09:04:51] === deploy start (log: /tmp/sgap1756-live.3EYaX8/script-ac2.log) ===
+   | [09:04:51] HEAD: 75eaaa73 docs: pause/resume need the operator credential; document the drain-restart ladder. Addresses SCHED-GAP-1756.
+   | [09:04:51] live before: {"active_ticks":10,"build_sha":"8ec55a6f","build_time":"2026-10-22T13:14:01Z","clock":{"mode":"real","scale":1},"db":"connected","evaluation_age_seconds":16.797476974,"gateway_errors":5,"last_evaluation":"2026-10-22T14:04:34Z","scheduler_id":"karaHermes-mde-7840hs","spawns_exec":0,"spawns_http":21,"stall_census":{"coding-hermes":{"family":"coding-hermes","stalls_24h":13,"terminal_ticks_24h":272,"stall_rate_24h":0.04779411764705882,"turn_deadline":"","exempt_from_turn_deadline":false},"dogfood":{"family":"dogfood","stalls_24h":1,"terminal_ticks_24h":4,"stall_rate_24h":0.25,"turn_deadline":"","exempt_from_turn_deadline":false},"duckbrain-sync":{"family":"duckbrain-sync","stalls_24h":19,"terminal_ticks_24h":82,"stall_rate_24h":0.23170731707317074,"turn_deadline":"0s","exempt_from_turn_deadline":true},"perf":{"family":"perf","stalls_24h":1,"terminal_ticks_24h":1,"stall_rate_24h":1,"turn_deadline":"","exempt_from_turn_deadline":false},"pm":{"family":"pm","stalls_24h":10,"terminal_ticks_24h":19,"stall_rate_24h":0.5263157894736842,"turn_deadline":"","exempt_from_turn_deadline":false},"qa":{"family":"qa","stalls_24h":6,"terminal_ticks_24h":12,"stall_rate_24h":0.5,"turn_deadline":"2h","exempt_from_turn_deadline":false},"releases":{"family":"releases","stalls_24h":0,"terminal_ticks_24h":5,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false},"review":{"family":"review","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false}},"status":"ok","uptime":"50m43.292701864s","version":"v1.12.0-566-g8ec55a6f"}
+   | [09:04:51] drain cap=1200s | daemon --tick-timeout=3h | mainpid=1581445
+   | [09:04:51] WARN: drain cap 1200s < tick timeout 3h — an in-flight tick can outlive the cap, so this run is BOUND to abort (exit 3) rather than restart; raise DRAIN_MAX or wait for a quiet window
+   | [09:04:51] pre-flight: paused=false (no inherited pause)
+   | [09:04:51] pause attempt 1/2: X-Operator-Token (/home/kara/.hermes/scheduler-auth.env) -> HTTP 200 {"status":"paused"}
+   | [09:04:51]    credential RESOLVED: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env) — every later call uses this one
+   | [09:04:51] paused at 2026-10-22T09:04:51-05:00 (paused=1)
+   | [09:04:52] readback: paused=true
+   | [09:04:52] EXIT trap (rc=143): fleet is paused and the deploy did not complete — resuming so it is not left parked
+   | [09:04:52] resume -> HTTP 200 {"status":"resumed"} (credential: X-Operator-Token (SCHEDULER_OPERATOR_TOKEN from /home/kara/.hermes/scheduler-auth.env))
+   | [09:04:52] === exit rc=143 ===
 -- fleet after the forced abort: {"paused":false,"active_ticks":10}
 -- /api/v1/status paused = false
 
 === §3 fail-loud — bogus credentials must refuse, not pause ===
 -- fleet before: {"paused":false,"active_ticks":10}
-[08:54:22] === deploy start (log: /tmp/sgap1756-live.XAWEZB/script-ac3.log) ===
-[08:54:22] HEAD: 3cb8bd9b fix(scheduler): qa gets a 2h per-turn deadline — the 30m class ate 54% of the family. Addresses SCHED-GAP-1755.
-[08:54:22] live before: {"active_ticks":10,"build_sha":"8ec55a6f","build_time":"2026-10-22T13:14:01Z","clock":{"mode":"real","scale":1},"db":"connected","evaluation_age_seconds":122.050856774,"gateway_errors":2,"last_evaluation":"2026-10-22T13:52:20Z","scheduler_id":"karaHermes-mde-7840hs","spawns_exec":0,"spawns_http":19,"stall_census":{"coding-hermes":{"family":"coding-hermes","stalls_24h":15,"terminal_ticks_24h":273,"stall_rate_24h":0.054945054945054944,"turn_deadline":"","exempt_from_turn_deadline":false},"dogfood":{"family":"dogfood","stalls_24h":1,"terminal_ticks_24h":4,"stall_rate_24h":0.25,"turn_deadline":"","exempt_from_turn_deadline":false},"duckbrain-sync":{"family":"duckbrain-sync","stalls_24h":20,"terminal_ticks_24h":83,"stall_rate_24h":0.24096385542168675,"turn_deadline":"0s","exempt_from_turn_deadline":true},"perf":{"family":"perf","stalls_24h":1,"terminal_ticks_24h":1,"stall_rate_24h":1,"turn_deadline":"","exempt_from_turn_deadline":false},"pm":{"family":"pm","stalls_24h":10,"terminal_ticks_24h":19,"stall_rate_24h":0.5263157894736842,"turn_deadline":"","exempt_from_turn_deadline":false},"qa":{"family":"qa","stalls_24h":6,"terminal_ticks_24h":12,"stall_rate_24h":0.5,"turn_deadline":"2h","exempt_from_turn_deadline":false},"releases":{"family":"releases","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false},"review":{"family":"review","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false}},"status":"ok","uptime":"40m14.186150511s","version":"v1.12.0-566-g8ec55a6f"}
-[08:54:22] drain cap=60s | daemon --tick-timeout=3h | mainpid=1581445
-[08:54:22] WARN: drain cap 60s < tick timeout 3h — an in-flight tick can outlive the cap, so this run is BOUND to abort (exit 3) rather than restart; raise DRAIN_MAX or wait for a quiet window
-[08:54:22] pre-flight: paused=? (no inherited pause)
-[08:54:22] pause attempt 1/2: X-Operator-Token (/tmp/sgap1756-live.XAWEZB/auth-bogus.env) -> HTTP 401 {"error":"invalid operator credential"}
-[08:54:22] pause attempt 2/2: Authorization: Bearer (/tmp/sgap1756-live.XAWEZB/env-bogus.env API_SERVER_KEY) -> HTTP 401 {"error":"invalid operator credential"}
-[08:54:22] !! NO WORKING CREDENTIAL: X-Operator-Token=401, Bearer(API_SERVER_KEY)=401
-[08:54:22]    both 401 = the daemon holds an operator token that matches neither source above
-[08:54:22]    nothing was paused by this script, so there is no state to restore — refusing to continue
-[08:54:22] === deploy ABORTED (no working credential) ===
-[08:54:22] === exit rc=1 ===
+[09:04:54] === deploy start (log: /tmp/sgap1756-live.3EYaX8/script-ac3.log) ===
+[09:04:54] HEAD: 75eaaa73 docs: pause/resume need the operator credential; document the drain-restart ladder. Addresses SCHED-GAP-1756.
+[09:04:54] live before: {"active_ticks":10,"build_sha":"8ec55a6f","build_time":"2026-10-22T13:14:01Z","clock":{"mode":"real","scale":1},"db":"connected","evaluation_age_seconds":20.300710288,"gateway_errors":5,"last_evaluation":"2026-10-22T14:04:34Z","scheduler_id":"karaHermes-mde-7840hs","spawns_exec":0,"spawns_http":21,"stall_census":{"coding-hermes":{"family":"coding-hermes","stalls_24h":13,"terminal_ticks_24h":272,"stall_rate_24h":0.04779411764705882,"turn_deadline":"","exempt_from_turn_deadline":false},"dogfood":{"family":"dogfood","stalls_24h":1,"terminal_ticks_24h":4,"stall_rate_24h":0.25,"turn_deadline":"","exempt_from_turn_deadline":false},"duckbrain-sync":{"family":"duckbrain-sync","stalls_24h":19,"terminal_ticks_24h":82,"stall_rate_24h":0.23170731707317074,"turn_deadline":"0s","exempt_from_turn_deadline":true},"perf":{"family":"perf","stalls_24h":1,"terminal_ticks_24h":1,"stall_rate_24h":1,"turn_deadline":"","exempt_from_turn_deadline":false},"pm":{"family":"pm","stalls_24h":10,"terminal_ticks_24h":19,"stall_rate_24h":0.5263157894736842,"turn_deadline":"","exempt_from_turn_deadline":false},"qa":{"family":"qa","stalls_24h":6,"terminal_ticks_24h":12,"stall_rate_24h":0.5,"turn_deadline":"2h","exempt_from_turn_deadline":false},"releases":{"family":"releases","stalls_24h":0,"terminal_ticks_24h":5,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false},"review":{"family":"review","stalls_24h":0,"terminal_ticks_24h":4,"stall_rate_24h":0,"turn_deadline":"","exempt_from_turn_deadline":false}},"status":"ok","uptime":"50m46.795936971s","version":"v1.12.0-566-g8ec55a6f"}
+[09:04:54] drain cap=60s | daemon --tick-timeout=3h | mainpid=1581445
+[09:04:54] WARN: drain cap 60s < tick timeout 3h — an in-flight tick can outlive the cap, so this run is BOUND to abort (exit 3) rather than restart; raise DRAIN_MAX or wait for a quiet window
+[09:04:55] pre-flight: paused=false (no inherited pause)
+[09:04:55] pause attempt 1/2: X-Operator-Token (/tmp/sgap1756-live.3EYaX8/auth-bogus.env) -> HTTP 401 {"error":"invalid operator credential"}
+[09:04:55] pause attempt 2/2: Authorization: Bearer (/tmp/sgap1756-live.3EYaX8/env-bogus.env API_SERVER_KEY) -> HTTP 401 {"error":"invalid operator credential"}
+[09:04:55] !! NO WORKING CREDENTIAL: X-Operator-Token=401, Bearer(API_SERVER_KEY)=401
+[09:04:55]    both 401 = the daemon holds an operator token that matches neither source above
+[09:04:55]    nothing was paused by this script, so there is no state to restore — refusing to continue
+[09:04:55] === deploy ABORTED (no working credential) ===
+[09:04:55] === exit rc=1 ===
 -- script exit rc=1 (1 expected)
 -- fleet after: {"paused":false,"active_ticks":10}
 

@@ -40,8 +40,10 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/scheduler-cred.sh
 source "$SCRIPT_DIR/lib/scheduler-cred.sh"
 
-status_field() {  # $1 = json key; GETs are open, so no credential is sent
-  status_json | python3 -c "import sys,json;print(json.load(sys.stdin).get('$1','?'))" 2>/dev/null || echo "?"
+status_field() {  # $1 = json key; GETs are open, so no credential is sent.
+  # python prints JSON booleans as True/False; normalise to lowercase so the shell
+  # comparisons below read the same strings the JSON carries (SCHED-GAP-1756).
+  status_json | python3 -c "import sys,json;print(str(json.load(sys.stdin).get('$1','?')).lower())" 2>/dev/null || echo "?"
 }
 
 # Safety net: if we paused and died before the restart (or the restart failed),

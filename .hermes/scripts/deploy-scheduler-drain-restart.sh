@@ -37,6 +37,7 @@ DRAIN_MAX=${DRAIN_MAX:-2700}
 AUTH_ENV=${SCHEDULER_AUTH_ENV:-$HOME/.hermes/scheduler-auth.env}
 ENV_FILE=${SCHEDULER_ENV_FILE:-$HOME/.hermes/.env}
 LOG=${DEPLOY_LOG:-/tmp/scheduler-deploy-$(date +%Y%m%d-%H%M%S).log}
+RESTART_CMD=${SCHEDULER_RESTART_CMD:-"systemctl --user restart coding-hermes-scheduler.service"}
 
 AUTH_MODE=none      # operator | bearer | none — the ONE resolved credential
 CRED_LABEL=""       # human-readable name of the resolved credential (never the value)
@@ -50,9 +51,12 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/scheduler-cred.sh
 source "$SCRIPT_DIR/lib/scheduler-cred.sh"
 
-field() {  # $1 = top-level key of a status JSON object
+field() {  # $1 = top-level key of a status JSON object ("?" when absent/unparseable)
+  # NB: `// "?"` is WRONG for booleans — jq's alternative operator treats `false` as empty,
+  # so `.paused // "?"` answers "?" for a RUNNING fleet and a post-resume check sees a bogus
+  # non-false value. Test for null explicitly.
   local out
-  out=$(jq -r --arg k "${1:-}" 'if type=="object" then (.[$k] // "?") else "?" end' 2>/dev/null)
+  out=$(jq -r --arg k "${1:-}" 'if type=="object" then (.[$k] | if . == null then "?" else . end) else "?" end' 2>/dev/null)
   printf '%s' "${out:-?}"
 }
 
@@ -162,10 +166,14 @@ main() {
   log "drained at $(date -Iseconds)"
 
   # 3. restart (ExecStartPre = schedulerd-build.sh -> make build from HEAD)
-  log "restarting coding-hermes-scheduler.service (rebuilds HEAD via ExecStartPre)"
-  systemctl --user restart coding-hermes-scheduler.service
+  # SCHEDULER_RESTART_CMD is a test seam: the credential/readback flow is exercised
+  # end-to-end against a fake daemon without restarting the live one.
+  log "restarting via: $RESTART_CMD (ExecStartPre rebuilds HEAD)"
+  local -a restart_argv
+  read -r -a restart_argv <<< "$RESTART_CMD"
+  "${restart_argv[@]}"
   local rc=$?
-  log "systemctl restart exit=$rc"
+  log "restart command exit=$rc"
 
   # 4. wait for health
   local ok=0 h i

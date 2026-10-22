@@ -81,6 +81,8 @@ run_case() {  # $1=label $2=port $3=auth_env $4=env_file
     echo "RESULT_LABEL=$CRED_LABEL"
     echo "RESULT_CRED_DIR_PERMS=$(stat -c '%a' "$CRED_DIR" 2>/dev/null)"
     echo "RESULT_CRED_FILE_PERMS=$(stat -c '%a' "$CRED_DIR"/*.curl 2>/dev/null | sort -u | tr '\n' ',' )"
+    # The paused flag must read back as a real boolean, not "?" (jq `//` treats false as empty).
+    echo "RESULT_FLAG_AFTER_PAUSE=$(status_json | field paused)"
     # Only a resolved credential is allowed to reach resume: a failure to resolve stops
     # the deploy (main exits 1) with nothing paused, exactly like the script.
     if [ "$PAUSED" = "1" ]; then
@@ -88,6 +90,7 @@ run_case() {  # $1=label $2=port $3=auth_env $4=env_file
     else
       echo "RESULT_RESUME=skipped"
     fi
+    echo "RESULT_FLAG_AFTER_RESUME=$(status_json | field paused)"
     echo "RESULT_RESUMED=$RESUMED"
     rm -rf "$CRED_DIR"
   ) > "$TMP/case-$label.log" 2>&1
@@ -116,6 +119,8 @@ if start_server operator_ok; then
   check "A RESUMED"            "$(getv A RESUMED)"        "1"
   check "A credential dir perms" "$(getv A CRED_DIR_PERMS)"  "700"
   check "A credential file perms" "$(getv A CRED_FILE_PERMS)" "600,"
+  check "A paused flag after pause"  "$(getv A FLAG_AFTER_PAUSE)"  "true"
+  check "A paused flag after resume" "$(getv A FLAG_AFTER_RESUME)" "false"
   read -r st_paused st_calls <<< "$(server_state "$PORT")"
   check "A server paused"      "$st_paused" "false"
   check "A total POSTs (1 pause + 1 resume, no probe noise)" "$st_calls" "2"
@@ -131,6 +136,7 @@ if start_server bearer_ok; then
   check "B PAUSED"             "$(getv B PAUSED)"         "1"
   check "B resume"             "$(getv B RESUME)"         "0"
   check "B RESUMED"            "$(getv B RESUMED)"        "1"
+  check "B paused flag after resume" "$(getv B FLAG_AFTER_RESUME)" "false"
   if grep -q 'pause attempt 1/2: X-Operator-Token' "$TMP/case-B.log" &&
      grep -q 'pause attempt 2/2: Authorization: Bearer' "$TMP/case-B.log"; then
     ok "B tried rung 1 then rung 2 in order"
@@ -186,6 +192,34 @@ if start_server resume_401; then
   else
     bad "E did not log the 401 resume as a failure"
   fi
+fi
+
+# --- case F: full main() end-to-end against the fake daemon ---------------
+echo "-- case F: full main() run (pause -> drain -> restart(no-op seam) -> resume)"
+if start_server operator_ok; then
+  (
+    export SCHEDULER_API="http://127.0.0.1:$PORT"
+    export SCHEDULER_AUTH_ENV="$TMP/auth-good.env"
+    export SCHEDULER_ENV_FILE="$TMP/env-good.env"
+    export SCHEDULER_RESTART_CMD="/bin/true"
+    export SCHEDULER_REPO="$TMP"
+    export DRAIN_MAX=60
+    export DEPLOY_LOG="$TMP/case-F.deploy.log"
+    "$SCRIPT"
+  ) > "$TMP/case-F.log" 2>&1
+  F_RC=$?
+  check "F exit code (whole deploy)" "$F_RC" "0"
+  if grep -q 'deploy done' "$TMP/case-F.log"; then ok "F reached 'deploy done'"; else bad "F did not finish the deploy"; fi
+  if grep -q 'readback after resume: paused=false' "$TMP/case-F.log"; then
+    ok "F post-resume readback saw paused=false (not '?')"
+  else
+    bad "F post-resume readback wrong: $(grep 'readback after resume' "$TMP/case-F.log" 2>/dev/null || echo MISSING)"
+  fi
+  check "F restart seam ran once"      "$(grep -c 'restart command exit=0' "$TMP/case-F.log")" "1"
+  check "F resolved at rung 1"         "$(grep -c 'credential RESOLVED: X-Operator-Token' "$TMP/case-F.log")" "1"
+  if grep -q 'RESUME FAILED' "$TMP/case-F.log"; then bad "F logged a resume failure"; else ok "F logged no resume failure"; fi
+  read -r st_paused st_calls <<< "$(server_state "$PORT")"
+  check "F server left unpaused" "$st_paused" "false"
 fi
 
 echo
