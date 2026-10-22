@@ -74,6 +74,7 @@ scrape_configs:
   # window), bound to that host's tailscale IP only. Reads state.db read-only at the
   # source — the monitoring host cannot mount that db.
   - job_name: hermes-cost
+    scrape_timeout: 30s
     metrics_path: /metrics
     static_configs:
       - targets: ["100.97.236.14:19109"]
