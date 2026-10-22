@@ -2454,26 +2454,124 @@ elif [ -f frontend/package.json ] && grep -qE '"dev"|"start"' frontend/package.j
     esac
   fi
 elif [ -f go.mod ] && ui_go_http_source; then
-  # QA-BUNKER-B21 (2026-10-19): broadened Go HTTP detection + port discovery.
-  # coding-hermes-scheduler serves an htmx dashboard on :9090 (documented in
-  # docs/reference/flags.md --listen 127.0.0.1:9090) but the old arm missed it:
-  # (a) grep only scanned *.go at repo root (scheduler HTTP is in cmd/schedulerd/),
-  # (b) :9090 was not in the default port list, (c) no doc-parsing for listen ports.
-  # Fix: recursive grep with --include, parse README/flags docs for --listen/--port,
-  # add 9090 to defaults, support BUNKER_QA_UI_PORTS override. N/A only when no
-  # listen flag exists at all.
-  UI_PORTS="\${BUNKER_QA_UI_PORTS:-}"
-  if [ -z "\$UI_PORTS" ]; then
-    UI_PORTS="3000 5173 8000 8080 8081 8766 8767 9000 9090"
+  # ── QA-CONSENSUS-30 (2026-10-22): PORT DISCOVERY IS CONFIG-FIRST ────────────
+  # The list below used to be "hardcoded defaults + ports scraped out of docs"
+  # and nothing else. On a repo whose documented DEFAULT listen port is written
+  # as host:port ('localhost:8090', '-p 8090:8090', '"8090"', a table row) that
+  # ERE matches NOTHING, while a docs-mentioned WORKAROUND port does — consensus
+  # documents 'CONSENSUS_PORT=8095 ./bin/consensus serve' for a shadowed 8090,
+  # so the probe list held 8095 (which the product ALSO binds, as its pprof debug
+  # listener) and not 8090 (the app). The cell swept the pprof mux, collected
+  # seven 404s, and graded "no 2xx text/html surface" — a false 'no UI' verdict
+  # for a product whose admin UI serves 200 text/html at /ui/* (QA-CONSENSUS-30;
+  # the same class QA-CONSENSUS-29 had to find by hand).
+  # Three rules now hold:
+  #   (1) the repo's OWN declared default listen port comes FIRST, resolved from
+  #       product config (Go flag defaults, config struct defaults, declared
+  #       default URLs, package.json, yaml/toml config) — never from prose;
+  #   (2) ports the repo declares for DEBUG/profiling listeners (pprof & co) are
+  #       never UI candidates, wherever they were found;
+  #   (3) the docs scan is a SUPPLEMENT appended after (1) and the historical
+  #       defaults, and when a candidate answers but serves no 2xx text/html the
+  #       sweep CONTINUES to the remaining candidates instead of concluding
+  #       "no UI" — a wrong port is not a product fact.
+  ui_valid_port() { # 0 = plausible TCP listen port (unprivileged..max)
+    case "\$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ "\$1" -ge 1024 ] && [ "\$1" -le 65535 ]
+  }
+  ui_last_port_on_line() { # stdin → last plausible 4-5 digit number per line
+    awk '{
+      last = ""
+      while (match(\$0, /[0-9][0-9][0-9][0-9]?/)) {
+        n = substr(\$0, RSTART, RLENGTH); n += 0
+        if (n >= 1024 && n <= 65535) last = n
+        \$0 = substr(\$0, RSTART + RLENGTH)
+      }
+      if (last != "") print last
+    }'
+  }
+  ui_scan_excl() {
+    printf '%s\\n' --exclude-dir=.git --exclude-dir=vendor --exclude-dir=node_modules \\
+      --exclude-dir=testdata --exclude-dir=wt --exclude-dir=.vfs --exclude-dir=.venv \\
+      --exclude-dir=dist --exclude-dir=build --exclude-dir=.coding-hermes --exclude-dir=.github
+  }
+  ui_declared_ports() { # the repo's OWN default listen port(s) — explicit declarations
+    _excl=\$(ui_scan_excl)
+    # A · listen/port FLAG default in Go source: flag.Int("port", 8090, ...)
+    # shellcheck disable=SC2086
+    grep -rnE '(Int|Int64|Uint|Uint64)\\(\\s*"(port|listen|addr|address)"' . --include='*.go' \$_excl 2>/dev/null \\
+      | grep -v '_test\\.go' | ui_last_port_on_line
+    # B · config struct default: Port: 8090 (config sources only)
+    # shellcheck disable=SC2086
+    grep -rhoE '^[[:space:]]*Port[[:space:]]*:[[:space:]]*[0-9]{3,5}' \\
+      . --include='*config*.go' --include='config.go' \$_excl 2>/dev/null | grep -oE '[0-9]{3,5}'
+    # C · DECLARED default URL in non-test Go: defaultServerURL = "http://localhost:8090"
+    # shellcheck disable=SC2086
+    grep -rhE '(default|Default)[^;]{0,60}(localhost|127\\.0\\.0\\.1):[0-9]{3,5}' \\
+      . --include='*.go' \$_excl 2>/dev/null | grep -v '_test\\.go' \\
+      | grep -oE '(localhost|127\\.0\\.0\\.1):[0-9]{3,5}' | grep -oE '[0-9]+\$'
+  }
+  ui_declared_ports_fallback() { # weaker, used ONLY when A..C name nothing
+    _excl=\$(ui_scan_excl)
+    # D · any loopback listen URL in non-test Go
+    # shellcheck disable=SC2086
+    grep -rhoE '(localhost|127\\.0\\.0\\.1):[0-9]{3,5}' . --include='*.go' \$_excl 2>/dev/null \\
+      | grep -oE '[0-9]+\$' | sort -un | head -5
+    # E · yaml/toml config default: port: 8090
+    # shellcheck disable=SC2086
+    grep -rhoE '^[[:space:]]*(port|listen|addr|address)[[:space:]]*[:=][[:space:]]*"?[0-9]{3,5}' \\
+      . --include='*.yaml' --include='*.yml' --include='*.toml' \$_excl 2>/dev/null | grep -oE '[0-9]{3,5}'
+  }
+  ui_debug_ports() { # ports the repo declares for DEBUG/profiling listeners — never the UI
+    _excl=\$(ui_scan_excl)
+    # shellcheck disable=SC2086
+    grep -rhiE '(pprof|profil|debug_listen|debug_addr)' . --include='*.go' \$_excl 2>/dev/null \\
+      | grep -oE '(localhost|127\\.0\\.0\\.1):[0-9]{3,5}' | grep -oE '[0-9]+\$' | sort -un | head -10
+  }
+  ui_add_ports() { # append ports not already listed (order preserved = priority)
+    for _p in \$1; do
+      ui_valid_port "\$_p" || continue
+      case " \$UI_PORTS " in *" \$_p "*) ;; *) UI_PORTS="\$UI_PORTS \$_p" ;; esac
+    done
+  }
+  # Debug/profiling listeners are resolved FIRST so a stale pprof/debug port can
+  # never enter the declared-default set (consensus: a Go comment still said
+  # 'pprof_addr (default 127.0.0.1:8095)' after the listener moved to +10000).
+  UI_DEBUG=\$(ui_debug_ports 2>/dev/null | tr '\\n' ' ')
+  UI_DECLARED_RAW=\$(ui_declared_ports 2>/dev/null | awk '!seen[\$0]++' | tr '\\n' ' ')
+  if [ -z "\$(echo \$UI_DECLARED_RAW)" ]; then
+    UI_DECLARED_RAW=\$(ui_declared_ports_fallback 2>/dev/null | awk '!seen[\$0]++' | tr '\\n' ' ')
+  fi
+  UI_DECLARED=""
+  for _p in \$UI_DECLARED_RAW; do
+    case " \$UI_DEBUG " in *" \$_p "*) continue ;; esac
+    UI_DECLARED="\$UI_DECLARED \$_p"
+  done
+  UI_DECLARED=\$(echo \$UI_DECLARED)
+  UI_PORTS=""
+  UI_PORTS_SRC="config-default + historical defaults + docs supplement"
+  if [ -n "\${BUNKER_QA_UI_PORTS:-}" ]; then
+    UI_PORTS="\${BUNKER_QA_UI_PORTS}"
+    UI_PORTS_SRC="explicit BUNKER_QA_UI_PORTS override"
+  else
+    # (1) the repo's own declared default port(s) — HIGHEST priority
+    for _p in \$UI_DECLARED; do
+      case " \$UI_DEBUG " in *" \$_p "*) continue ;; esac
+      ui_add_ports "\$_p"
+    done
+    # (2) the historical default list (unchanged — a supplement below (1))
+    ui_add_ports "3000 5173 8000 8080 8081 8766 8767 9000 9090"
+    # (3) docs scan — SUPPLEMENT ONLY, appended after (1)+(2), never displacing
     for doc in README.md docs/reference/flags.md docs/flags.md docs/reference/cli.md; do
       if [ -f "\$doc" ]; then
         for p in \$(grep -oE '(--listen|--port|--addr|listen|port)[= :]+[^,;"]*' "\$doc" 2>/dev/null | grep -oE '[0-9]{4,5}' | sort -u); do
-          UI_PORTS="\$UI_PORTS \$p"
+          case " \$UI_DEBUG " in *" \$p "*) continue ;; esac
+          ui_add_ports "\$p"
         done
       fi
     done
-    UI_PORTS=\$(echo "\$UI_PORTS" | tr ' ' '\n' | sort -un | tr '\n' ' ')
   fi
+  UI_PORTS=\$(echo \$UI_PORTS)
   UI_BINS="\${BIN:-go run .}"
   case "\${BIN:-}" in
     "go run ./cmd/"*)
@@ -2501,10 +2599,12 @@ elif [ -f go.mod ] && ui_go_http_source; then
   # that stops at /docs — or at a 404 / — can still miss the largest surface it
   # is here to watch, and a cell reading only "responded, port 8767" leaves the
   # finding unreadable six cycles later.
-  # Listening detection is now SEPARATE from HTML detection: any non-000 status
+  # QA-CONSENSUS-30: '/ui/' is probed too — an '/ui/*' mount answers 301 on
+  # '/ui' (consensus) so the trailing-slash form is what proves the surface.
+  # Listening detection is SEPARATE from HTML detection: any non-000 status
   # proves the port answers (crier's / is 404), so a server whose landing page is
   # JSON or 404 is awaited properly instead of being treated as dead.
-  UI_PATHS="\${BUNKER_QA_UI_PATHS:-/chat /docs / /ui /dashboard /app /index.html}"
+  UI_PATHS="\${BUNKER_QA_UI_PATHS:-/ui/ /ui /chat /docs / /dashboard /app /index.html /health}"
   UI_DEGRADE_NOTE=""
   case "\${UI_HTTP_SCAN:-}" in
     found-degraded) UI_DEGRADE_NOTE=" (HARNESS-DEGRADED: the detection ERE was rejected by grep — the arm ran on fixed-string terms)" ;;
@@ -2513,49 +2613,68 @@ elif [ -f go.mod ] && ui_go_http_source; then
   for UI_B in "\${UI_LIST[@]}"; do
     ( setsid timeout 45 \$UI_B ) </dev/null >\$LOGD/ui-probe.log 2>&1 &
     UIPID=\$!
-    UI_SURFACES=""; UI_OTHER=""; UI_LISTEN=""
-    # 1 · wait for a listener on a port nobody else held before we started
+    UI_SURFACES=""; UI_OTHER=""; UI_LISTEN=""; UI_MISS=""; UI_ANSWERS=""
+    # 1 · wait for the first answer on a port nobody else held before we started
     for i in \$(seq 1 20); do
       kill -0 \$UIPID 2>/dev/null || break
       for p in \$UI_PORTS; do
         case "\$UI_OCCUPIED" in *" \$p "*) continue ;; esac
+        case " \$UI_ANSWERS " in *" \$p "*) continue ;; esac
         UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$p/" 2>/dev/null)
         [ "\$UI_C" = "000" ] && UI_C=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$p/chat" 2>/dev/null)
-        case "\$UI_C" in 000|"") : ;; *) UI_LISTEN=\$p; break ;; esac
+        case "\$UI_C" in 000|"") : ;; *) UI_ANSWERS="\$UI_ANSWERS \$p" ;; esac
       done
-      [ -n "\$UI_LISTEN" ] && break
+      [ -n "\$UI_ANSWERS" ] && break
       sleep 1
     done
-    # 2 · sweep every documented path on the port that answered
-    if [ -n "\$UI_LISTEN" ]; then
-      UI_HIT=\$UI_LISTEN
+    # 2 · sweep every documented path on EVERY answering candidate, in priority
+    #     order. A candidate that answers but serves no 2xx text/html is "not
+    #     this repo's UI port" — keep scanning the remaining candidates instead
+    #     of concluding there is no UI (the pprof-mux false verdict).
+    for p in \$UI_ANSWERS; do
+      UI_SURFACES=""; UI_OTHER=""
       for path in \$UI_PATHS; do
-        UI_R=\$(curl -s -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' --max-time 3 "http://127.0.0.1:\$UI_LISTEN\$path" 2>/dev/null)
+        UI_R=\$(curl -s -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' --max-time 3 "http://127.0.0.1:\$p\$path" 2>/dev/null)
         IFS='|' read -r UI_C UI_CT UI_SZ <<< "\$UI_R"
         case "\$UI_C" in
           2??) case "\$UI_CT" in
-                 text/html*) UI_SURFACES="\$UI_SURFACES http://127.0.0.1:\$UI_LISTEN\$path \$UI_C \$UI_CT \${UI_SZ}B" ;;
+                 text/html*) UI_SURFACES="\$UI_SURFACES http://127.0.0.1:\$p\$path \$UI_C \$UI_CT \${UI_SZ}B" ;;
                  *) UI_OTHER="\$UI_OTHER \$path=[\$UI_C \$UI_CT \${UI_SZ}B]" ;;
                esac ;;
           000|"") : ;;
-          *) UI_OTHER="\$UI_OTHER \$path=[\$UI_C \$UI_CT]" ;;
+          *) UI_OTHER="\$UI_OTHER \$path=[\$UI_C \${UI_CT:-unknown}]" ;;
         esac
       done
-    fi
-    if [ -n "\$UI_SURFACES" ] || [ -n "\$UI_OTHER" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
+      if [ -n "\$UI_SURFACES" ]; then UI_LISTEN="\$p"; break; fi
+      UI_MISS="\$UI_MISS :\$p{\$(printf '%s' "\$UI_OTHER" | sed 's/^ *//' | cut -c1-200)}"
+    done
+    if [ -n "\$UI_SURFACES" ] || [ -n "\$UI_MISS" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
   done
+  # Did any DECLARED default port actually answer? (drives wrong-port vs no-surface)
+  UI_DECL_HIT=""
+  for p in \$UI_DECLARED; do case " \$UI_ANSWERS " in *" \$p "*) UI_DECL_HIT="\$UI_DECL_HIT \$p" ;; esac; done
+  UI_DECL_IN_LIST=""
+  for p in \$UI_DECLARED; do case " \$UI_PORTS " in *" \$p "*) UI_DECL_IN_LIST="\$UI_DECL_IN_LIST \$p" ;; esac; done
   if [ -n "\$UI_SURFACES" ]; then
-    cell ui-probe OK "UI serves text/html:\${UI_SURFACES} (start: \$UI_B)\${UI_OTHER:+, other paths:\$UI_OTHER}\${UI_DEGRADE_NOTE}"
-  elif [ -n "\$UI_OTHER" ]; then
-    cell ui-probe INFO "go-native server answers on :\$UI_LISTEN but NO 2xx text/html surface on any probed path [\$UI_PATHS] — exact answers:\$UI_OTHER (start: \$UI_B)\${UI_DEGRADE_NOTE}"
+    cell ui-probe OK "UI serves text/html:\${UI_SURFACES} (port \$UI_LISTEN; probe list [\$UI_PORTS] from \${UI_PORTS_SRC}; start: \$UI_B)\${UI_OTHER:+, other paths:\$UI_OTHER}\${UI_DEGRADE_NOTE}"
+  elif [ -n "\$UI_MISS" ]; then
+    if [ -n "\$UI_DECLARED" ] && [ -z "\$UI_DECL_HIT" ]; then
+      cell ui-probe INFO "WRONG-PORT, not a no-UI verdict: port(s)\$UI_ANSWERS answered but serve NO 2xx text/html on [\$UI_PATHS], while the repo's OWN declared default port(s) \${UI_DECLARED} never answered — the probe list ([\$UI_PORTS] from \${UI_PORTS_SRC}) does not name the port this repo serves on. answers:\${UI_MISS} (start: \$UI_B)\${UI_DEGRADE_NOTE}"
+    else
+      cell ui-probe INFO "go-native server answers on\$UI_ANSWERS but NO 2xx text/html surface on any probed path [\$UI_PATHS] — exact answers:\${UI_MISS} (declared default port(s):\${UI_DECLARED:-none}; start: \$UI_B)\${UI_DEGRADE_NOTE}"
+    fi
   elif ! kill -0 \$UIPID 2>/dev/null; then
-    cell ui-probe INFO "go-native start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DEGRADE_NOTE}"
+    cell ui-probe INFO "go-native start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DECLARED:+ (repo declares default port(s) \${UI_DECLARED})}\${UI_DEGRADE_NOTE}"
   else
-    cell ui-probe INFO "go-native server ran 20s, no probed port answered [\$UI_PORTS] — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DEGRADE_NOTE}"
+    if [ -n "\$UI_DECLARED" ] && [ -z "\$UI_DECL_IN_LIST" ]; then
+      cell ui-probe INFO "no probed port answered [\$UI_PORTS] (source: \${UI_PORTS_SRC}); the repo's OWN declared default port(s) \${UI_DECLARED} are NOT in that list — PROBE-LIST MISMATCH (wrong port), NOT a no-UI verdict: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DEGRADE_NOTE}"
+    else
+      cell ui-probe INFO "go-native server ran 20s, no probed port answered [\$UI_PORTS]\${UI_DECL_IN_LIST:+ (declared default port(s)\${UI_DECL_IN_LIST} were in the list and did not answer)} — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)\${UI_DEGRADE_NOTE}"
+    fi
   fi
   kill -- -\$UIPID 2>/dev/null; sleep 1; kill -9 -- -\$UIPID 2>/dev/null
   kill \$UIPID 2>/dev/null; sleep 1; kill -9 \$UIPID 2>/dev/null
-  for p in \$UI_LISTEN; do fuser -k \$p/tcp >/dev/null 2>&1; done
+  for p in \$UI_ANSWERS; do fuser -k \$p/tcp >/dev/null 2>&1; done
   true
 else
   # QA-CRIER-19-R2 · AC-3: N/A stays for a repo with NO HTML route, but it NAMES
