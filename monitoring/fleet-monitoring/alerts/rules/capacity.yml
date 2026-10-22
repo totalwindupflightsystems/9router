@@ -112,6 +112,7 @@ groups:
             The scheduled fleet inventory sweep (MON-GAP-007) has not published a fresh
             inventory for over a week. Drift (new containers, dead agents, unreachable
             hosts) is no longer being observed.
+          runbook: docs/runbook.md#inventory-sweep-is-stale
 
       - alert: InventoryHostsNotReporting
         # reachable host whose agent does not report to Prometheus
