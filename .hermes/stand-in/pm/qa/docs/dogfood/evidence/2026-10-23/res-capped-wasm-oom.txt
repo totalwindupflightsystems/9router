@@ -1,0 +1,22 @@
+# capped chaos-resource leg: ( ulimit -v 3145728; ... ) bunker-qa.sh:2913/2927
+PARENT_CAP=unlimited
+SUBSHELL_CAP=3145728
+CAP_EFFECTIVE=3145728 CAP_REQUESTED=3145728
+
+# grep -n '^--- FAIL' res.log
+1491:--- FAIL: TestChatInFlightTruth (0.13s)
+1534:--- FAIL: TestChatLateJoinTruth (0.11s)
+1590:--- FAIL: TestChatLifecycleTruth (0.19s)
+1647:--- FAIL: TestChatRefusalTruth (0.15s)
+1794:--- FAIL: TestChatClientNoParallelAuthOrExecution (0.00s)
+
+# Wasm OOM occurrences:
+1529:        RangeError: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance
+1569:        	            	RangeError: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance
+1625:        	            	RangeError: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance
+1699:        	            	RangeError: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance
+# count:
+4
+
+# proof the arms had passed before the node crash (TestChatInFlightTruth)
+1524:        RESULT 16/16 passed; 0 failed (stub HTTP; shipped client functions)

@@ -1,0 +1,12 @@
+# uncapped ci-pass native leg (crier @ fb6cbfc6, agent 634852c9 @ bunker-las-02)
+# grep -n '^--- FAIL' native.log
+1491:--- FAIL: TestChatLateJoinTruth (0.07s)
+1648:--- FAIL: TestChatClientNoParallelAuthOrExecution (0.00s)
+
+# Wasm OOM count:
+0
+
+# tail
+ok  	github.com/crier-dev/crier/internal/trust	0.013s
+ok  	github.com/crier-dev/crier/internal/webhook	16.630s
+FAIL

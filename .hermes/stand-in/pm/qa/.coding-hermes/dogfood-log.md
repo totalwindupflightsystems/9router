@@ -349,3 +349,37 @@
   permissions untouched.
 - **Residue:** detached worktree `/tmp/crier-head-JsBb/src` (read-only reproduction of HEAD, safe to
   delete), evidence + harvest under `/tmp/qa-audit-df-20261023-1343/`.
+
+## 2026-10-23 (13:43Z tick) — CORROBORATION + EVIDENCE PACK for QA-HARNESS-CAP-1 (third delivery; the two entries above own the collect close-out)
+
+- **Why this entry is short:** the two entries above already close the collect leg and grade all
+  19 cells. This delivery therefore re-runs nothing and adds only (a) an independent second
+  `collect` measurement, (b) the evidence pack that makes `QA-HARNESS-CAP-1` reviewable from the
+  repo instead of from `/tmp`, and (c) an attribution disclosure for the commit that carried it.
+- **Independent collect (same evidence file, concurrent with the delivery above):**
+  `BUNKER_QA_SERVER=bunker-las-02 BUNKER_QA_SSH_PORT=22 bunker-qa.sh collect --evidence
+  /tmp/bunker-qa-evidence-20261023T140019Z-1181340.jsonl` → `COLLECTED agent=634852c9 rows=19`,
+  **WALL=243.79 s** (USER 0.12 s / SYS 0.15 s). Two `collect` processes ran on that one path at
+  once; both landed `collect OK` rows, the merge produced **0 duplicate `(cell,status,detail)`
+  groups** across the 24 merged rows, and the later one printed `destroy reported failure but the
+  agent is GONE from the server list` — so a concurrent collect is survivable, and the walls
+  (243.79 s here, 337.64 s above, vs the ~90 s of a lone collect) are contention, not product
+  numbers. Agent `634852c9` verified absent from `bunker list --server bunker-las-02` afterwards.
+- **The `QA-HARNESS-CAP-1` evidence, now IN the repo:** `docs/dogfood/evidence/2026-10-23/` holds
+  `crier-battery-evidence.jsonl` (the 24 merged rows), `native-uncapped-failures.txt` (the uncapped
+  ci-pass leg: 2 failures, **0** Wasm-OOM lines) and `res-capped-wasm-oom.txt` (the capped
+  `chaos-resource` leg: `SUBSHELL_CAP=3145728`, 5 failures, **4** `WebAssembly.instantiate(): Out
+  of memory` lines, and the `RESULT 16/16 passed` line that precedes the node crash). The
+  discrimination is leg-vs-leg on one repo: **2 uncapped vs 5 capped**, with a dev-host uncapped run
+  of all five tests failing only the same two — so the three extras are the cap, not the product.
+- **Attribution disclosure:** `QA-HARNESS-CAP-1`, event **49**, the `res.log`-is-capped and
+  concurrent-collect usage-skill pitfalls, and the cap sections in the integration report and the
+  diagnostics trail were written by THIS delivery but were committed by commit `926a32ca0e`
+  (the other delivery's follow-up commit swept the working tree). Nothing was lost and nothing was
+  filed twice: `QA-CRIER-1` (P1, crier's red `cmd/server` suite) is that delivery's row, not a
+  duplicate of mine, and crier's own `INT-CRIER-015` / `DF-CRIER-483` remain the fix owners.
+- **Final census:** five ids from this tick on the board (`QA-HARNESS-PORT-1`,
+  `QA-HARNESS-LEAK-003`, `QA-HARNESS-STATUS-1`, `DOC-009`, `QA-HARNESS-CAP-1`) plus `QA-CRIER-1`,
+  each present exactly once in the committed blob; `boardctl validate -C .` → **RESULT: OK,
+  16 warnings**, the pre-tick baseline (0 new). Foreman not woken; repo visibility and permissions
+  untouched.
