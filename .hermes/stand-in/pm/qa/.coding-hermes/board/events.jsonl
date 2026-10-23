@@ -58,3 +58,7 @@
 {"id": 54, "event_type": "task_created", "task_id": "DOC-013", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T20:55:59Z", "detail": "{\"id\":\"DOC-013\",\"status\":\"pending\"}"}
 {"id": 55, "event_type": "task_created", "task_id": "DOC-014", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T20:55:59Z", "detail": "{\"id\":\"DOC-014\",\"status\":\"pending\"}"}
 {"id": 56, "event_type": "task_updated", "task_id": "DOC-004", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T20:56:05Z", "detail": "{\"title\":\"P4 — document the full BUNKER_QA_* env-var surface (29 vars) in its docs\"}"}
+{"id": 57, "event_type": "task_created", "task_id": "README-002", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T21:13:30Z", "detail": "{\"id\":\"README-002\",\"status\":\"pending\"}"}
+{"id": 58, "event_type": "task_created", "task_id": "README-003", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T21:13:30Z", "detail": "{\"id\":\"README-003\",\"status\":\"pending\"}"}
+{"id": 59, "event_type": "task_created", "task_id": "README-004", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T21:13:30Z", "detail": "{\"id\":\"README-004\",\"status\":\"pending\"}"}
+{"id": 60, "event_type": "task_updated", "task_id": "README-001", "actor": "foreman", "tick_number": null, "timestamp": "2026-10-23T21:13:53Z", "detail": "{\"status\":\"pending\"}"}
