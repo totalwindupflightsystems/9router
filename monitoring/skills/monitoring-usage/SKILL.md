@@ -138,3 +138,35 @@ curl -s -X POST -H 'Content-Type: application/json' -d '{"matchers":[]}' \
 docker logs --tail 5 mon-pyroscope                 # hourly "head successfully written to block"
 # Grafana: /api/datasources/uid/pyroscope/health -> "Data source is working"
 ```
+
+
+## Drain (MON-GAP-032 contract, verified 2026-10-23 run 15)
+
+The drain is the operator's main verb. The deployed copy lives at
+`~/.hermes/scripts/drain-board-rows.sh` (md5 53657b05…); repo copies exist only as
+`monitoring/fixes/mon-gap-{030,032}/drain-board-rows.sh` (see MON-DOGFOOD-048 for the
+propagation gap).
+
+```sh
+MON_REMOTE=fleet-monitor bash ~/.hermes/scripts/drain-board-rows.sh      # real
+DRY=1 MON_REMOTE=fleet-monitor bash ~/.hermes/scripts/drain-board-rows.sh # exact plan only
+```
+
+Contract as verified (evidence: docs/dogfood/2026-10-23-run15-*):
+- repeat drain: appended=0 skipped=856 (idempotent, cumulative spool re-read is safe);
+- resolved events go to events.jsonl (NOT tasks.jsonl); one copy per id across EITHER file;
+- two concurrent drains: the second exits rc=3 `another drain already holds` untouched;
+- a re-fired alert re-appears only when ALL of: board row terminal, non-resolved spool line
+  exists, alert firing in prometheus right now, id dated TODAY — suppressions print
+  `olddate-suppressed=` / `stale-suppressed=` counts (93+2 typical on the live spool);
+- scratch-only testing hooks: `BOARD_ROOT SPOOL APPEND DRY ALERTS_FILE PROM_LOCAL` —
+  stub rsync on PATH with `FIXTURE_SPOOL_DIR`; battery at
+  monitoring/fixes/mon-gap-032/test-drain-resolved-dedupe.sh (13 asserts, offline).
+- cost: ~9s wall / 2.5s CPU per run on the 856-line spool (was 56-68s before MON-GAP-032);
+  steady-state timer runs read ~2s in the journal. Nothing user-noticeable.
+- pitfalls: NEVER clear the remote spool before checking the drain's landed rows; the
+  scratch refire experiment must set `ALERTS_FILE` to a REAl /api/v1/alerts snapshot,
+  or every refire suppresses with `unverified-suppressed` (fail-closed liveness).
+- known harness trap (MON-DOGFOOD-050): bunker-qa.sh BUNKER_QA_SUBDIR does nothing when
+  the dispatched dir IS the git root — drive install legs via git-archive
+  clone-equivalent extraction instead, and discard battery cells that graded the parent.

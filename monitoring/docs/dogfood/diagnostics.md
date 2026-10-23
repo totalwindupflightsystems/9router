@@ -196,3 +196,40 @@ working surface is dead. The version-independent checks that DID work: `GET /rea
 `head successfully written to block` lines. Lesson: when a documented probe 404s on a
 service that has a `/buildinfo` or `/status` route, read the version first and prefer the
 probe the deployed version actually serves (MON-DOGFOOD-045).
+
+## Run 15 (2026-10-23): the MON-GAP-032-fixed drain — how it works, and where the fix lives
+
+The drain that ships in `~/.hermes/scripts/drain-board-rows.sh` (md5 53657b05) is the
+product of two hardening rounds the fleet's own alerts drove: MON-GAP-030 (refire rule: a
+closed row re-opens only when the alert fires RIGHT NOW, the spool carries a non-resolved
+line for it, and the id is dated today — fail-closed when liveness is unknown) and
+MON-GAP-032 (a) alert-resolved rows route to events.jsonl with dual-file dedupe (the legacy
+tasks.jsonl history still suppresses, so a fixed drain never "backfills" 89 old rows), (b)
+flock serialization (`$TMPDIR/drain-board-rows.<board_root>.lock`, rc=3 when held), (c) a
+plan-emit pass that killed the 2-python3+grep-per-line hot path (56-68s -> ~9s on the
+856-line live spool; strace shows ~2 file opens per spool line remain but each spawn is now
+a cheap classify/sed, ~875 process starts total).
+
+The right way to test any change to it WITHOUT touching prod state:
+1. `bash monitoring/fixes/mon-gap-032/test-drain-resolved-dedupe.sh <candidate>` — 13
+   offline asserts (fixture spool + stub rsync + stub appender).
+2. Scratch-twin live drill: copy the real spool + a real /api/v1/alerts snapshot
+   (ALERTS_FILE preserves the live_ok liveness), point BOARD_ROOT at a copied board,
+   APPEND at a scratch appender, run the drain twice, assert appended=1->0 and one copy
+   per id. The stub-rsync trap that bit run 15: rsync's LAST argv is the destination;
+   copying "the source root" by accident slurps /snap and /lost+found — copy the named
+   spool FILE, not the directory.
+3. Only then run the live read/append (appended=0 expected on a quiet board).
+
+Provenance of the DEPLOYED copy vs the repo: the deployed script and the fix-archive copy
+are byte-identical, but no repo tracks the deployed path — runbook.md tells a fresh
+consumer to run ./scripts/drain-board-rows.sh, which does not resolve in a clone
+(MON-DOGFOOD-048). Do not "re-fix" the ops-side copy: it is the live one; the repo should
+adopt ITS bytes.
+
+Related provenance from the same run: the alert-router image on the live host contains the
+MON-DOGFOOD-046 fix (docker exec grep is_target_absent_from_targets = 2) even though its
+image Created stamp reads 2026-10-17 — the container was built/rebuilt from a context the
+repo's tree (md5 a6cf7c25 = container md5, host tree copy IS stale at 46b22e5) does not
+hold. When re-proving router fixes, exec INTO the container; a md5 of the host tree copy
+is not the running code.

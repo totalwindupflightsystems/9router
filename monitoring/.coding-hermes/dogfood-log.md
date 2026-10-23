@@ -179,3 +179,32 @@
 - disclosure: one time-boxed prod mutation (a 120s silence on the known-noise chronic alert), deleted in-run and verified cleared; one expired silence record remains (suppresses nothing)
 - foreman woken: no (read-only dogfood lane)
 - verdict: SHIPPABLE for the silencing promise; pyroscope moves from unknown to known-value with the discoverability defect filed
+
+
+## 2026-10-23 (run 15) | monitoring | SHIPPABLE drain contract (MON-GAP-032 fix driven as a user) + PROMISING-BUT-ROUGH install (Dockerfile recurrence)
+
+- angle: FIRST drive of the drain contract the MON-GAP-032 fix changed (resolved-event routing, flock, refire rule), plus clone-equivalent reinstall re-proof after the release-row findings (RELEASE-MON-009/010). Runs 1-14 left this slice untouched: they measured the OLD drain's cost and routed around its defects, never verified the fix as a USER would.
+- promise: "a repeated drain appends nothing; an alert-resolved event reaches events.jsonl (not tasks.jsonl) exactly once; a re-fired alert re-opens only today's closed row; two drains racing serialize; `./scripts/drain-board-rows.sh` is what an operator runs."
+- reality (live prod, all measured):
+  - idempotence: 3 consecutive live drains appended=0 skipped=856 (once appended=1/skipped=855 when the timer had not yet drained the newest row — correct).
+  - LIVE end-to-end cycle on prod: HighLoadPerCore @ bunker-mvp fired (activeAt 04:19:08Z); row appended to tasks.jsonl by the 00:00 local timer; alert resolved endsAt 05:00:08Z; -RESOLVED event appended to EVENTS.jsonL by the 00:15 local timer (MON-DOGFOOD-041 routing verified again); repeat drains replay nothing; 1 copy of the id in each file.
+  - flock: two racing drains — the second refused rc=3 with "another drain already holds" and appended nothing; the first completed normally.
+  - refire rule: every live run plan shows olddate-suppressed=93 stale-suppressed=2 (real historical spool replay, correctly silenced); scratch twin run (board copy + ED74A491-20261023 flipped terminal + PROM snapshot carrying a genuinely firing HighLoadPerCore) — run A appended=1 refire=1, run B appended=0: one row per id, exactly one.
+  - scratch fixture battery: 13/13 PASS (fix's own test).
+- reality (install leg, clone-equivalent tree via git archive HEAD -> ~/scratch-mon-df15):
+  - make env PASS; check-env PASS (rc=0, placeholders are all "dev default — REPLACE" non-secrets); make config PASS (compose OK + LINT: PASS); make up FAILS rc=17 "failed to read dockerfile: open Dockerfile: no such file or directory" — docker compose build alert-router fails alone (0.55s) on the same tree: stack/alert-router/ has NO Dockerfile (tracked or untracked). RECURRENCE of MON-DOGFOOD-039 -> filed MON-DOGFOOD-039-R2 (the prior close fixed the cost pipeline, not this; README:82's "Dockerfile, which is committed" is FALSE at HEAD while the file exists on the live host and in the 0f19a773d context).
+  - bunker-qa.sh harness defect found while driving the leg: BUNKER_QA_SUBDIR is applied ONLY inside the `if [ ! -d "$repo/.git" ]` branch, so dispatching the git ROOT (/home/kara) with SUBDIR=monitoring/fleet-monitoring joined NOTHING, graded the whole home meta-repo as project=kara, and detect_cmds baked `pnpm install` (an UNTRACKED scratch pnpm-lock.yaml at the meta-repo root) into the install verb -> fresh-install INFO/ci-pass FAIL/upgrade FAIL cells about the wrong product. Filed MON-DOGFOOD-050. Real install behavior below was obtained from the clone-equivalent tree ON THIS BOX instead, disclosed here.
+  - the fresh-install battery is therefore UNPROVEN for `make up` on a clone-equivalent tree, and the clone run IS the closest honest read: rc=17 on the missing Dockerfile.
+- repo surface state measured:
+  - the fixed drain EXISTS only ops-side: ~/.hermes/scripts/drain-board-rows.sh md5 53657b05 == monitoring/fixes/mon-gap-032/drain-board-rows.sh; `git ls-files monitoring | grep drain` shows ONLY the fixes/ copies; no repo tracks the deployed file; fleet-monitoring/docs/runbook.md:129 tells a user ./scripts/drain-board-rows.sh — which resolves to NOTHING in a clone (worse than the defective copy RELEASE-MON-010 described). Filed MON-DOGFOOD-048.
+- perf (Step 2b, run against the live spool 856 lines):
+  - wall 8.81-9.41s (warm x3 + cold); user 0.88-1.02s; sys 1.56-1.62s; RSS 23MB. Timer journal now shows ~2s/run end-to-end on steady state.
+  - vs PRE-fix (run 12, PERF-1): 56-68s wall, 38-50s CPU -> ~6x wall, ~16x CPU. Stage split: classify ~2.3s, apply ~4.7s, rsync fetch ~1.9s; the seconds live in waits (RTT/fsync), nothing a 15-min operator feels.
+  - strace: 16,864 openat / 1,740 procs; 865 board/jsonl + 864 spool opens = ~2 file opens per spool line remain but each spawn is now a cheap sed/classify, not python3+grep per line.
+  - VERDICT: PERF-1 premise FIXED on the operator box -> CLOSED with event 164 (no new PERF row).
+- rows: MON-DOGFOOD-048 (P2 propagation gap), MON-DOGFOOD-039-R2 (P1 recurrence), MON-DOGFOOD-050 (P2 fleet-harness), events 164/165/166 (PERF-1 close, MON-GAP-032 verified, RELEASE-MON-010 evidence)
+- pre-existing board damage NOT repaired by this lane: 14 duplicate-id validate errors (10 dup id classes, every duplicate created_at <= 02:43:38Z — ALL pre-deploy; zero post-deploy); owned by MON-GAP-033/MON-DOGFOOD-047's lane.
+- install: EXECUTED on scratch (clone-equivalent) -> make up rc=17 (missing Dockerfile); bunker battery leg EXECUTED but graded the wrong product due to MON-DOGFOOD-050 (its 3 junk cells discarded).
+- left behind: rows + events (pathspec commit), this log entry, docs/dogfood/2026-10-23-run15-fixed-drain-and-clone-install.md, diagnostics.md section, skills/monitoring-usage drain section
+- foreman woken: no (read-only dogfood lane)
+- verdict: SHIPPABLE for the drain promise (the fix delivers the operator contract exactly as documented, fast); PROMISING-BUT-ROUGH overall (fresh install still dead-ends at the untracked Dockerfile; release surface cannot pass the drain promise it documents)
