@@ -3077,6 +3077,37 @@ fence_check() {
   ' "$self"
 }
 
+# ─── render_fence_gate — BINDING wiring of fence_check into the render path ───
+# DF-HIVEMIND-WORK-13 (2026-10-23). The 2026-09-30 canopy launch log
+# (/tmp/qa-canopy-launch-2032.log) carried, under this script's own name:
+#   docker: 'docker pull' requires 1 argument
+#   /home/kara/.hermes/scripts/bunker-qa.sh: line 903: [: skip: integer expected
+#   /home/kara/.hermes/scripts/bunker-qa.sh: line 903: /usr/bin/python3:: No such file or directory
+# Those were NOT battery cells and NOT a docker call: three UNESCAPED backticked
+# PROSE lines inside the unquoted generated-battery heredoc ( `` `docker pull` `` ,
+# `` `[ skip -eq 0 ]` `` , `` `/usr/bin/python3: No module named pytest` `` ) were
+# command-substituted by the CONTROLLER at render time — the harness ran
+# `docker pull` with no argument, `[ skip -eq 0 ]` against a STRING sentinel, and
+# `/usr/bin/python3:` as a command. (Reported line 903 is where bash attributed
+# the substitution's inner command, which is why it points at unrelated code.)
+# The escapes were fixed (aa21781525, DF-020) and fence_check can catch the class
+# — but fence_check only ran when a human remembered to invoke `__fence-check`,
+# and this class had ALREADY regressed once after its first fix (QA-BUNKER-B21
+# shipped the ui-probe port list unescaped). This gate makes the invariant
+# binding: run/launch refuse to render a battery whose fence is broken, and they
+# refuse BEFORE any bunker slot is consumed.
+render_fence_gate() {
+  local fc_out fc_rc
+  fc_out=$(fence_check 2>&1); fc_rc=$?
+  if [ "$fc_rc" -ne 0 ]; then
+    printf '%s\n' "$fc_out" >&2
+    echo "ERROR: render fence BROKEN (fence_check rc=$fc_rc) — refusing to render the battery. An unescaped \$VAR / backtick inside the generated-battery heredoc executes on the CONTROLLER at render time (observed shape: \"docker pull requires 1 argument\", \"[: skip: integer expected\"); escape it, then re-run: bunker-qa.sh __fence-check" >&2
+    return "$fc_rc"
+  fi
+  log "$fc_out"
+  return 0
+}
+
 run() {
   local repo="${1:?usage: bunker-qa.sh run <repo-dir> [--keep]}"
   shift
@@ -3122,6 +3153,15 @@ run() {
   fi
 
   log "QA project: $PROJ — fresh-system pass on $SERVER (ttl $TTL)"
+
+  # DF-HIVEMIND-WORK-13: a broken render fence makes the CONTROLLER execute the
+  # heredoc's prose at render time (docker pull / [: skip: integer expected).
+  # Static check, zero cost, and it runs BEFORE preflights consume anything.
+  if ! render_fence_gate; then
+    printf '{"cell":"run_battery","status":"FAIL","detail":"run refused: render fence broken (unescaped heredoc token executes on the controller at render time) — fix the escape, then: bunker-qa.sh __fence-check","ts":"%s"}\n' \
+      "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 2
+  fi
 
   # Deterministic-failure preflights (config / ssh / capacity) — SHARED with
   # launch(); see preflights() for the record-one-FAIL-row + rc=2 contract.
@@ -3307,6 +3347,17 @@ launch() {
   log "QA HEAD: $QA_HEAD_SHA ($QA_HEAD_PULL)"
 
   log "QA LAUNCH project: $PROJ — detached battery on $SERVER (ttl $TTL)"
+
+  # DF-HIVEMIND-WORK-13: refuse to spawn on a broken render fence — an
+  # unescaped heredoc token is executed by the CONTROLLER at render time, which
+  # is what produced "docker pull requires 1 argument" / "[: skip: integer
+  # expected" in launch logs. Runs before preflights so no slot is consumed.
+  if ! render_fence_gate; then
+    printf '{"cell":"run_battery","status":"FAIL","detail":"launch refused: render fence broken (unescaped heredoc token executes on the controller at render time) — fix the escape, then: bunker-qa.sh __fence-check","ts":"%s"}\n' \
+      "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 2
+  fi
+
   preflights
 
   local spawn_err
@@ -3693,5 +3744,10 @@ case "${1:-}" in
   # controller-side substitution — the class that aborted the render to a
   # 0-byte battery (QA-BUNKER-B21 regression). Run after ANY heredoc edit.
   __fence-check) fence_check ;;
+  # DF-HIVEMIND-WORK-13: the SAME gate run()/launch() call before rendering.
+  # Exposed so the wiring can be proven without spawning an agent: green here
+  # means the render path will proceed, rc=1 means every battery run/launch
+  # refuses (no slot consumed) until the heredoc escape is fixed.
+  __render-gate) render_fence_gate ;;
   *) echo "usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>" ;;
 esac
