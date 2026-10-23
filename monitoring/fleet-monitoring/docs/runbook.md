@@ -55,7 +55,13 @@ knows the format: `sqlite3 db ".backup /tmp/out.db"`.
 
 **Alert:** `BackupFreshnessStale`
 
-The stack's own backup has not succeeded in 48h. Run it by hand and read the failure:
+The stack's own backup has not succeeded in 48h.
+
+**Production path:** `fleet-monitoring-backup.timer` runs nightly at 03:00 UTC. Check its last run:
+`journalctl -u fleet-monitoring-backup.service`. Manual rerun:
+`systemctl start fleet-monitoring-backup.service`. The timer calls `backup-to-s3.sh` directly.
+
+**Manual path (by-hand equivalent):**
 
 ```sh
 make backup        # follow the section headers: prometheus / grafana / bundle / upload

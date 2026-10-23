@@ -111,6 +111,13 @@ messages the lane. Details and the label taxonomy: `docs/alerting-to-agents.md`.
 
 ## Backups / S3 backend
 
+**Production path:** `fleet-monitoring-backup.timer` runs nightly at 03:00 UTC (systemd timer on the
+host). Check its last run: `journalctl -u fleet-monitoring-backup.service`. Manual rerun:
+`systemctl start fleet-monitoring-backup.service`. The timer calls `backup-to-s3.sh` directly (not
+via Makefile).
+
+**Manual path (by-hand equivalent):**
+
 ```sh
 make backup        # loki chunks + prometheus snapshot + grafana db + git bundle -> S3
 make restore-check # verifies the newest backup is readable (not just present)
