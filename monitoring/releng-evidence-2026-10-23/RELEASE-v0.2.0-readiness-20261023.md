@@ -85,6 +85,20 @@ behind production (`capacity-live-vs-main-before-merge.diff`). README-020 was cl
 be7b1f8: 19/19 rules label `lane: monitoring`, matching host-health.yml and probes.yml
 which already matched the host.
 
+## Board-row discipline (changelog → commits → rows)
+
+Every user-facing change in the delta names a board row: `feat(monitoring): MON-GAP-007 —
+scheduled fleet inventory sweep`, `feat: reconcile QA-MONITORING-009 — port alert-router
+live-state check`, `feat(containers): cadvisor on fleet-monitor (MON-GAP-008 step 1)`, and the
+one non-conventional subject `MON-GAP-009: blackbox_exporter + 8 inventory-derived probe
+targets …`. All four ids are present exactly once on `.coding-hermes/board/tasks.jsonl`
+(`grep -c "\"<id>\""` = 1 each). No unnamed user-facing change → no finding of that class.
+
+Version stamps: the tree carries none (`grep -rnE '^VERSION|APP_VERSION'` across Makefile,
+.env.example, stack/docker-compose.yml, README.md = 0 hits; the only `0.1.0` matches are
+docker/OS version strings under `scripts/raw/`). Tag and newest CHANGELOG heading are the
+only stamps that must agree.
+
 ## Path to the cut (next tick owning RELEASE-MON-015)
 
 1. RELEASE-MON-009 — reconcile master→main, name each conflict resolution.
