@@ -111,8 +111,8 @@ somewhere durable if the finding matters — /tmp does not survive.
   `ssh: connect to host … port 2223: Connection refused`; `collect` answers
   `COLLECT-FAIL unreachable-agent` (90.69 s) about a battery that is alive on 22. With
   `BUNKER_QA_SSH_PORT=22` the same two commands give rc=0 in 125.98 s and `RUNNING` in 2.32 s.
-- **A failed launch does not clean up after itself.** The sync-failure branch (`:3358-3360`,
-  twin at `:3190`) writes a FAIL row and `exit 1`s without calling `qa_destroy_agent()` (`:141`),
+- **A failed launch does not clean up after itself.** The sync-failure branch (`:3357-3363`,
+  twin at `:3189-3192`) writes a FAIL row and `exit 1`s without calling `qa_destroy_agent()` (`:141`),
   so agent `e9862866` stayed `running` on bunker-las-02 after the command returned rc=1. This is
   the third path of the LEAK family (001 = empty render, 002 = collect truncation, 003 = sync
   failure) and it is found by `bunker list --server <srv>` immediately after any failed launch.
@@ -126,3 +126,15 @@ somewhere durable if the finding matters — /tmp does not survive.
   the run installed Go 1.27.3 + gcc/g++ + make 4.4.1 + node v22.15.0 + compose/buildx plugins and
   graded `fresh-install OK` for crier, then ran `act` in containers — so the "docker-less agent"
   wall in DG-017 is a *host*-selection problem, not a universal property of the harness.
+- **Closed battery (same tick): the two legs of one run disagree, and the cap explains the delta.**
+  `native.log` (uncapped) ends with 2 failures — `TestChatLateJoinTruth`,
+  `TestChatClientNoParallelAuthOrExecution` — while `res.log` (the `chaos-resource` leg, run inside
+  `( ulimit -v 3145728; … )`, `bunker-qa.sh:2913/2927`) ends with 5: the same 2 plus
+  `TestChatInFlightTruth`, `TestChatLifecycleTruth`, `TestChatRefusalTruth`, each dying on
+  `RangeError: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new
+  instance` (node/undici llhttp) *after* its own arms printed `RESULT 16/16 passed`. The agent had
+  15.8 GB free, so this is virtual-address space, not RSS — the cap kills Node, not the suite's
+  appetite (`QA-HARNESS-CAP-1`). The 2 uncapped failures are crier's own, already tracked there as
+  `INT-CRIER-015` (P0) and `DF-CRIER-483` (P1); this run is clean-machine corroboration, so nothing
+  was minted on crier's board. Order of reading a battery for a verdict: `native.log` first,
+  `res.log` never as a product verdict, `ci.log` for the act leg's own per-step failures.

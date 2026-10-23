@@ -35,9 +35,37 @@ undocumented env var). The documented protocol alone never reached a battery.
 - **Fresh install on a clean box: WORKS.** `fresh-install OK` — the agent installed Go 1.27.3,
   gcc/g++, make 4.4.1, node v22.15.0 + npm 10.9.2, compose and buildx plugins, then built
   crier (`go build ./...` downloaded and compiled the full module graph).
-- **Docker on the agent: WORKS on bunker-las-02.** `HARNESS-COMPOSE=ok`, and the CI leg
-  actually ran `act` containers (`docker create image=catthehacker/ubuntu:act-latest`). This
-  contradicts the `docker=yes` reading of `status` on bunker-mvp, which is a HOST probe.
+- **Docker on the agent: available on bunker-las-02 — but the lifecycle cells are gated off by the
+  CONTROLLER, not by the agent.** `HARNESS-COMPOSE=ok` and the CI leg really ran `act` containers
+  (`docker create image=catthehacker/ubuntu:act-latest`); `docker-deploy` and `chaos-shutdown` were
+  then graded `SKIPPED — safety gate: controller is the live Hermes host; Compose lifecycle cells are
+  forced off`. So "docker works" is proven for the act leg and NOT proven for compose lifecycle: those
+  two cells are unverified on this controller by design.
+- **The battery itself produced a real, gradable result (19 evidence rows).**
+
+| cell | status | note |
+|---|---|---|
+| fresh-install | **OK** | Go 1.27.3, gcc/g++, make 4.4.1, node v22.15.0, compose+buildx; `go build ./...` clean on a clean box |
+| ci-pass | **FAIL** | native suite rc=1 — `TestChatLateJoinTruth` + `TestChatClientNoParallelAuthOrExecution` fail (see below) |
+| upgrade | **OK** | previous release `v0.1.0-rc2` via `git archive` → HEAD reinstall clean |
+| ui-probe | **OK** | `/chat` and `/docs` serve `200 text/html`, 131394 B |
+| chaos-disconnect | UNVERIFIED | suite already red, so the disconnect verdict is not derivable |
+| chaos-shutdown / docker-deploy | SKIPPED | controller-host safety gate (above) |
+| chaos-corruption | N/A | no db/state files in repo |
+| chaos-resource | INFO | OOM under the 3 GiB cap (expected for a heavy suite) |
+| chaos-errorpath | **OK** | broken config → rc=1 with the variable named in the log |
+| collect | OK | 19 rows pulled, merge-deduped, agent destroyed (2 destroy attempts failed, the third landed late — the documented benign shape) |
+
+- **Target product defect found by the battery, confirmed on the controller:** crier's `cmd/server`
+  suite is RED at HEAD `fb6cbfc6`. Reproduced outside the battery in a detached worktree:
+  `go test ./cmd/server -run 'TestChatLateJoinTruth|TestChatClientNoParallelAuthOrExecution'` at
+  `fb6cbfc6` → `RESULT 0/12 passed` with `updateClassControls is not defined`, plus
+  `embedded chat contains forbidden shortcut "Authorization:"`. Root cause of the first is the test
+  harness's own extraction list (`scripts/chat-late-join-truth.cjs:74-77` stops the extracted region at
+  the `// Management reads deliberately` marker, which now sits ABOVE `updateClassControls`
+  (`cmd/server/chat.html:1103`) while `chat.html:591/598/699` call it from inside the extracted code);
+  the second is `chat.html:1101` containing `Authorization:` prose that
+  `cmd/server/chatclient_ui_test.go:196-203` forbids.
 - **Agent provisioning on the default server: BROKEN (today).** Two identical 211 s spawn
   failures at `stage rootless-install`; the harness retries 3× at ~70 s each, so the user pays
   the whole ladder before being told.
@@ -55,9 +83,10 @@ undocumented env var). The documented protocol alone never reached a battery.
 | row | severity | defect |
 |---|---|---|
 | `QA-HARNESS-PORT-1` | P2 | port table wrong for bunker-las-02 → launch dies at repo sync, collect reports the live battery unreachable |
-| `QA-HARNESS-LEAK-003` | P2 | repo-sync failure exits 1 without `qa_destroy_agent` → agent left running (third leak path) |
+| `QA-HARNESS-LEAK-003` | P2 | repo-sync failure exits 1 without `qa_destroy_agent` (`:3357-3363`, twin `:3189-3192`) → agent left running (third leak path) |
 | `QA-HARNESS-STATUS-1` | P2 | `status` green while spawn is broken; spawn-failure line probes "port 22 AND port 22" and blames the network for a systemd failure |
 | `DOC-009` | P4 | usage-skill numbers/protocol drift (launch 5-45 s vs 126 s measured; fixed stale-agent count; missing port override; "8 slots" vs 6/50) |
+| `QA-CRIER-1` | P1 | crier's `cmd/server` suite is RED at HEAD `fb6cbfc6` on a clean machine and on the controller (stale function-extraction list in `chat-late-join-truth.cjs`; `Authorization:` prose vs the forbidden-shortcut guard) |
 
 Plus event **47** on `QA-HARNESS-LEAK-001` (expired leaked agents are not reaped) and event
 **48** on `DOC-009` (capacity drift found after filing).
@@ -70,7 +99,8 @@ Plus event **47** on `QA-HARNESS-LEAK-001` (expired leaked agents are not reaped
 | `launch`, working path | 125.98 s (54.7 MB payload) | payload-bound, matches the script header (60-120 s); the skill's old "5-45 s" was wrong |
 | `launch`, broken spawn | 211.49 s / 211.18 s | 3 × ~70 s spawn attempts, no early abort — the user pays the full ladder |
 | `collect`, wrong port | 90.69 s → wrong verdict | the wrong constant costs 90 s *and* a false failure |
-| `collect`, right port | 2.32 s → `RUNNING` | 39× faster, same binary, same agent |
+| `collect`, right port, battery alive | 2.32 s → `RUNNING` | 39× faster, same binary, same agent |
+| `collect`, battery FINISHED (pull + teardown + destroy) | **337.64 s** | the skill's "~90s for an already-finished battery" understates it 3.7× — two destroy attempts failed before the third landed late |
 
 No profile was warranted: every number above is dominated by network/spawn/substrate waits
 (near-zero user+sys in `/usr/bin/time`), not by compute in the script. Nothing here is a
@@ -89,3 +119,42 @@ that path failed 4/4 times before the override.
 1. The port override for non-mvp hosts (now added to the usage skill).
 2. That `status` does not test spawn capability or the agent's docker socket.
 3. That a failed launch can leave an agent behind, and how to find it (`bunker list --server`).
+
+## The battery, closed (collect 14:2xZ)
+
+Battery ran 14:02:25Z → `CELLS-DONE`; collect (`BUNKER_QA_SERVER=bunker-las-02
+BUNKER_QA_SSH_PORT=22 bunker-qa.sh collect --evidence …`) returned
+`COLLECTED agent=634852c9 rows=19` and the agent is gone from
+`bunker list --server bunker-las-02` (tail census: 2 agents, not ours). The evidence file
+holds 24 rows with **0 duplicate `(cell,status,detail)` groups**.
+
+| cell | grade | measured |
+|---|---|---|
+| `repo-head` | OK | `fb6cbfc69c92…` (clone dirty → recorded sha tested) |
+| `toolchain-bootstrap` ×8 | OK | go 1.27.3 (floor 1.26.9), gcc/g++, make 4.4.1, compose plugin, buildx v0.38.1, node v22.15.0 / npm 10.9.2 |
+| `fresh-install` | **OK** | full `go build ./...` module graph fetched and compiled on the fresh agent |
+| `ci-pass` | **FAIL** | `native rc=1` — the native suite, run **uncapped**: exactly 2 failures, `TestChatLateJoinTruth` and `TestChatClientNoParallelAuthOrExecution` |
+| `upgrade` | OK | previous release `v0.1.0-rc2` (git-archive tree) → HEAD reinstall clean |
+| `ui-probe` | OK | `/chat` 200 `text/html` 131394 B, `/docs` 200 11885 B on :8767 |
+| `docker-deploy` / `chaos-shutdown` | SKIPPED | safety gate: controller is the live Hermes host |
+| `chaos-corruption` | N/A | no db/state files in repo |
+| `chaos-resource` | INFO | OOM under the 3 GiB cap (see the discrimination below) |
+| `chaos-errorpath` | OK | documented failure on broken config: rc=1, log names the variable |
+| `chaos-disconnect` | UNVERIFIED | suite already red first — honest skip, not folded into PASS |
+
+**The ci-pass FAIL is a real product defect, already tracked by crier's own board:**
+`INT-CRIER-015` (P0, "main red: TestChatLateJoinTruth + TestChatClientNoParallelAuthOrExecution
+fail on origin/main") and `DF-CRIER-483` (P1, `updateClassControls()` wired but no definition
+reachable where the harness extracts). This run adds *clean-machine* corroboration and nothing
+new, so no crier row was minted and no cross-board write was made (a crier foreman wave is
+active on that board).
+
+**Do not read `res.log` as a product verdict.** The capped leg (`chaos-resource`, `ulimit -v
+3145728` at `bunker-qa.sh:2913/2927`) shows **5** failures where the uncapped `native.log` shows
+**2**: the three extras (`TestChatInFlightTruth`, `TestChatLifecycleTruth`,
+`TestChatRefusalTruth`) die on `RangeError: WebAssembly.instantiate(): Out of memory: Cannot
+allocate Wasm memory for new instance` (node/undici) *after* their assertions printed
+`RESULT 16/16 passed`. The agent had 15.8 GB free — the cap is virtual address space, not RSS.
+Filed as `QA-HARNESS-CAP-1`; the reproduction is `( ulimit -v 3145728; node <harness> )` vs the
+same command uncapped.
+

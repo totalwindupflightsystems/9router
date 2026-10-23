@@ -115,6 +115,18 @@ jq -r '[.cell,.status,(.detail|.[0:150])] | @tsv' /tmp/bunker-qa-evidence-*.json
   The sync-failure branch exits 1 without calling `qa_destroy_agent()`
   (QA-HARNESS-LEAK-003). After any failed launch, `bunker list --server <srv>`
   and destroy the id the launch printed before it died.
+- **2026-10-23: `res.log` is the CAPPED run — never grade the product from it.** `chaos-resource`
+  wraps the suite in `( ulimit -v 3145728; … )` (`bunker-qa.sh:2913/2927`, virtual memory, not
+  RSS). A Node/Wasm test harness dies inside it with `RangeError: WebAssembly.instantiate(): Out
+  of memory: Cannot allocate Wasm memory for new instance` even with 15 GB of RAM free, so
+  `res.log` shows failures `native.log` (uncapped) does not: measured today 5 vs 2, the three
+  extras all carrying that Wasm error after their assertions had printed `16/16 passed`
+  (QA-HARNESS-CAP-1). Compare the two logs before calling anything a product failure.
+- **2026-10-23: two concurrent `collect`s of ONE evidence file both succeed** (observed when two
+  deliveries of the same tick ran): each pulls 19 rows, the merge dedupes (`0` duplicate
+  `(cell,status,detail)` groups), the second prints `destroy reported failure but the agent is
+  GONE — teardown recovered`, and the wall roughly doubles (243.79 s vs the ~90 s of a lone
+  collect). Re-running collect after success is still `already-collected` in ~0.01 s.
 - Board rows this pipeline files: QA-<PROJ>-NNN in the TARGET project's
   board; findings about the pipeline itself go on the qa-audit board
   (`.coding-hermes/board/tasks.jsonl` in this workdir).

@@ -302,3 +302,50 @@
   (`NO-FINISHED`), ci-pass mid-`act`. Closed and graded in the follow-up entry below.
 - **Foreman:** not woken (read-only dogfood lane; cooldown/enablement untouched). Repo visibility
   and permissions untouched.
+
+## 2026-10-23 (13:43Z tick) — COLLECT LEG CLOSED + target finding (follow-up delivery)
+
+- **The collect leg promised by the previous entry is now closed.** Battery on agent
+  `634852c9` @ bunker-las-02 FINISHED (`CELLS-DONE`), `collect` → `COLLECTED agent=634852c9 rows=19`,
+  **WALL=337.64 s** (the usage skill's "~90s for an already-finished battery" understates it 3.7×:
+  two `destroy FAILED … rc=1` attempts, then the third landed late and the re-list verified the
+  agent GONE — the documented benign `TEARDOWN-RECOVERED` shape). Census after: `bunker list
+  --server bunker-las-02` → no `634852c9`.
+- **Cells (19 evidence rows, `/tmp/bunker-qa-evidence-20261023T140019Z-1181340.jsonl`):**
+  `repo-head OK` · `toolchain-bootstrap OK` ×8 (go 1.27.3, gcc/g++, make 4.4.1, node v22.15.0,
+  compose+buildx) · `fresh-install OK` · `ci-pass FAIL (native rc=1)` · `upgrade OK` (v0.1.0-rc2 →
+  HEAD) · `docker-deploy SKIPPED` and `chaos-shutdown SKIPPED` (**safety gate: controller is the
+  live Hermes host** — NOT docker absence; act containers did run, so "docker works" is proven only
+  for the act leg) · `ui-probe OK` (`/chat` and `/docs` 200 text/html, 131394 B) · `chaos-disconnect
+  UNVERIFIED` (suite already red) · `chaos-corruption N/A` · `chaos-resource INFO` (OOM under the
+  3 GiB cap — the sibling delivery's `QA-HARNESS-CAP-1` owns the mechanism) · `chaos-errorpath OK`
+  · `collect OK`. One `collect FAIL — cannot reach agent … after 3 probe attempts` row remains in
+  that file from the earlier no-override attempt: it is the `QA-HARNESS-PORT-1` evidence, not a
+  battery defect.
+- **The battery found a real target defect, confirmed OUTSIDE the battery:** crier's `cmd/server`
+  suite is RED at HEAD `fb6cbfc6`. Detached worktree of that sha, then
+  `go test ./cmd/server -run 'TestChatLateJoinTruth|TestChatClientNoParallelAuthOrExecution' -count=1`
+  → `RESULT 0/12 passed; 12 failed` with `updateClassControls is not defined`, plus
+  `embedded chat contains forbidden shortcut "Authorization:"`. Filed as **`QA-CRIER-1`** (P1), with
+  the two root causes: the stale extraction list at `scripts/chat-late-join-truth.cjs:74-77` (its
+  region ends at the `// Management reads deliberately` marker, above `updateClassControls`
+  (`cmd/server/chat.html:1103`), while `chat.html:591/598/699` call it from inside the extracted
+  code) and `chat.html:1101`'s `Authorization:` prose versus `chatclient_ui_test.go:196-203`.
+- **Concurrent delivery, disclosed:** a sibling delivery of this same tick landed commit
+  `c9802466f0` (the four harness rows, the integration report, the usage-skill corrections and the
+  previous log entry) at 14:11Z and appended `QA-HARNESS-CAP-1` at 14:30Z. This delivery therefore
+  **re-ran nothing** and adds only the collect close-out, the battery grading above and
+  `QA-CRIER-1`; the earlier rows are cited as theirs, not re-filed. Verified in the committed blob:
+  each of `QA-HARNESS-PORT-1`, `-LEAK-003`, `-STATUS-1`, `DOC-009` appears exactly once;
+  `boardctl validate -C .` → **RESULT: OK, 16 warnings**, which is this board's pre-tick baseline
+  (0 new warnings, 0 errors).
+- **Perf additions this delivery:** `collect` on a finished battery **337.64 s** (pull + teardown +
+  destroy ladder); `collect` with the wrong port **90.69 s** → false FAIL versus **2.32 s** →
+  correct `RUNNING` on the right port. No `PERF-<n>` row: all of it is substrate wait or a wrong
+  constant (`QA-HARNESS-PORT-1`).
+- **Left behind:** the battery grading + crier finding appended to
+  `docs/dogfood/2026-10-23-integration.md`, the diagnostics section from the sibling entry (unchanged
+  by me), the usage-skill corrections, and this entry. Foreman not woken; repo visibility and
+  permissions untouched.
+- **Residue:** detached worktree `/tmp/crier-head-JsBb/src` (read-only reproduction of HEAD, safe to
+  delete), evidence + harvest under `/tmp/qa-audit-df-20261023-1343/`.
