@@ -392,3 +392,26 @@
   lost, but the key now carries one record where the skill asks for two. DuckBrain also reported
   `/health` → `status: degraded` (embedding provider unhealthy) at write time, so recall of this
   record may lag until embeddings recover.
+
+## 2026-10-23 (13:43Z tick) — NO-OP RESUME (third fire): verified, nothing re-run, nothing missing
+
+- **HEAD == origin/main == `f4b3431827de…`**, unpushed 0, behind 0 (`git fetch` + `rev-list --count`).
+- **Committed-blob census** (not the working tree): `QA-HARNESS-PORT-1`, `QA-HARNESS-LEAK-003`,
+  `QA-HARNESS-STATUS-1`, `DOC-009`, `QA-HARNESS-CAP-1`, `QA-CRIER-1` each appears **exactly once**;
+  events 47, 48, 49, 50 once each; `boardctl validate` on the committed board → **OK, 16 warnings**
+  (this board's pre-tick baseline, 0 errors, no new classes).
+- **Artifacts present in the HEAD tree:** 3 log entries for this tick (initial run, the other
+  delivery's collect close-out, this delivery's corroboration/evidence entry), plus this one;
+  `docs/dogfood/2026-10-23-integration.md` including its "The battery, closed" section; 3 files under
+  `docs/dogfood/evidence/2026-10-23/` (merged evidence JSONL, uncapped-leg excerpt, capped-leg
+  excerpt); the usage-skill corrections; the diagnostics cap section.
+- **Quiescence — two samples 21 s apart, identical:** 14:31:54Z and 14:32:15Z; mtimes
+  `tasks.jsonl 1792765590`, `dogfood-log 1792765681`, `2026-10-23-integration.md 1792765606`,
+  `skills/qa-audit-usage/SKILL.md 1792765606`; no `bunker-qa.sh` / `qa-run.sh` writer running.
+- **No agent residue from this tick:** `634852c9` absent from `bunker-las-02`, `e9862866` destroyed
+  and verified earlier, zero matches on `bunker-mvp`.
+- **DuckBrain** `/project/qa-audit/dogfood/2026-10-23` (namespace `qa-audit`) read back at 4007 chars
+  containing `FINAL STATE` and `QA-HARNESS-CAP-1`; the same key without `namespace=` answers **404**
+  (scoping proven). A second same-key record from the other delivery remains, as disclosed there.
+- **This fire re-ran no leg and filed no row.** It exists so the tick's quiet tail cannot later be
+  read as a missing delivery.
