@@ -1,0 +1,421 @@
+#!/bin/bash
+# Tiered Hermes backup system: local staging + external HDD + Hetzner S3.
+#
+# TWO artifacts per system, ONE staged point-in-time copy feeding both:
+#   binary  — sqlite3 .backup API snapshot, zstd -6   (fast restore)
+#   text    — sqlite3 .dump of THAT staged copy, xz -2 (tiny archive)
+# The dump is derived from the staged binary, never the live DB, so both
+# artifacts are the same point-in-time and the live DB is read once.
+#
+# Tiers (grandfather-father-son):
+#   hourly            — every run (6h cron) — BINARY (restore speed)
+#   daily / weekly    — 00:xx run, Monday 00:xx — TEXT xz (tiny + cheap)
+#   monthly           — 1st-of-month 00:xx — TEXT xz, kept FOREVER
+#   local legacy copy — state-backups/state_<TS>.db.zst, keep 12 (~3 days)
+#   HDD mirror        — binary hourly/daily/weekly + text monthly
+#
+# Every artifact is VERIFIED:
+#   binary: zstd integrity + sqlite integrity_check (state DBs) / quick_check
+#   text:   pipefail (dump errors abort) + xz clean-exit + size floor; small
+#           DBs are FULLY replay-verified every run; state.db gets a FULL
+#           replay + integrity + FTS-count drill on the Monday run (a dump
+#           reads every row through the SQL layer, so corruption fails the
+#           drill loudly instead of compressing into a valid-looking archive).
+#
+# Restore:
+#   binary: zstd -d <file.zst> > db;  (swap procedure: restore-state-db.sh)
+#   text:   xzcat <db.sql.xz> | sqlite3 new.db   then (state.db only)
+#           repair_state_db_fts.py --force with the gateway venv python.
+#
+# Layout:
+#   S3  backups/<system>/hourly/<system>-<TS>.tar.zst        (keep 8)
+#       backups/<system>/{daily,weekly,monthly}/<system>-<TS>.dump.tar.xz
+#   HDD /mnt/passport/hermes-backups/<system>/... same split
+#   S3 root = s3://karahermes-hel | HDD = /mnt/passport/hermes-backups
+set -uo pipefail
+
+LOG="$HOME/.hermes/logs/state-backup.log"
+S3_BUCKET="karahermes-hel"
+S3_ENDPOINT="https://hel1.your-objectstorage.com"
+S3_PROFILE="hetzner"
+HDD_ROOT="/mnt/passport/hermes-backups"
+# 2026-10-02 (supervisor): transient staging moved OFF the USB HDD.
+# /mnt/bulk is a TOSHIBA MQ04UBB400 (5400rpm USB, ~50MB/s). Every heavy step
+# (sqlite .backup copy, zstd/xz, verify decompress + integrity_check, tar) reads
+# or writes this dir, so a 27.6GB state.db made a single .backup exceed the 900s
+# wrapper bound and then the full integrity_check of the 24GB decompressed copy
+# consumed the rest of the 7200s cron cap — hermes-main last landed an S3 object
+# on 2026-09-28. DURABLE tiers (STATE_BACKUP_DIR keep-12 and the /mnt/passport
+# mirror) still live on the external disks; only the transient scratch moved.
+# Override with STAGING=... ; a free-space guard below falls back to the USB path.
+STAGING="${STAGING:-/var/tmp/hermes-backup-staging}"
+# sqlite online-copy bound. state.db is 27.6GB (2026-10-02) and the measured
+# copy rate onto USB staging was ~50MB/s => ~553s nominal, so the old 900s
+# wrapper bound was inside the noise band and produced a hard failure at
+# 12:15:56 on 2026-10-02. With fast-disk staging this completes in ~1-3 min;
+# the 1800s bound is headroom for a loaded box, not a target.
+BACKUP_COPY_TIMEOUT="${BACKUP_COPY_TIMEOUT:-1800}"
+# Keep-12 restore-compatible snapshot tier. It is ~77 GB, so it must NOT live on
+# the root drive (archived to /mnt/passport 2026-09-26), and the script must
+# create its own output dir: when the dir was missing the redirect failed, the
+# log blamed the DB ("failed verification (still corrupt?)"), and the hermes-main
+# tar silently shipped WITHOUT state.db while reporting dbs_ok=4 dbs_failed=0.
+STATE_BACKUP_DIR="${STATE_BACKUP_DIR:-$HOME/.hermes/state-backups}"
+if [ ! -d "$STATE_BACKUP_DIR" ] && mountpoint -q /mnt/passport; then
+  STATE_BACKUP_DIR="/mnt/passport/hermes-backups/kara-db-backups-20260926/state-backups"
+fi
+KEEP_HOURLY=8
+KEEP_DAILY=30
+KEEP_WEEKLY=12
+SIZE_FLOOR=1000000          # 1MB — a state.db dump smaller than this is suspect
+# cron PATH is minimal — aws lives in the totalstack venv, sqlite3 (fixed
+# 3.53.1 build) lives in ~/.local/bin. NEVER let a vulnerable system sqlite3
+# open a WAL DB (WAL-reset bug #69784). ~/.local/bin FIRST so test stubs can
+# override aws/mountpoint when HOME points at a scratch tree.
+export PATH="$HOME/.local/bin:/home/kara/totalstack/.venv/bin:$PATH"
+
+# Free-space guard for the fast-disk staging choice: the transient scratch needs
+# ~5x the state.db size at peak (copy + zstd + verify + tar). If the fast disk
+# cannot carry it, fall back to the USB HDD path rather than filling root.
+STAGING_REQUIRED_KB=$((150 * 1024 * 1024))   # 150 GiB
+if [ "$STAGING" = "/var/tmp/hermes-backup-staging" ]; then
+  staging_free_kb=$(df -Pk /var/tmp 2>/dev/null | awk 'NR==2{print $4}')
+  if [ -z "${staging_free_kb:-}" ] || [ "$staging_free_kb" -lt "$STAGING_REQUIRED_KB" ]; then
+    echo "$(date '+%F %T') WARN: /var/tmp has ${staging_free_kb:-?}KiB free (<${STAGING_REQUIRED_KB}KiB) — falling back to USB staging" >> "$LOG"
+    STAGING="/mnt/bulk/scratch/hermes-backup-staging"
+  fi
+fi
+
+# single-instance guard: a wedged prior run must not overlap the next one
+mkdir -p "$STAGING"
+exec 9>"$STAGING/.backup.lock"
+flock -n 9 || { echo "$(date '+%F %T') SKIP: previous backup run still active" >> "$LOG"; exit 0; }
+
+# 2026-09-23: a SIGKILLed / OOM-killed / timed-out run left its 21GB stage files behind
+# (tmp_legacy_$$.db + verify_$$.db per run — two dead runs had 86GB sitting in /tmp, which
+# helped pin the disk at 89%). Clean up on every exit path.
+# 2026-09-27: the EXIT trap cannot fire on SIGKILL, and the old sweep only deleted
+# files matching tmp_/verify_/replay_ that were >6h old — it never touched the
+# per-system staging dirs, so the 06:00 run, killed at its 1h timeout with verification
+# mid-flight, left 53.68 GiB in /tmp (23G tmp_legacy + 23G verify + 7.2G hermes-main
+# + 1.5G hermes-foreman) and held /tmp at 427 GiB. The flock above proves no other run
+# is active, so EVERYTHING already in STAGING is dead code by definition: wipe it now,
+# keeping only the lock file we just opened. No age gate — age is what let it linger.
+staging_cleanup() { rm -rf "$STAGING"; }
+# 2026-10-02 (supervisor): a handler that only rm -rf does NOT stop the script —
+# on INT/TERM the shell runs the trap and then RESUMES, so a cron-TERM'd run kept
+# running with its staging dir already wiped (observed live while stopping a run
+# this tick). Signal handlers must exit explicitly; EXIT does not need it.
+on_signal() { staging_cleanup; exit 143; }
+trap staging_cleanup EXIT
+trap on_signal INT TERM
+find "$STAGING" -mindepth 1 -maxdepth 1 ! -name '.backup.lock' \
+     -exec rm -rf -- {} + 2>/dev/null || true
+
+# Self-wrap in nice -n 19 (Bane 2026-09-17): full-speed -T0 compression, but
+# the scheduler deprioritizes us instantly when anything real needs CPU.
+# Re-exec only when not already niced; children (xz/zstd/tar/sqlite3) inherit.
+if [ "$(id -u)" != "0" ]; then
+  CUR_NICE=$(ps -o nice= -p $$ 2>/dev/null | tr -d ' ')
+  [ "${CUR_NICE:-0}" -lt 19 ] 2>/dev/null && exec nice -n 19 bash "$0" "$@"
+fi
+
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+log "BACKUP-START (v2: binary zstd + text xz two-artifact scheme)"
+
+# verify_compacted_db <file.zst|file.gz> -> 0 if archive intact AND sqlite ok
+# state DBs get FULL integrity_check (quick_check misses btree rowid
+# corruption — proven 2026-08-27); side DBs keep quick_check for speed.
+# 2026-10-02 (supervisor): every step is now wall-clock bounded, and the FULL
+# state.db integrity_check is gated to FULL_DRILL (Mon 00:xx) instead of every
+# run. Measured on the 27.6GB state.db: a full check is a 27GB scan that the
+# running fleet starves (66s CPU in 621s wall at nice 19) — it cannot fit an
+# hourly cadence, and as an UNBOUNDED step it consumed the whole 7200s cron cap
+# (hermes-main S3 objects stopped 2026-09-28). Weekly coverage is preserved, not
+# reduced: the 00:xx text tier already runs a full replay+integrity drill on
+# state.db when FULL_DRILL=1. Off-drill runs keep zstd -t (whole-archive stream
+# integrity) + quick_check. A slow verify must fail LOUD, never wedge the run.
+VERIFY_DECOMP_TIMEOUT="${VERIFY_DECOMP_TIMEOUT:-900}"
+VERIFY_CHECK_TIMEOUT="${VERIFY_CHECK_TIMEOUT:-5400}"
+# 2026-10-03 (monitoring tick MON-GAP-021): the keep-12 legacy snapshot leg
+# (state.db, 27.7GB) TIMES OUT verify at 2400s under fleet load (loadavg 52):
+# quick_check at nice 19 measured 66s CPU / 621s wall on an IDLE box, so wall
+# time is load-dominated. The leg then deletes its own fresh 8.1GB snapshot
+# (line ~405 rm after verify failure), so a slow box produces NO snapshot at
+# all — keep-12 stuck at 2026-09-28. 5400s gives ~2.2x the failing margin and
+# still fits inside the 7200s cron cap alongside the ~49min the run already
+# spent on S3/HDD legs. A genuinely corrupted DB fails quick_check fast (it
+# does not need the timeout), so corruption detection is unaffected.
+verify_compacted_db() {
+  local f="$1" vtmp check
+  vtmp="$STAGING/verify_$$.db"
+  case "$f" in
+    *.zst) zstd -t "$f" 2>/dev/null || return 1; timeout "$VERIFY_DECOMP_TIMEOUT" zstd -dc "$f" > "$vtmp" 2>/dev/null || { log "ERROR: verify decompress timed out after ${VERIFY_DECOMP_TIMEOUT}s: $f"; rm -f "$vtmp"; return 1; } ;;
+    *.gz)  gunzip -t "$f" 2>/dev/null || return 1; timeout "$VERIFY_DECOMP_TIMEOUT" gunzip -c "$f" > "$vtmp" 2>/dev/null || { log "ERROR: verify decompress timed out after ${VERIFY_DECOMP_TIMEOUT}s: $f"; rm -f "$vtmp"; return 1; } ;;
+    *) return 1 ;;
+  esac
+  case "$(basename "$f")" in
+    *state.db.*) if [ "${FULL_DRILL:-0}" = "1" ]; then check="PRAGMA integrity_check;"
+                 else check="PRAGMA quick_check;"; fi ;;
+    *)           check="PRAGMA quick_check;" ;;
+  esac
+  if ! timeout "$VERIFY_CHECK_TIMEOUT" sqlite3 "$vtmp" "$check" 2>/dev/null | grep -q '^ok$'; then
+    log "ERROR: verify check failed/timed out after ${VERIFY_CHECK_TIMEOUT}s: $f"
+    rm -f "$vtmp"; return 1
+  fi
+  rm -f "$vtmp"
+  return 0
+}
+
+# verify_dump_xz <file.sql.xz> [replay] -> 0 if xz stream clean (+ replay ok)
+# Floor applies to the UNCOMPRESSED dump size (xz -l), not the compressed
+# file — xz of a small DB is tiny and would otherwise always "fail".
+# "replay" = full restore drill: rebuild into scratch + integrity_check
+# (+ FTS count parity when the dump contains messages_fts). Expensive —
+# reserved for small DBs every run and state.db on the weekly drill.
+verify_dump_xz() {
+  local f="$1" do_replay="${2:-}" scratch raw_sz
+  [ -s "$f" ] || return 1
+  xz -t "$f" 2>/dev/null || return 1
+  local floor="${3:-$SIZE_FLOOR}"
+  raw_sz=$(xz -l --robot "$f" 2>/dev/null | awk '/^totals/{print $5}')
+  [ -n "$raw_sz" ] && [ "$raw_sz" -ge "$floor" ] || { log "ERROR: dump below size floor (raw=$raw_sz): $f"; return 1; }
+  if [ "$do_replay" = "replay" ]; then
+    scratch="$STAGING/replay_$$.db"
+    rm -f "$scratch"
+    if ! xzcat "$f" | sqlite3 "$scratch" 2>>"$LOG"; then rm -f "$scratch"; return 1; fi
+    if ! sqlite3 "$scratch" "PRAGMA integrity_check;" 2>/dev/null | grep -q '^ok$'; then
+      rm -f "$scratch"; return 1
+    fi
+    local m fts has_fts
+    has_fts=$(sqlite3 "$scratch" "SELECT count(*) FROM sqlite_master WHERE name IN ('messages','messages_fts');" 2>/dev/null || echo 0)
+    if [ "$has_fts" = "2" ]; then
+      m=$(sqlite3 "$scratch" "SELECT count(*) FROM messages;" 2>/dev/null || echo -1)
+      fts=$(sqlite3 "$scratch" "SELECT count(*) FROM messages_fts;" 2>/dev/null || echo -2)
+      if [ "$m" != "$fts" ]; then
+        log "ERROR: replay FTS mismatch messages=$m fts=$fts ($f)"
+        rm -f "$scratch"; return 1
+      fi
+    fi
+    rm -f "$scratch"
+  fi
+  return 0
+}
+
+# s3_upload <local> <s3key> -> 0 on upload AND size match
+s3_upload() {
+  local local_f="$1" key="$2" local_sz remote_sz
+  local_sz=$(stat -c %s "$local_f")
+  aws --quiet --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT" s3 cp "$local_f" "s3://$S3_BUCKET/$key" 2>>"$LOG" || return 1
+  remote_sz=$(aws --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT" s3 ls "s3://$S3_BUCKET/$key" 2>/dev/null | awk '{print $3}')
+  [ "$remote_sz" = "$local_sz" ] || { log "ERROR: size mismatch for $key (local=$local_sz remote=$remote_sz)"; return 1; }
+  return 0
+}
+
+# --- system definitions: name|db-list|file-list (paths must not contain spaces) ---
+SYSTEMS=(
+  "hermes-main|$HOME/.hermes/state.db $HOME/.hermes/response_store.db $HOME/.hermes/kanban.db $HOME/.hermes/dagger.db|$HOME/.hermes/config.yaml $HOME/.hermes/cron/jobs.json"
+  "hermes-foreman|$HOME/.hermes/foreman/state.db|"
+)
+
+TS=$(date +%Y%m%d-%H%M%S)
+HOUR=$(date +%H)
+DOW=$(date +%u)    # 1=Monday
+DOM=$(date +%d)    # 01-31
+FULL_DRILL=0; [ "$DOW" = "1" ] && [ "$HOUR" = "00" ] && FULL_DRILL=1
+
+mkdir -p "$STAGING"
+
+for spec in "${SYSTEMS[@]}"; do
+  IFS='|' read -r name dbs files <<< "$spec"
+  [ -z "$name" ] && continue
+  WORK="$STAGING/$name"
+  rm -rf "$WORK"; mkdir -p "$WORK"
+  BIN_TAR="$STAGING/$name-$TS.tar.zst"
+  TXT_TAR="$STAGING/$name-$TS.dump.tar.xz"
+  DB_OK=0; DB_FAIL=0
+
+  for db in $dbs; do
+    [ -f "$db" ] || continue
+    base=$(basename "$db")
+    # sqlite3 shell .backup retries SQLITE_BUSY forever — sqlite-backup.py
+    # bounds the wait to 60s via the backup API + busy_timeout.
+    if timeout "$BACKUP_COPY_TIMEOUT" "$HOME/.hermes/scripts/sqlite-backup.py" "$db" "$STAGING/tmp_$$.db" 2>>"$LOG"; then
+      # --- binary artifact (zstd) ---
+      if zstd -q -6 -T0 -c "$STAGING/tmp_$$.db" > "$WORK/$base.zst" 2>>"$LOG" \
+         && verify_compacted_db "$WORK/$base.zst"; then
+        BIN_OK=1
+      else
+        BIN_OK=0
+        rm -f "$WORK/$base.zst"
+      fi
+      # --- text artifact (dump of the SAME staged copy) — 00:xx runs ONLY ---
+      # The text tier only ever uploads at 00:xx (daily/weekly/monthly), so
+      # building it every 6h burned a full xz pass for nothing. Binary-only
+      # on the 06/12/18 runs. pipefail: a corrupt b-tree makes the dump fail
+      # -> no archive (self-witnessing, the point of this tier).
+      DUMP_OK=0
+      REPLAY=""
+      if [ "$base" != "state.db" ]; then REPLAY="replay"; fi          # small DBs: drill every run
+      if [ "$base" = "state.db" ] && [ "$FULL_DRILL" = "1" ]; then REPLAY="replay"; fi
+      if [ "$HOUR" = "00" ]; then
+        if sqlite3 "$STAGING/tmp_$$.db" .dump 2>>"$LOG" | xz -q -2 -T0 -c > "$WORK/$base.sql.xz" \
+           && verify_dump_xz "$WORK/$base.sql.xz" "$REPLAY" "$([ "$base" = "state.db" ] && echo "$SIZE_FLOOR" || echo 1000)"; then
+          DUMP_OK=1
+        else
+          rm -f "$WORK/$base.sql.xz"
+        fi
+      fi
+      if [ "$BIN_OK" = 1 ] || [ "$DUMP_OK" = 1 ]; then
+        DB_OK=$((DB_OK+1))
+        if [ "$HOUR" = "00" ]; then
+          DUMP_STATUS=$([ "$DUMP_OK" = 1 ] && { [ -n "$REPLAY" ] && echo 'ok+replay' || echo ok; } || echo FAIL)
+        else
+          DUMP_STATUS=skip   # text tier is 00:xx-only
+        fi
+        log "VERIFY: $name/$base bin=$([ "$BIN_OK" = 1 ] && echo ok || echo FAIL) dump=$DUMP_STATUS ($(du -h "$WORK/$base.zst" 2>/dev/null | cut -f1) bin / $(du -h "$WORK/$base.sql.xz" 2>/dev/null | cut -f1) dump)"
+      else
+        DB_FAIL=$((DB_FAIL+1))
+        log "ERROR: $name BOTH artifacts failed for $db (unreadable/corrupt?)"
+      fi
+    else
+      DB_FAIL=$((DB_FAIL+1))
+      log "ERROR: $name staged .backup failed for $db (busy>60s?)"
+    fi
+    rm -f "$STAGING/tmp_$$.db"
+  done
+
+  for f in $files; do
+    [ -f "$f" ] && cp "$f" "$WORK/" 2>>"$LOG"
+  done
+
+  # fallback: no verified state.db binary this run -> last-good local snapshot
+  if [ ! -f "$WORK/state.db.zst" ] && [ "$name" = "hermes-main" ]; then
+    LAST=$(ls -1t "$STATE_BACKUP_DIR"/state_*.db.zst "$STATE_BACKUP_DIR"/state_*.db.gz 2>/dev/null | head -1)
+    if [ -n "$LAST" ] && verify_compacted_db "$LAST"; then
+      case "$LAST" in
+        *.zst) cp "$LAST" "$WORK/state.db.zst" ;;
+        *.gz)  cp "$LAST" "$WORK/state.db.gz" ;;
+      esac
+      log "WARN: $name used last-good local snapshot $LAST (verified)"
+    else
+      log "ERROR: $name no verified state.db snapshot available"
+    fi
+  fi
+
+  if [ "$DB_OK" -eq 0 ] && [ "$DB_FAIL" -eq 0 ]; then
+    log "SKIP: $name — no backup sources found"
+    continue
+  fi
+
+  # --- binary tar (hourly fast-restore tier): *.zst + plain config files ---
+  # NO *.sql.xz inside — re-compressing the text tier into the binary tar
+  # doubled its size for zero benefit (9.6G observed 2026-09-17 00:xx run).
+  # --exclude MUST precede the -cf operands or tar treats it as a path.
+  if ls "$WORK"/*.zst >/dev/null 2>&1 || ls "$WORK"/*.gz >/dev/null 2>&1; then
+    tar --exclude='*.sql.xz' -cf - -C "$STAGING" "$name" 2>>"$LOG" | zstd -q -6 -T0 -o "$BIN_TAR"
+    if zstd -t "$BIN_TAR" 2>/dev/null; then
+      log "SNAPSHOT: $name binary $BIN_TAR ($(du -h "$BIN_TAR" | cut -f1)) dbs_ok=$DB_OK dbs_failed=$DB_FAIL"
+      if s3_upload "$BIN_TAR" "backups/$name/hourly/$(basename "$BIN_TAR")"; then
+        log "S3: uploaded hourly(binary) $name"
+      else
+        log "ERROR: S3 hourly upload failed $name"
+      fi
+    else
+      log "ERROR: $name binary tar failed zstd integrity — NOT uploaded"
+      rm -f "$BIN_TAR"
+    fi
+  fi
+
+  # --- text tar (long-term tier): *.sql.xz ONLY ---
+  if ls "$WORK"/*.sql.xz >/dev/null 2>&1; then
+    tar --exclude='*.zst' --exclude='*.gz' -cf - -C "$STAGING" "$name" 2>>"$LOG" | xz -q -2 -T0 -c > "$TXT_TAR"
+    if xz -t "$TXT_TAR" 2>/dev/null; then
+      log "SNAPSHOT: $name text $TXT_TAR ($(du -h "$TXT_TAR" | cut -f1))"
+    else
+      log "ERROR: $name text tar failed xz integrity — NOT uploaded"
+      rm -f "$TXT_TAR"
+    fi
+  fi
+
+  # --- S3: hourly(binary, uploaded above); daily/weekly/monthly=text ---
+  if [ -f "$TXT_TAR" ] && [ "$HOUR" = "00" ]; then
+    for tier in daily weekly monthly; do
+      case $tier in
+        daily)   [ "${PROMO_DAILY:-1}" = "1" ] || continue ;;
+        weekly)  [ "$DOW" = "1" ] || continue ;;
+        monthly) [ "$DOM" = "01" ] || continue ;;
+      esac
+      if s3_upload "$TXT_TAR" "backups/$name/$tier/$(basename "$TXT_TAR")"; then
+        log "S3: promoted $name → $tier (text)"
+      else
+        log "ERROR: S3 $tier promotion failed $name"
+      fi
+    done
+  fi
+
+  # --- prune S3: binary hourly by count; text daily/weekly by count ---
+  aws --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT" s3 ls "s3://$S3_BUCKET/backups/$name/hourly/" 2>/dev/null \
+    | awk '{print $4}' | grep -E '\.tar\.zst$' | sort -r | tail -n +$((KEEP_HOURLY+1)) | while read -r key; do
+      [ -n "$key" ] && aws --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT" s3 rm "s3://$S3_BUCKET/backups/$name/hourly/$key" >>"$LOG" 2>&1 && log "S3: pruned hourly $key"
+    done
+  for tier in daily weekly; do
+    keep=$KEEP_DAILY; [ "$tier" = "weekly" ] && keep=$KEEP_WEEKLY
+    aws --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT" s3 ls "s3://$S3_BUCKET/backups/$name/$tier/" 2>/dev/null \
+      | awk '{print $4}' | grep -E '\.dump\.tar\.xz$' | sort -r | tail -n +$((keep+1)) | while read -r key; do
+        [ -n "$key" ] && aws --profile "$S3_PROFILE" --endpoint-url "$S3_ENDPOINT" s3 rm "s3://$S3_BUCKET/backups/$name/$tier/$key" >>"$LOG" 2>&1 && log "S3: pruned $tier $key"
+      done
+  done
+
+  # --- external HDD mirror: binary hourly/daily/weekly + text monthly ---
+  if mountpoint -q /mnt/passport; then
+    H="$HDD_ROOT/$name"
+    mkdir -p "$H"/{hourly,daily,weekly,monthly}
+    [ -f "$BIN_TAR" ] && cp "$BIN_TAR" "$H/hourly/" && log "HDD: copied hourly(binary) $name"
+    if [ "$HOUR" = "00" ]; then
+      [ "${PROMO_DAILY:-1}" = "1" ] && [ -f "$BIN_TAR" ] && cp "$BIN_TAR" "$H/daily/" && log "HDD: → daily(binary) $name"
+      [ "$DOW" = "1" ] && [ -f "$BIN_TAR" ] && cp "$BIN_TAR" "$H/weekly/" && log "HDD: → weekly(binary) $name"
+      [ "$DOM" = "01" ] && [ -f "$TXT_TAR" ] && cp "$TXT_TAR" "$H/monthly/" && log "HDD: → monthly(text) $name"
+    fi
+    for tier in hourly daily weekly; do
+      keep=$KEEP_HOURLY; [ "$tier" = "daily" ] && keep=$KEEP_DAILY; [ "$tier" = "weekly" ] && keep=$KEEP_WEEKLY
+      ls -1t "$H/$tier"/*.tar.zst 2>/dev/null | tail -n +$((keep+1)) | while read -r f; do
+        rm -f "$f" && log "HDD: pruned $tier $(basename "$f")"
+      done
+    done
+    ls -1t "$H/monthly"/*.dump.tar.xz 2>/dev/null | tail -n +13 | while read -r f; do
+      rm -f "$f" && log "HDD: pruned monthly(excess) $(basename "$f")"
+    done
+  else
+    log "WARN: /mnt/passport not mounted — HDD mirror skipped"
+  fi
+
+  rm -f "$BIN_TAR" "$TXT_TAR"
+done
+
+# --- legacy local state.db snapshot (restore-compatible, verified, keep 12) ---
+# STATE_BACKUP_DIR was resolved (and pointed at /mnt/passport when the root-side
+# dir is absent) in the config block at the top; here we only guarantee it exists
+# and is writable, and we no longer blame the database for a failed redirect.
+if ! mkdir -p "$STATE_BACKUP_DIR" 2>>"$LOG"; then
+  log "ERROR: cannot create local snapshot dir $STATE_BACKUP_DIR (fallback leg will be skipped)"
+elif ! [ -w "$STATE_BACKUP_DIR" ]; then
+  log "ERROR: local snapshot dir $STATE_BACKUP_DIR is not writable"
+fi
+log "LOCAL-DIR: $STATE_BACKUP_DIR (keep 12)"
+if [ -f "$HOME/.hermes/state.db" ]; then
+  if timeout "$BACKUP_COPY_TIMEOUT" "$HOME/.hermes/scripts/sqlite-backup.py" "$HOME/.hermes/state.db" "$STAGING/tmp_legacy_$$.db" 2>>"$LOG" \
+     && zstd -q -6 -T0 -c "$STAGING/tmp_legacy_$$.db" > "$STATE_BACKUP_DIR/state_$TS.db.zst" \
+     && verify_compacted_db "$STATE_BACKUP_DIR/state_$TS.db.zst"; then
+    ls -1t "$STATE_BACKUP_DIR"/state_*.db.zst | tail -n +13 | xargs -r rm -f
+    ls -1t "$STATE_BACKUP_DIR"/state_*.db.gz 2>/dev/null | tail -n +13 | xargs -r rm -f
+    log "LOCAL: verified state.db.zst snapshot written"
+  else
+    rm -f "$STATE_BACKUP_DIR/state_$TS.db.zst"
+    log "ERROR: local state.db snapshot leg failed — check the sqlite-backup/zstd/verify steps above AND that $STATE_BACKUP_DIR was writable (do not assume DB corruption first)"
+  fi
+  rm -f "$STAGING/tmp_legacy_$$.db"
+fi
+
+rm -rf "$STAGING"
+log "DONE"
