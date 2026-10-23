@@ -383,3 +383,12 @@
   each present exactly once in the committed blob; `boardctl validate -C .` → **RESULT: OK,
   16 warnings**, the pre-tick baseline (0 new). Foreman not woken; repo visibility and permissions
   untouched.
+- **DuckBrain run record:** key `/project/qa-audit/dogfood/2026-10-23`, namespace `qa-audit`,
+  domain `raw_note` — this delivery's record id `94d89474-306f-451d-8675-3552999b299a` (read back 200
+  with its distinctive text; the anonymous/`namespace=default` read of the same key answers 404, so
+  the scoping is proven). A concurrent delivery had already written the same key (id
+  `83f32ab7-ae9d-4277-ad5a-9e317a4ce59a`) and my write superseded it rather than being suffixed: the
+  surviving body is a superset that names that delivery and its commit `c9802466`, so no finding is
+  lost, but the key now carries one record where the skill asks for two. DuckBrain also reported
+  `/health` → `status: degraded` (embedding provider unhealthy) at write time, so recall of this
+  record may lag until embeddings recover.
