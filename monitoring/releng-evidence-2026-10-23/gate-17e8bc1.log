@@ -1,0 +1,140 @@
+cd terraform && terraform fmt -recursive && terraform init -input=false -backend=false && terraform validate
+[0m[1mInitializing provider plugins...[0m
+- Reusing previous version of hetznercloud/hcloud from the dependency lock file
+- Using previously-installed hetznercloud/hcloud v1.69.0
+
+[0m[1m[32mTerraform has been successfully initialized![0m[32m[0m
+[0m[32m
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.[0m
+[32m[1mSuccess![0m The configuration is valid.
+[0m
+== compose ==
+  [32mOK[0m   docker-compose.yml
+== shell ==
+  [32mOK[0m   shellcheck clean
+== YAML parse ==
+  [32mOK[0m   every YAML file parses
+== prometheus ==
+  [32mOK[0m   prometheus.yml
+== alert rules ==
+  [32mOK[0m     SUCCESS: 5 rules found
+  [32mOK[0m     SUCCESS: 8 rules found
+  [32mOK[0m     SUCCESS: 3 rules found
+== alertmanager ==
+  [32mOK[0m   alertmanager.yml
+== loki ==
+  [32mOK[0m   loki-config.yml
+== alloy ==
+  [32mOK[0m   config.alloy parses and is formatted
+
+LINT: PASS
+python3 stack/alert-router/test_pre_resolve.py
+MON-GAP-017 — alert-router live-state check before writing pending rows
+router: /home/kara/fleet-monitoring/stack/alert-router/router.py
+
+---- ARM A: Prometheus reports the alert STILL FIRING -> pending row (today's path)
+  webhook HTTP status: 200
+  stub saw 1 query/queries: ['ALERTS{alertname="DiskWillFillIn24h",host="bunker-mvp",instance="bunker-mvp:9100",job="integrations/unix",lane="monitoring",mountpoint="/we\\"ird",severity="warning",alertstate="firing"}']
+  spool ids: ['MON-MONITORING-AA11BB22-20261023']
+  PASS webhook answered 200
+  PASS router queried Prometheus exactly once
+  PASS query is an ALERTS selector: ALERTS{alertname="DiskWillFillIn24h",host="bunker-mvp",instance="bunker-mvp:9100",job="integrations/unix",lane="monitoring",mountpoint="/we\"ird",severity="warning",alertstate="firing"}
+  PASS selector asks for alertstate="firing" once
+  PASS selector carries the alert's own labels
+  PASS label value is escaped for PromQL
+  PASS exactly one spooled row, id MON-MONITORING-AA11BB22-20261023
+  PASS that row is status=pending
+  PASS no resolution event for a still-firing alert
+  PASS spool keeps one JSON object per line + trailing newline
+
+---- ARM B: Prometheus reports NOT FIRING (empty result) -> resolution only
+  webhook HTTP status: 200
+  stub saw 1 query/queries: ['ALERTS{alertname="DiskWillFillIn24h",host="bunker-mvp",instance="bunker-mvp:9100",job="integrations/unix",lane="monitoring",severity="warning",alertstate="firing"}']
+  spool row ids: ['MON-MONITORING-BB22CC33-20261023-RESOLVED']
+  resolution event: {"alertname": "DiskWillFillIn24h", "endsAt": "0001-01-01T00:00:00Z", "host": "bunker-mvp", "id": "MON-MONITORING-BB22CC33-20261023-RESOLVED", "lane": "monitoring", "note": "pre-resolved at webhook time: Prometheus reports no firing ALERTS series for these labels, so no pending row was written", "resolved_at": "2026-10-23 03:51:53", "severity": "warning", "state_check": "series-absent", "type": "alert-resolved"}
+  PASS webhook answered 200
+  PASS NO pending row written (was: the MON-GAP-017 defect)
+  PASS resolution event MON-MONITORING-BB22CC33-20261023-RESOLVED present
+  PASS resolution event carries the pre-resolved note
+  PASS resolution event keeps the build_resolution shape
+  PASS /health rows_pre_resolved_total == 1
+  PASS an EMPTY answer is counted as series-absent, not as not-firing (series-absent=1 not-firing=0)
+  PASS spool keeps one JSON object per line + trailing newline
+
+---- ARM C: Prometheus unreachable (dead port) -> pending row (fallback)
+  pre-probe from the test: 127.0.0.1:57117 -> ConnectionRefusedError(111, 'Connection refused')
+  webhook HTTP status: 200 (0.01s)
+  spool ids: ['MON-MONITORING-CC33DD44-20261023']
+  PASS webhook returned success despite the state-check failure
+  PASS webhook was not delayed past the short timeout (0.01s)
+  PASS pending row MON-MONITORING-CC33DD44-20261023 written (fallback = today's behaviour)
+  PASS /health rows_statecheck_failed_total == 1
+  PASS router logged the failed state check
+
+---- ARM D: Prometheus answers a MALFORMED body -> pending row (fallback)
+  webhook HTTP status: 200
+  spool ids: ['MON-MONITORING-DD44EE55-20261023']
+  PASS webhook returned success
+  PASS pending row MON-MONITORING-DD44EE55-20261023 written (fallback)
+  PASS /health rows_statecheck_failed_total == 1
+
+---- ARM E: Prometheus HANGS (accepts, never answers) -> timeout, rows still written
+  webhook HTTP status: 200 (3.03s for 2 alerts)
+  spool ids: ['MON-MONITORING-FF660011-20261023', 'MON-MONITORING-66001122-20261023']
+  query attempts that reached the hung Prometheus: 1
+  router 'state check failed' log lines: 1
+  rows_statecheck_failed_total: 2  rows_spooled_total: 2
+  PASS webhook returned success against a hung Prometheus
+  PASS one 3.0s timeout for the batch, not one per alert (3.03s)
+  PASS both pending rows written (fallback), in order
+  PASS only the FIRST alert of the batch paid the timeout (1 attempt, 1 log line)
+  PASS both alerts counted as uncheckable (rows_statecheck_failed_total=2)
+
+---- ARM F: board mode (ALERT_ROUTER_WRITE=1) — same rule, tasks/events
+  tasks.jsonl ids: ['MON-MONITORING-11223344-20261023']
+  events.jsonl ids: ['MON-MONITORING-22334455-20261023-RESOLVED', 'MON-MONITORING-33445566-20261023-RESOLVED']
+  stub saw 3 query/queries: ['ALERTS{alertname="DiskWillFillIn24h",host="bunker-mvp",instance="bunker-mvp:9100",job="integrations/unix",lane="monitoring",severity="warning",alertstate="firing"}', 'ALERTS{alertname="DiskWillFillIn24h",host="bunker-mvp",instance="bunker-mvp:9100",job="integrations/unix",lane="monitoring",severity="warning",alertstate="firing"}', 'up{instance="bunker-mvp:9100",job="integrations/unix"}']
+  counters: {"errors_total": 0, "received_total": 3, "rejected_total": 0, "resolved_suppressed_total": 0, "resolved_total": 2, "rows_appended_total": 1, "rows_deduped_total": 0, "rows_not_firing_total": 0, "rows_pre_resolved_total": 1, "rows_series_absent_total": 1, "rows_spooled_total": 0, "rows_statecheck_failed_total": 0}
+  PASS only the still-firing alert reached the board
+  PASS the board row is status=pending
+  PASS pre-resolved alert AND a real resolved webhook both became events
+  PASS the real resolution was verified against a live up series (guard intact)
+  PASS nothing was suppressed: the target was live for the genuine resolution
+  PASS the pre-resolved event keeps its note on the board
+  PASS both board files keep one JSON object per line + trailing newline
+
+---- ARM G: liveness answer is PER TARGET, not one slot for the fleet (REV19-03)
+  up queries the stub received: ['up{instance="dark-host:9100",job="integrations/unix"}', 'up{instance="live-host:9100",job="integrations/unix"}']
+  events.jsonl ids: ['MON-MONITORING-55667788-20261023-RESOLVED']
+  resolved_suppressed_total: 1  resolved_total: 1
+  PASS the LIVE target's resolution survived the earlier dark-target check: MON-MONITORING-55667788-20261023-RESOLVED
+  PASS only the dark target's resolution was suppressed
+  PASS each target got its own `up` query (cache is keyed by instance+job)
+
+---- ARM H: external_labels must not enter the ALERTS selector (REV19-02)
+  stub saw 3 query/queries: ['ALERTS{alertname="TargetUnreachable",host="dark-host",instance="dark-host:9100",job="integrations/unix",lane="monitoring",severity="critical",alertstate="firing"}', 'ALERTS{alertname="TargetFlapping",host="dark-host",instance="dark-host:9100",job="integrations/unix",lane="monitoring",severity="warning",alertstate="firing"}', 'ALERTS{alertname="TargetVanished",host="dark-host",instance="dark-host:9100",job="integrations/unix",lane="monitoring",severity="warning",alertstate="firing"}']
+  selectors carrying an external_label: []
+  pending ids: ['MON-MONITORING-66778899-20261023']
+  event ids: ['MON-MONITORING-77889900-20261023-RESOLVED', 'MON-MONITORING-88990011-20261023-RESOLVED']  state_check: ['not-firing', 'series-absent']
+  counters: rows_pre_resolved_total=2 rows_not_firing_total=1 rows_series_absent_total=1
+  PASS no ALERTS selector carries monitor/prometheus* external labels
+  PASS the FIRING alert wrote a pending row despite the webhook's external_labels
+  PASS the cleared alert and the absent-series alert became resolution events
+  PASS each pre-resolved event records WHY (not-firing vs series-absent)
+  PASS counters separate 'not firing' (1) from 'series absent' (1): not-firing=1 series-absent=1
+  PASS nothing was treated as an unchecked fallback
+
+---- TOKEN: bearer check still enforced (ALERT_ROUTER_TOKEN set)
+  POST without Authorization: 401   with token: 200
+  spool ids: ['MON-MONITORING-EE55FF66-20261023']
+  PASS unauthenticated webhook rejected 401
+  PASS authenticated webhook accepted
+  PASS only the authenticated alert produced a row
+
+0 check(s) failed

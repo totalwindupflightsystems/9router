@@ -1,0 +1,74 @@
+17c17
+<           lane: monitoring
+---
+>           lane: hermes-fleet-ops
+35c35
+<           lane: monitoring
+---
+>           lane: hermes-fleet-ops
+49c49
+<           lane: monitoring
+---
+>           lane: hermes-fleet-ops
+63c63
+<           lane: monitoring
+---
+>           lane: hermes-fleet-ops
+71c71
+<           (time() - monitoring_backup_last_success_timestamp_seconds{exported_job!~".+"}) > 172800
+---
+>           (time() - monitoring_backup_last_success_timestamp_seconds) > 172800
+75c75
+<           lane: monitoring
+---
+>           lane: hermes-fleet-ops
+82,130d81
+<       - alert: BackupFreshnessStaleWeekly
+<         # MON-GAP-018: per-job freshness for the weekly host backups published by the
+<         # lane box (backup-freshness-stamp.sh -> node-exporter-textfile/backup-freshness.prom).
+<         # 1.5x the weekly schedule = 10.5d. job=cube-agent with value 0 = no complete
+<         # MANIFEST ever found in its S3 prefix (also the failure mode).
+<         expr: |
+<           (time() - monitoring_backup_last_success_timestamp_seconds{exported_job=~"kara-hermes|cube-agent"}) > 907200
+<         for: 30m
+<         labels:
+<           severity: warning
+<           lane: monitoring
+<         annotations:
+<           summary: "weekly backup job {{ $labels.job }} has no successful upload in 10.5d"
+<           description: |
+<             The weekly host backup job {{ $labels.job }} (s3://dexdat-backups) has not
+<             completed a verified upload (MANIFEST present) for over 10.5 days.
+<             value 0 means no manifest was ever found for that job.
+<           runbook: docs/runbook.md#backup-stale
+<       - alert: InventorySweepStale
+<         # textfile-collector metric: if the sweep stops publishing, the metric goes
+<         # absent — absence is the failure mode, same pattern as BackupFreshnessStale.
+<         expr: |
+<           (time() - fleet_inventory_last_success_timestamp_seconds) > 604800
+<         for: 1h
+<         labels:
+<           severity: warning
+<           lane: monitoring
+<         annotations:
+<           summary: "fleet software inventory sweep has not run for 7d"
+<           description: |
+<             The scheduled fleet inventory sweep (MON-GAP-007) has not published a fresh
+<             inventory for over a week. Drift (new containers, dead agents, unreachable
+<             hosts) is no longer being observed.
+<           runbook: docs/runbook.md#inventory-sweep-is-stale
+< 
+<       - alert: InventoryHostsNotReporting
+<         # reachable host whose agent does not report to Prometheus
+<         expr: |
+<           fleet_inventory_hosts_not_reporting > 7
+<         for: 6h
+<         labels:
+<           severity: warning
+<           lane: monitoring
+<         annotations:
+<           summary: "{{ $value }} reachable hosts are not reporting to monitoring"
+<           description: |
+<             More hosts than the current known baseline (7) are reachable but their
+<             monitoring agent is not reporting. Investigate the new non-reporter(s)
+<             via the latest coverage.json snapshot on fleet-monitor.
