@@ -93,3 +93,36 @@ somewhere durable if the finding matters — /tmp does not survive.
   sibling patch; HEAD still hardcodes the tarball. Verify provenance of a harness fix
   before crediting it: `sha256sum` the script the battery actually read, and check the
   comments' row id (QA-GUARD-005) against HEAD's content.
+
+## What the 2026-10-23 run added to this trail
+
+- **The lifecycle is three commands, but only one of them is honest about failure.** `status`
+  (`bunker-qa.sh:224-229`) ssh's the *server host* and prints that host's
+  `bunkerd`/`docker`/`act`/`uidmap`; it says nothing about whether the daemon can provision an
+  agent, and nothing about the *agent's* docker socket (which is what the battery gates on).
+  Measured today: `status` green in 465 ms, then two launches failed 211.49 s / 211.18 s at
+  `stage rootless-install … Could not enable linger: Connection timed out`. The failure line's
+  own root cause is a guess — `err_detail` (`:3145-3150`) prints
+  `agent ssh port $qaprobe AND port 22`, and on bunker-mvp `$qaprobe` IS 22, so the two arms are
+  the same port and the "server/network down" claim points at the wrong subsystem.
+- **`server_ssh_port()` is a stale constant, not a probe** (`:81-88`: mvp→22, everything else→
+  2223). bunker-las-02's agents answer on 22. The consequence is a two-sided false failure:
+  `launch` spawns the agent, prints its id, then dies at `repo sync` with
+  `ssh: connect to host … port 2223: Connection refused`; `collect` answers
+  `COLLECT-FAIL unreachable-agent` (90.69 s) about a battery that is alive on 22. With
+  `BUNKER_QA_SSH_PORT=22` the same two commands give rc=0 in 125.98 s and `RUNNING` in 2.32 s.
+- **A failed launch does not clean up after itself.** The sync-failure branch (`:3358-3360`,
+  twin at `:3190`) writes a FAIL row and `exit 1`s without calling `qa_destroy_agent()` (`:141`),
+  so agent `e9862866` stayed `running` on bunker-las-02 after the command returned rc=1. This is
+  the third path of the LEAK family (001 = empty render, 002 = collect truncation, 003 = sync
+  failure) and it is found by `bunker list --server <srv>` immediately after any failed launch.
+- **TTL does not reap what a battery leaves behind.** At 13:50Z bunker-mvp held 6 agents, four
+  `destroy-refused:live_processes` (40.1 GB, all created the same day); `0e8aec07` had expired at
+  07:51Z and was still alive six hours later, `bunker info` reporting
+  `Status: destroy-refused:live_processes`. Three of the four are provably this harness's own
+  launches because their `/tmp/bunker-qa-evidence-*.meta` files name the agent id. Census before
+  every wave; never trust a remembered count.
+- **The battery itself still works, and it works on a docker-capable agent.** On bunker-las-02
+  the run installed Go 1.27.3 + gcc/g++ + make 4.4.1 + node v22.15.0 + compose/buildx plugins and
+  graded `fresh-install OK` for crier, then ran `act` in containers — so the "docker-less agent"
+  wall in DG-017 is a *host*-selection problem, not a universal property of the harness.

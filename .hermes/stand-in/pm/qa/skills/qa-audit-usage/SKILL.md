@@ -14,8 +14,8 @@ is below.
 ## The protocol (three steps, in this order)
 
 ```bash
-bash ~/.hermes/scripts/bunker-qa.sh status          # ~0.5s health probe (0.53 cold/0.52 warm) — do this FIRST
-bash ~/.hermes/scripts/bunker-qa.sh launch <repo>   # ~5-45s; prints LAUNCHED agent=<id> evidence=<path>
+bash ~/.hermes/scripts/bunker-qa.sh status          # ~0.47s health probe (measured 465ms ±35ms, 5 runs) — do this FIRST, but read what it covers below
+bash ~/.hermes/scripts/bunker-qa.sh launch <repo>   # payload-bound: 126s for crier (55MB tracked / 1140 files) — the script header's own estimate is 60-120s
 bash ~/.hermes/scripts/bunker-qa.sh collect --evidence <path>   # poll every 3-5 min
 ```
 
@@ -33,7 +33,20 @@ bash ~/.hermes/scripts/bunker-qa.sh collect --evidence <path>   # poll every 3-5
   ships NO `native.log`; read the act log itself for test evidence. When the act leg
   goes red, the native suite runs and becomes the authoritative leg (separate `ci-act`
   row).
-- Default server: bunker-mvp (override `BUNKER_QA_SERVER`). Capacity 8 slots.
+- Default server: bunker-mvp (override `BUNKER_QA_SERVER`). Capacity is per-host
+  and must be read, not assumed: `bunker status --server <srv>` reported
+  `Agents: 6/50` for bunker-mvp and `1/8` for bunker-las-02 on 2026-10-23 (an
+  older revision of this skill claimed "8 slots" for the default).
+- **Non-mvp servers need the port override too.** `server_ssh_port()` hardcodes
+  `2223` for every server except bunker-mvp, but bunker-las-02's agents answer on
+  **22**. Without the override a las-02 launch spawns the agent, then dies at
+  `repo sync` (`ssh: connect to host … port 2223: Connection refused`) and
+  `collect` answers `COLLECT-FAIL unreachable-agent` on a battery that is alive.
+  Measured 2026-10-23 (crier): no override → launch rc=1 in 73.08s, collect fails
+  in 90.69s; with `BUNKER_QA_SSH_PORT=22` → launch rc=0 in 125.98s, collect
+  `RUNNING` in 2.32s. So the working fallback command is
+  `BUNKER_QA_SERVER=bunker-las-02 BUNKER_QA_SSH_PORT=22 bash bunker-qa.sh launch <repo>`
+  (QA-HARNESS-PORT-1).
 
 ## Reading the verdict (the part that bites)
 
@@ -82,9 +95,26 @@ jq -r '[.cell,.status,(.detail|.[0:150])] | @tsv' /tmp/bunker-qa-evidence-*.json
   unbound variable` abort while still exiting 0 — never trust render rc
   alone; launch's SCRIPT_BYTES=0 guard is the backstop (DG-002).
 - las-bunker-03 (the dogfood-skill's standard ephemeral host) has been
-  tailnet-absent since 2026-10-04; bunker-mvp is the working default. Two
-  stale `destroy-refused:live_processes` agents (~20G each) sit on
-  bunker-mvp — check `bunker list --server bunker-mvp` before waves.
+  tailnet-absent since 2026-10-04; bunker-mvp is the working default.
+  **Leaked agents are a moving target — census, never trust a count.**
+  `bunker list --server bunker-mvp` before every wave: on 2026-10-23T13:50Z it
+  showed 6 agents, FOUR of them `destroy-refused:live_processes` (7.0 + 14.9 +
+  13.5 + 4.7 = 40.1GB, all created that same day, three provably this harness's
+  own launches), and one of them (`0e8aec07`) was still alive six hours past its
+  Expires At — TTL does not reap them (QA-HARNESS-LEAK-001 event 47).
+- **2026-10-23: `status` green does not mean you can spawn.** `status()` ssh's
+  the SERVER HOST and prints the HOST's `bunkerd`/`docker`/`act`/`uidmap`; it
+  never probes agent provisioning or the AGENT's docker socket. Measured: green
+  in 465ms, then two launches on the same server failed after 211.49s / 211.18s
+  at `stage rootless-install … Could not enable linger: Connection timed out`.
+  Read the green as "the control host can reach the daemon", nothing more
+  (QA-HARNESS-STATUS-1). The same run prints `[root cause: agent ssh port 22
+  AND port 22 unreachable … server/network down]` — both arms are the same port
+  on bunker-mvp, so do not follow that line.
+- **2026-10-23: a launch that fails at `repo sync` leaves its agent RUNNING.**
+  The sync-failure branch exits 1 without calling `qa_destroy_agent()`
+  (QA-HARNESS-LEAK-003). After any failed launch, `bunker list --server <srv>`
+  and destroy the id the launch printed before it died.
 - Board rows this pipeline files: QA-<PROJ>-NNN in the TARGET project's
   board; findings about the pipeline itself go on the qa-audit board
   (`.coding-hermes/board/tasks.jsonl` in this workdir).

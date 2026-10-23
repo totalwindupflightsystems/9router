@@ -239,3 +239,66 @@
 - Sweep note for the next tick: the home meta-repo's Tier-1 guard is still red
   repo-wide (pytest collection INTERNALERROR from an unrelated file), so board/docs
   commits here need `--no-verify` with the secrets cell verified clean on the diff.
+
+## 2026-10-23 (13:43Z tick) — default host could not spawn; a working battery cost 4 attempts + one undocumented override
+
+- **Target / promise:** `crier` @ `fb6cbfc69c921846176f5566b0c2a9f1fe7aeec6` (clone dirty → pull
+  skipped, recorded sha tested). Promise: any fleet repo gets a graded clean-machine battery
+  (install, CI, upgrade, docker, UI, chaos) from three documented commands — `status`, `launch`,
+  `collect`. Verdict **🟡 PROMISING-BUT-ROUGH**: the battery itself works and genuinely proves
+  installability, but the orchestration around it could not complete one lifecycle on the
+  documented defaults today.
+- **Commands as driven** (evidence `/tmp/qa-audit-df-20261023-1343/launch*.out|err`, plus the
+  launch evidence file `/tmp/bunker-qa-evidence-20261023T140019Z-1181340.jsonl`):
+  1. `status` → green (`bunkerd=active docker=yes act=no uidmap=yes`), **531.6 ms ± 2.3 ms**
+     (hyperfine, 5 runs, 2 warmup; an earlier sample on the same binary read 465.4 ± 34.9).
+  2. `launch crier` on the default `bunker-mvp` → rc=1, **211.49 s**,
+     `spawn <id> failed at stage rootless-install: … Could not enable linger: Connection timed out`.
+  3. same again → rc=1, **211.18 s**, identical stage.
+  4. `BUNKER_QA_SERVER=bunker-las-02 launch crier` → rc=1 after **73.08 s**:
+     `repo sync failed — ssh: connect to host 100.116.99.35 port 2223: Connection refused` —
+     the agent `e9862866` had already been spawned and was left running.
+  5. `collect --evidence …` on las-02 without the port override → evidence row
+     `collect FAIL: cannot reach agent … (may be TRANSIENT ssh/auth)` at 14:04:32Z on a battery
+     that was alive (the earlier timed capture of that attempt: 90.69 s).
+  6. `BUNKER_QA_SERVER=bunker-las-02 BUNKER_QA_SSH_PORT=22 launch crier` → rc=0, **125.98 s**,
+     `LAUNCHED agent=634852c9`.
+  Time to first successful launch: **~10 min, four attempts, one undocumented env var**. The
+  documented three-command protocol alone never reached a battery.
+- **Cells harvested so far** (`~/qa-evidence.jsonl` on the agent, read pre-collect): `repo-head`
+  OK · `toolchain-bootstrap` ×7 OK (go 1.27.3 vs floor 1.26.9, gcc/g++, make 4.4.1, compose
+  plugin, buildx v0.38.1, node v22.15.0/npm 10.9.2) · **`fresh-install` OK** (full `go build ./...`
+  module graph fetched and compiled on the fresh box) · `ci-pass` running the `act` leg inside
+  containers (`ci.log` shows per-step `✅ Success`). Docker-compose/UI/chaos cells not yet reached.
+- **Install leg: PARTIAL, not SKIPPED.** The default host (`bunker-mvp`) could not provision an
+  agent at all today (two identical 211 s linger failures), so the leg ran on `bunker-las-02`
+  with `BUNKER_QA_SSH_PORT=22`; on that genuinely fresh agent `fresh-install` graded OK. What is
+  *not* proven is the documented path (default server, no override): 4/4 attempts failed first.
+- **Perf (Step 2b):** `status` 531.6 ± 2.3 ms (cheap; its *content* is the problem —
+  the green does not cover spawn capability). `launch` 125.98 s for a 54.7 MB / 1140-file payload
+  (payload-bound: the 211.49 s failing attempt recorded USER 0.08 s / SYS 0.14 s, so the wall is
+  ship + boot + retry, not compute) and 211 s on the broken path —
+  the harness retries spawn 3× at ~70 s with no early abort. `collect` wrong port 90.69 s →
+  false FAIL vs right port 2.32 s → correct `RUNNING`. **No `PERF-<n>` row filed:** every number
+  is a network/spawn/substrate wait or a wrong constant, not compute — the constant is filed as
+  `QA-HARNESS-PORT-1`.
+- **Rows filed (qa-audit board, minted with `board_next_id.py`):** `QA-HARNESS-PORT-1` (P2 — port
+  table hardcodes 2223 for non-mvp; verified at `bunker-qa.sh:81-88`, consequence at
+  `:3358-3360`), `QA-HARNESS-LEAK-003` (P2 — sync-failure `exit 1` without `qa_destroy_agent`:
+  agent `e9862866` left running), `QA-HARNESS-STATUS-1` (P2 — `status` green while spawn is
+  broken, and the failure line prints the same port twice as a network diagnosis,
+  `:3145-3150`), `DOC-009` (P4 — usage-skill numbers/protocol drift). **Events:** 47 →
+  `QA-HARNESS-LEAK-001` (expired `destroy-refused` agents are not reaped by TTL: `0e8aec07`
+  alive 6 h past expiry; four such agents = 40.1 GB on bunker-mvp), 48 → `DOC-009` (capacity
+  drift after filing).
+- **Board integrity:** `boardctl validate -C .` → **OK, 16 warnings** both at committed HEAD and
+  with these rows appended — the delta from this tick's write is **0 new warnings**, 0 errors;
+  each of the four ids appears exactly once.
+- **Left behind:** `docs/dogfood/2026-10-23-integration.md` (integration report + promise/what-the-
+  user-did table), a diagnostics section (new trail: status-vs-spawn, port constant, third leak
+  path, TTL non-reaping), the usage skill (corrected launch timing/payload bound, live-census
+  instruction for leaked agents, the non-mvp port override, the two new pitfalls), this entry.
+- **Collect leg: OPEN at write time** — battery still running on agent `634852c9`
+  (`NO-FINISHED`), ci-pass mid-`act`. Closed and graded in the follow-up entry below.
+- **Foreman:** not woken (read-only dogfood lane; cooldown/enablement untouched). Repo visibility
+  and permissions untouched.
