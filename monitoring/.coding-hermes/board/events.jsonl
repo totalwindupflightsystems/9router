@@ -381,3 +381,4 @@
 {"id":"MON-MONITORING-33D26594-20261023-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"BunkerSpawnFailures","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-23 01:03:08","endsAt":"2026-10-23T01:02:38.579Z"}
 {"id":"MON-MONITORING-FA5F538B-20261023-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"OOMKillsLowPressure","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-23 01:28:08","endsAt":"2026-10-23T01:27:08.579Z"}
 {"id":156,"timestamp":"2026-10-23T02:08:21Z","event_type":"task_created","task_id":"MON-GAP-032","actor":"foreman","detail":"{\"id\":\"MON-GAP-032\",\"status\":\"pending\"}"}
+{"id":"MON-MONITORING-EE32DFF5-20261023-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskWillFillIn24h","host":"karahermes-mde-7840hs","severity":"warning","resolved_at":"2026-10-23 02:33:15","endsAt":"2026-10-23T02:31:45.919Z"}
