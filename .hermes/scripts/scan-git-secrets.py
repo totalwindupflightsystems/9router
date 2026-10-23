@@ -370,7 +370,20 @@ FP_PATTERNS = [
     # marker in backticks: `+-----BEGIN RSA PRIVATE KEY-----`. Complete header,
     # no base64 body on the line — documentation, not material. Narrow like the
     # straight-quote rule: header must END the backtick span immediately.
-    re.compile(r'`\+?-----BEGIN [A-Z ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK|KEY BLOCK)-----`'),
+    re.compile(r'`\\+?-----BEGIN [A-Z ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK|KEY BLOCK)-----`'),
+    # ── SINGLE-quoted PEM BEGIN-header in prose (scan #146, 2026-10-23T10:02Z) ──
+    # Third consecutive fire on the same carrier family, now in a single-quoted sentence:
+    # `cat ~/.ssh/back-office.key prints '-----BEGIN OPENSSH PRIVATE KEY-----' — the full
+    # root bind exposes every file…`. The text lives in board evidence prose
+    # (~/warpfs/.coding-hermes/board/tasks.jsonl, row DF-WARPFS-151, plus its
+    # .snapshot_20261022_tick331 copy) and in archived hermes-telemetry event JSON that
+    # quotes that row — 3 CRITICALs → exit(1) → cron wrapper "Script Error" for prose that
+    # merely NAMES a banner. The double-quote rule above (#90) and the backtick rule (#101)
+    # miss it because the delimiter is a SINGLE quote. Narrow by construction: the header
+    # must be closed by the quote IMMEDIATELY after the trailing dashes. Real PEM material
+    # is followed by \n or a base64 body, never by a closing quote, so a committed key
+    # (bare header diff line, header+body one-liner, PEM body line) still trips private_key.
+    re.compile(r"'-----BEGIN [A-Z ]*(?:PRIVATE KEY|PRIVATE KEY BLOCK|KEY BLOCK)-----'(?![A-Za-z0-9+/=])"),
     # (d) literal alphabet run as an assigned value (Go byte-set const: setToken = "ABC…XYZabc…xyz0-9")
     re.compile(r'"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'),
     # ── Secret-store KEY-NAME constants (scan #93, 2026-09-17) ──
