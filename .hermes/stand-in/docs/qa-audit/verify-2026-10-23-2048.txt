@@ -1,0 +1,207 @@
+qa-audit documentation gap audit — tick qa-audit-docs-2026-10-23-20-48-24
+captured (UTC): 2026-10-23T20:54:03Z
+target: /home/kara/.hermes/stand-in/pm/qa   surface: /home/kara/.hermes/scripts/bunker-qa.sh
+auditor: docs-gap lane (files rows, never edits target docs)
+
+### A. surface size + board tip
+$ git -C target rev-parse HEAD
+5c329d857478c55d057a550a49097ba63bc5eeca
+$ git -C target log -1 --format='%h %s'
+5c329d8574 board(monitoring-docs): 3 documentation-gap rows DOC-023..025 (P4) — doc audit 2026-10-23
+$ wc -l /home/kara/.hermes/scripts/bunker-qa.sh
+3753 /home/kara/.hermes/scripts/bunker-qa.sh
+
+### FINDING 1 — launch duration literal
+$ sed -n '20,22p' target/docs/dogfood/diagnostics.md
+- **Phase split (launch/collect)** — QA-HERMES-CANOPY-8: a full battery takes
+  7-15 min but a Hermes tool call dies at ~180s. Launch is bounded ≤ ~30s and
+  waits on NOTHING; collect is a short idempotent poll.
+$ sed -n '23,26p' /home/kara/.hermes/scripts/bunker-qa.sh   # the script's own header estimate
+#                                               and one launch cell. Waits on NO cells.
+#   bunker-qa.sh collect --evidence <path>    — PHASE B: poll → pull → destroy.
+#                                               Idempotent; prints RUNNING (rc=0, no
+#                                               destroy) while the battery is alive.
+$ grep -n '126.0s|125.98|payload-bound' target/skills/qa-audit-usage/SKILL.md
+18:bash ~/.hermes/scripts/bunker-qa.sh launch <repo>   # payload-bound: 126s for crier (55MB tracked / 1140 files) — the script header's own estimate is 60-120s
+46:  in 90.69s; with `BUNKER_QA_SSH_PORT=22` → launch rc=0 in 125.98s, collect
+89:- **2026-10-20: launch is payload-bound, not fixed-cost.** Measured 41.54s for a 34MB
+
+### FINDING 2 — tool-call cap literal (same sentence)
+$ grep -n -B2 '~420s' /home/kara/.hermes/scripts/bunker-qa.sh
+36-# (spawn, sync, toolchain bootstrap, act CI, native suite, compose, 4 chaos
+37-# cells) takes 7-15 min, but a single Hermes terminal tool call is killed at
+38:# ~420s. The synchronous form therefore killed the battery mid-run, the
+--
+3264-# ─── launch — PHASE A: preflights + spawn + sync + START the battery DETACHED ───
+3265-# Returns as soon as `qa-run.sh` is running on the agent — it NEVER waits on a
+3266:# cell. This is what keeps every Hermes tool call far under the ~420s terminal
+$ grep -n 'dies at ~' target/docs/dogfood/diagnostics.md
+21:  7-15 min but a Hermes tool call dies at ~180s. Launch is bounded ≤ ~30s and
+
+### FINDING 3 — stale capacity literal
+$ sed -n '66,69p' target/docs/dogfood/diagnostics.md
+alone; cross-check ci-pass against fresh-install before believing either.
+Treat TEARDOWN-LEAK and destroy-refused agents as capacity incidents (8-slot
+cap; two stale agents currently sit on bunker-mvp). Copy evidence jsonls
+somewhere durable if the finding matters — /tmp does not survive.
+$ grep -n '6/50|1/8|8 slots' target/skills/qa-audit-usage/SKILL.md
+38:  `Agents: 6/50` for bunker-mvp and `1/8` for bunker-las-02 on 2026-10-23 (an
+39:  older revision of this skill claimed "8 slots" for the default).
+
+### FINDING 4 — evidence row schema per writer
+$ sed -n '3494,3497p' /home/kara/.hermes/scripts/bunker-qa.sh
+  append_collect_row() { # <status> <detail>
+    printf '{"cell":"collect","status":"%s","detail":"%s","ts":"%s"}\n' \
+      "$1" "$(printf '%s' "$2" | tr '\n' ' ' | cut -c1-300)" "$(date -u +%FT%TZ)" >> "$evidence"
+  }
+$ sed -n '3466p' /home/kara/.hermes/scripts/bunker-qa.sh
+  printf '{"project":"%s","cell":"launch","status":"OK","detail":"agent=%s server=%s ttl=%s script_bytes=%s — battery started detached (qa-run.sh); phase B: bunker-qa.sh collect --evidence %s","ts":"%s"}\n' \
+$ sed -n '1092,1097p' /home/kara/.hermes/scripts/bunker-qa.sh
+cell() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys,datetime; print(json.dumps({"project":"'\$PROJ'","cell":sys.argv[1],"status":sys.argv[2],"detail":sys.argv[3],"ts":datetime.datetime.now(datetime.timezone.utc).isoformat()}))' "\$1" "\$2" "\$3" >> \$EVID
+  else
+    local d; d=\$(printf '%s' "\$3" | tr '\n\t\r' '   ' | sed 's/"/'"'"'/g'); echo "{\"project\":\"\$PROJ\",\"cell\":\"\$1\",\"status\":\"\$2\",\"detail\":\"\$d\",\"ts\":\"\$(date -u +%FT%TZ)\"}" >> \$EVID
+  fi
+
+$ jq -r '[.cell,(.project//"<ABSENT>")]|@tsv' crier-battery-evidence.jsonl | sort | uniq -c
+      1 chaos-corruption	crier
+      1 chaos-disconnect	crier
+      1 chaos-errorpath	crier
+      1 chaos-resource	crier
+      1 chaos-shutdown	crier
+      1 ci-pass	crier
+      3 collect	<ABSENT>
+      1 docker-deploy	crier
+      1 fresh-install	crier
+      1 launch	crier
+      2 repo-head	crier
+      8 toolchain-bootstrap	crier
+      1 ui-probe	crier
+      1 upgrade	crier
+$ wc -l crier-battery-evidence.jsonl ; jq -c 'select(has("project")|not)' | wc -l
+24 /home/kara/.hermes/stand-in/pm/qa/docs/dogfood/evidence/2026-10-23/crier-battery-evidence.jsonl
+3
+$ jq -r '.ts' crier-battery-evidence.jsonl | sed -E 's/[0-9]/N/g' | sort | uniq -c
+     19 NNNN-NN-NNTNN:NN:NN.NNNNNN+NN:NN
+      5 NNNN-NN-NNTNN:NN:NNZ
+
+$ second independent battery: newest /tmp/bunker-qa-evidence-*.jsonl
+file=/tmp/bunker-qa-evidence-20261023T194838Z-2950666.jsonl
+22 /tmp/bunker-qa-evidence-20261023T194838Z-2950666.jsonl
+rows missing .project:
+1
+     19 NNNN-NN-NNTNN:NN:NN.NNNNNN+NN:NN
+      3 NNNN-NN-NNTNN:NN:NNZ
+
+$ does any field reference exist in the target docs?
+dogfood
+/home/kara/.hermes/stand-in/pm/qa/docs/dogfood/2026-10-09-integration.md
+/home/kara/.hermes/stand-in/pm/qa/docs/dogfood/2026-10-23-integration.md
+/home/kara/.hermes/stand-in/pm/qa/docs/dogfood/evidence/2026-10-23/crier-battery-evidence.jsonl
+/home/kara/.hermes/stand-in/pm/qa/skills/qa-audit-usage/SKILL.md
+(exit of grep above: no hits = no field reference exists)
+
+### FINDING 5 — dispatch surface beyond the three protocol verbs
+$ sed -n '3713,3720p' /home/kara/.hermes/scripts/bunker-qa.sh
+
+case "${1:-}" in
+  status) status ;;
+  run) run "$2" "${@:3}" ;;
+  launch) launch "$2" "${@:3}" ;;
+  collect) collect "${@:2}" ;;
+  # test hook: print the generated script. `agent` is a placeholder here — the
+  # real caller (run/launch) sets it before build_remote_script, and without a
+$ sed -n '3733,3742p' /home/kara/.hermes/scripts/bunker-qa.sh
+  # BUNKER_QA_GEN_DETECT=1 (QA-9ROUTER-19/20, 2026-09-23): run the REAL
+  # detection on the target dir before rendering, so the render carries the
+  # actual QA_CI_SELECT / QA_ACT_NOTE / QA_PKG_NAME a battery run would ship.
+  # Opt-in on purpose — the default hook stays a fixed-placeholder render so
+  # existing callers keep byte-identical output.
+  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\nDETECT_BIN=%s\nDETECT_PKG_NAME=%s\nDETECT_PKG_ECOSYSTEM=%s\nDETECT_CI_SELECT=%s\nDETECT_ACT_NOTE=%s\nDETECT_PYTEST_REPO=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" "$DETECT_BIN" "$DETECT_PKG_NAME" "$DETECT_PKG_ECOSYSTEM" "$DETECT_CI_FILES" "$DETECT_ACT_NOTE" "$DETECT_PYTEST_REPO" ;;
+  # QA-9ROUTER-19/20: render with the REAL detection for $2, so a test can
+  # assert what a battery run would actually ship (see the hook's comment).
+  __gen-remote-detected) agent="${agent:-test-agent-0000}"; detect_cmds "$2" "${3:-test-agent-0000}"; build_remote_script "$2" "$DETECT_INSTALL" "$DETECT_CI" "$DETECT_NATIVE" ;;
+  # GUARD-DF-009: static guard for the render fence. Fails (rc=1) on any
+$ sed -n '3111,3114p' /home/kara/.hermes/scripts/bunker-qa.sh   # run()
+run() {
+  local repo="${1:?usage: bunker-qa.sh run <repo-dir> [--keep]}"
+  shift
+  local keep=0
+$ grep -rn 'bunker-qa.sh run |__fence-check|__render-gate|__detect-cmds' target/docs target/skills target/.coding-hermes/dogfood-log.md
+(no output above = not documented anywhere in the target)
+
+$ bash /home/kara/.hermes/scripts/bunker-qa.sh --help ; echo rc=$?
+usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>
+rc=0
+$ bash /home/kara/.hermes/scripts/bunker-qa.sh help ; echo rc=$?
+usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>
+rc=0
+$ bash /home/kara/.hermes/scripts/bunker-qa.sh ; echo rc=$?   (no args)
+usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>
+rc=0
+$ grep -n 'there is no .--help' target/skills/qa-audit-usage/SKILL.md
+80:- **2026-10-20: there is no `--help`.** `launch --help` (or any flag-shaped target)
+
+### FINDING 6 (amend DOC-004) — env-var census re-run
+$ grep -ohE 'BUNKER_QA_[A-Z0-9_]+' /home/kara/.hermes/scripts/bunker-qa.sh | sort -u | wc -l
+29
+$ ... | sort -u | tr '\n' ' '
+BUNKER_QA_ACT_TIMEOUT BUNKER_QA_AGENT BUNKER_QA_ALLOW_SHARED_EVIDENCE BUNKER_QA_BRANCH BUNKER_QA_CAPACITY_TIMEOUT BUNKER_QA_COLLECT_SSH_TIMEOUT BUNKER_QA_DEPLOY_PROBE_TIMEOUT BUNKER_QA_DESTROY_BACKOFF BUNKER_QA_DISCONNECT_TIMEOUT BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK BUNKER_QA_ENABLE_DOCKER_LIFECYCLE BUNKER_QA_EVIDENCE BUNKER_QA_GEN_DETECT BUNKER_QA_HOST_KEY BUNKER_QA_INSTALL_CMD BUNKER_QA_NATIVE_CMD BUNKER_QA_NATIVE_TEST_TIMEOUT BUNKER_QA_PROBE_TIMEOUT BUNKER_QA_RETRY_SLEEP BUNKER_QA_SERVER BUNKER_QA_SKIP_PREFLIGHT BUNKER_QA_SSH_PORT BUNKER_QA_SSH_TIMEOUT BUNKER_QA_SUBDIR BUNKER_QA_SYNC_EXCLUDES BUNKER_QA_SYNC_MAX_BYTES BUNKER_QA_TTL BUNKER_QA_UI_PATHS BUNKER_QA_UI_PORTS 
+DOC-004 title asserts 23 vars; keys added since: DOCKER_LIFECYCLE_HOST_BLOCK ENABLE_DOCKER_LIFECYCLE NATIVE_TEST_TIMEOUT SUBDIR UI_PATHS UI_PORTS
+
+### polish — line-count claim in both artifacts
+$ grep -rn '3000 lines' target/docs target/skills
+/home/kara/.hermes/stand-in/pm/qa/docs/dogfood/diagnostics.md:10:pipeline: `bunker-qa.sh` (~3000 lines of hardened bash) + the dagger role
+/home/kara/.hermes/stand-in/pm/qa/skills/qa-audit-usage/SKILL.md:9:`~/.hermes/scripts/bunker-qa.sh` (~3000 lines, hardened bash). The scheduler
+
+### board baseline before filing
+$ boardctl -C target/.coding-hermes/board validate | tail -2
+[warn] events.jsonl line 32: event id "ev-readme-20261016T1940Z" is not a JSON number (legacy shape tolerated)
+RESULT: OK (16 warning(s))
+
+### UNVERIFIED boundaries
+- no live launch was run this tick (no agent slot spent): the 126s launch figure is the
+  usage skill's own 2026-10-23 measurement, cited as a sibling instance, not re-measured here.
+- audience check was static: developer/operator/integrator surfaces were derived from
+  dispatch + writers; end-user audience is N/A for a harness with no end user.
+- qa-scheduler-tick.sh and qa_discover.py were NOT re-audited (DOC-005 / DOC-001 /
+  QA-DISCOVER-NAME-001 already track them).
+END
+
+### ADDENDUM — corrected line ranges for two captures above
+(the FINDING 1 sed range 23-26 missed the estimate line; the FINDING 5 range 3733-3742 stopped before the two gates)
+$ sed -n '21,23p' /home/kara/.hermes/scripts/bunker-qa.sh
+#                                               START the battery DETACHED on the
+#                                               agent (~60-120s). Writes $EVIDENCE.meta
+#                                               and one launch cell. Waits on NO cells.
+$ sed -n '3743,3752p' /home/kara/.hermes/scripts/bunker-qa.sh
+  # unescaped $.../backtick in the heredoc body whose token is not an intended
+  # controller-side substitution — the class that aborted the render to a
+  # 0-byte battery (QA-BUNKER-B21 regression). Run after ANY heredoc edit.
+  __fence-check) fence_check ;;
+  # DF-HIVEMIND-WORK-13: the SAME gate run()/launch() call before rendering.
+  # Exposed so the wiring can be proven without spawning an agent: green here
+  # means the render path will proceed, rc=1 means every battery run/launch
+  # refuses (no slot consumed) until the heredoc escape is fixed.
+  __render-gate) render_fence_gate ;;
+  *) echo "usage: bunker-qa.sh status | run <repo-dir> [--keep] | launch <repo-dir> [--keep] | collect --evidence <path>" ;;
+$ sed -n '3010,3015p' /home/kara/.hermes/scripts/bunker-qa.sh   # the 'run after ANY heredoc edit' instruction
+# that class and it regressed once — QA-BUNKER-B21 shipped the ui-probe port
+# list unescaped. This scan walks the heredoc body and FAILS on any unescaped
+# `$`/backtick whose token is not in the render's intended-substitution contract.
+# Run it after ANY edit inside the heredoc body: bunker-qa.sh __fence-check
+fence_check() {
+  local self="${BASH_SOURCE[0]}"
+$ sed -n '3158,3163p' /home/kara/.hermes/scripts/bunker-qa.sh   # run-path refusal names the same gate
+  # heredoc's prose at render time (docker pull / [: skip: integer expected).
+  # Static check, zero cost, and it runs BEFORE preflights consume anything.
+  if ! render_fence_gate; then
+    printf '{"cell":"run_battery","status":"FAIL","detail":"run refused: render fence broken (unescaped heredoc token executes on the controller at render time) — fix the escape, then: bunker-qa.sh __fence-check","ts":"%s"}\n' \
+      "$(date -u +%FT%TZ)" >> "$EVIDENCE"
+    exit 2
+
+$ provenance of the two surfaces audited
+bunker-qa.sh mtime: 2026-10-23T17:51:28Z
+sha256(bunker-qa.sh) = ae6fbdad5feb5aa2f43326b436e1b86fc50a492ab5120e67a87d28f894d9e919
+board tip = 5c329d857478c55d057a550a49097ba63bc5eeca  origin/main ahead/behind: 0
