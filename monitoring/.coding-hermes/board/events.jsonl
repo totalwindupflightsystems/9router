@@ -401,3 +401,4 @@
 {"id":171,"timestamp":"2026-10-23T06:46:39Z","event_type":"task_created","task_id":"MON-MONITORING-TICKNOTE-20261023-0645","actor":"foreman","detail":"{\"id\":\"MON-MONITORING-TICKNOTE-20261023-0645\",\"status\":\"pending\"}"}
 {"id":172,"timestamp":"2026-10-23T06:46:39Z","event_type":"task_completed","task_id":"MON-MONITORING-TICKNOTE-20261023-0645","actor":"foreman","detail":"{\"status\":\"complete\"}"}
 {"id":173,"timestamp":"2026-10-23T13:10:41Z","event_type":"task_created","task_id":"MON-GAP-038","actor":"foreman","detail":"{\"id\":\"MON-GAP-038\",\"status\":\"pending\"}"}
+{"id":"MON-MONITORING-210F61B3-20261023-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"BunkerLogindWedge","host":"bunker-mvp","severity":"critical","resolved_at":"2026-10-23 14:01:18","endsAt":"2026-10-23T13:58:38.579Z"}
