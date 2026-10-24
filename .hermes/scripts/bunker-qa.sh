@@ -1421,6 +1421,14 @@ disconnect_log_valid() { # <logfile> -> 0 when the log is full disconnect eviden
   pass=\${counts%% *}; fail=\${counts##* }
   [ "\${pass:-0}" -gt 0 ] || [ "\${fail:-0}" -gt 0 ]
 }
+# live_test_transport_cut — the live-key test ran under the disconnect proxy
+# and reported a transport refusal. This is exercised output, not vacuity: the
+# network cut worked, but the live classifier is an external dependency.
+live_test_transport_cut() { # <logfile> -> 0 when the live test failed on transport
+  local f="\$1"
+  grep -qE '(^|[[:space:]])FAIL([[:space:]:]|$)' "\$f" || return 1
+  grep -qiE 'TestLiveJevRoutesKnownCases|proxyconnect|connection refused|dial tcp' "\$f"
+}
 # corr_grade — pure chaos-corruption decision. The caller owns truncation,
 # restart, and restoration; this function only grades the observed evidence.
 corr_grade() { # <rc> <logfile> <state_file> <ref_note> <tracked_yes_no>
@@ -2774,7 +2782,12 @@ disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 printf '%s\\n' 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9' >\$LOGD/disc.log
 ( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off timeout \$disc_window bash -c "\$native_cmd" ) >>\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
-if [ -n "\${nat_rc:-}" ] && [ "\$nat_rc" -ne 0 ] 2>/dev/null; then cell chaos-disconnect UNVERIFIED "ci-pass native suite FAILED first (nat_rc=\$nat_rc) — the disconnect verdict is not derivable from a failing suite; fix the ci-pass failure before reading this cell (QA-HERMES-DAGGER-26); disconnect probe rc=\$disc_rc: \$(head -2 \$LOGD/disc.log)"
+# A keyed live test can fail with a real FAIL line when the dead proxy refuses
+# its classifier request. That is exercised disconnect evidence, not an empty
+# or never-ran log: name the external transport dependency before the generic
+# native-suite and vacuity branches so it can never be graded as EMPTY.
+if live_test_transport_cut \$LOGD/disc.log; then cell chaos-disconnect INFO "network cut exercised; TestLiveJevRoutesKnownCases hit a live-test transport dependency (proxyconnect/connection refused/dial tcp), so the live classifier was unavailable under cut (rc=\$disc_rc) — non-live suite output was preserved: \$(disconnect_suite_counts \$LOGD/disc.log)"
+elif [ -n "\${nat_rc:-}" ] && [ "\$nat_rc" -ne 0 ] 2>/dev/null; then cell chaos-disconnect UNVERIFIED "ci-pass native suite FAILED first (nat_rc=\$nat_rc) — the disconnect verdict is not derivable from a failing suite; fix the ci-pass failure before reading this cell (QA-HERMES-DAGGER-26); disconnect probe rc=\$disc_rc: \$(head -2 \$LOGD/disc.log)"
 elif [ ! -s \$LOGD/disc.log ] || vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
 elif ! disconnect_log_valid \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disconnect evidence incomplete: disc.log must contain NETWORK_CUT_APPLIED and a non-zero suite pass/fail result; rc=\$disc_rc is not sufficient (log: \$(head -3 \$LOGD/disc.log | tr '\\n' ' ' | cut -c1-300))"
 elif [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (NETWORK_CUT_APPLIED; suite result: \$(disconnect_suite_counts \$LOGD/disc.log))"
