@@ -420,3 +420,4 @@
 {"id": 186, "timestamp": "2026-10-23T23:58:19Z", "event_type": "task_created", "task_id": "MON-MONITORING-TICKNOTE-20261023-2352", "actor": "foreman", "detail": "{\"id\":\"MON-MONITORING-TICKNOTE-20261023-2352\",\"status\":\"complete\"}"}
 {"id":"MON-MONITORING-B8283F46-20261024-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"OOMKillsLowPressure","host":"karahermes-mde-7840hs","severity":"warning","resolved_at":"2026-10-24 02:09:08","endsAt":"2026-10-24T02:08:08.579Z"}
 {"id":187,"timestamp":"2026-10-24T02:32:08Z","event_type":"task_completed","task_id":"MON-MONITORING-B8283F46-20261024","actor":"foreman","detail":"{\"status\":\"complete\"}"}
+{"id":"MON-MONITORING-EE32DFF5-20261024-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskWillFillIn24h","host":"karahermes-mde-7840hs","severity":"warning","resolved_at":"2026-10-24 02:51:15","endsAt":"2026-10-24T02:49:45.919Z"}
