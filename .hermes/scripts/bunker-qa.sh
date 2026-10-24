@@ -1395,6 +1395,32 @@ native_zero_tests() { # <logfile> -> 0 when the native leg provably ran zero tes
     pytest_zero_collected "\$f"
   fi
 }
+# disconnect_suite_counts — derive pass/fail package or test counts from the
+# disconnect log. The marker and this summary are written by the chaos cell so
+# evidence carries more than the subprocess rc. A zero count is intentionally
+# invalid: a marker without a real suite result is still UNVERIFIED.
+disconnect_suite_counts() { # <logfile> -> <pass-count> <fail-count>
+  local f="\$1" pass=0 fail=0 n
+  n=\$(grep -Eo '[0-9]+[[:space:]]+passed' "\$f" 2>/dev/null | awk '{s+=\$1} END {print s+0}')
+  pass=\${n:-0}
+  n=\$(grep -Eo '[0-9]+[[:space:]]+(failed|errors?)' "\$f" 2>/dev/null | awk '{s+=\$1} END {print s+0}')
+  fail=\${n:-0}
+  # Go's default output reports package results rather than test counts.
+  [ "\$pass" -eq 0 ] && pass=\$(grep -Ec '^ok[[:space:]]' "\$f" 2>/dev/null || true)
+  [ "\$fail" -eq 0 ] && fail=\$(grep -Ec '^(FAIL|--- FAIL)' "\$f" 2>/dev/null || true)
+  printf '%s %s\\n' "\${pass:-0}" "\${fail:-0}"
+}
+# disconnect_log_valid — the network-cut marker plus a non-zero suite result
+# are both required before chaos-disconnect can grade rc=0/1. This closes the
+# QA-HERMES-CANOPY-44 gap where an empty disc.log accompanied rc=0.
+disconnect_log_valid() { # <logfile> -> 0 when the log is full disconnect evidence
+  local f="\$1" counts pass fail
+  [ -s "\$f" ] || return 1
+  grep -qE '^NETWORK_CUT_APPLIED([[:space:]]|$)' "\$f" || return 1
+  counts=\$(disconnect_suite_counts "\$f")
+  pass=\${counts%% *}; fail=\${counts##* }
+  [ "\${pass:-0}" -gt 0 ] || [ "\${fail:-0}" -gt 0 ]
+}
 # corr_grade — pure chaos-corruption decision. The caller owns truncation,
 # restart, and restoration; this function only grades the observed evidence.
 corr_grade() { # <rc> <logfile> <state_file> <ref_note> <tracked_yes_no>
@@ -1429,12 +1455,17 @@ ep_grade() { # <rc> <logfile> <probe_started_yes_no> [probed_bin]
     printf '%s\\t%s\\n' INFO "start probe did not run the application (probe_started=\$probe_started_yes_no) — missing-config behavior UNVERIFIED: \$(head -2 "\$logfile" | tr '\\n' ' ')"
   elif [ "\$rc" -gt 0 ]; then
     printf '%s\\t%s\\n' OK "clean error on missing config (rc=\$rc)"
-  elif head -8 "\$logfile" | grep -q '^Usage:'; then
+  elif head -8 "\$logfile" | grep -qE '^[Uu]sage:'; then
     # QA-CHIMERA-V2-42 (2026-10-11): an rc=0 whose output is a usage banner is
     # the CLI-help arm, NOT a missing-config observation — never grade a help
     # banner as "application started but exited cleanly" (the recurring
     # QA-CHIMERA-V2-36 INFO was exactly this misread of a bare-script probe).
-    printf '%s\\t%s\\n' INFO "probe invoked CLI-help arm (rc=0, usage banner, argv: \${ep_bin:-unknown}) — not the missing-config path: \$(grep -m1 '^Usage:' "\$logfile")"
+    # QA-GITREINS-2 (2026-10-23): this arm matched only a CAPITAL "Usage:", so
+    # argparse's lower-case "usage: gitreins [-h] ..." fell through to the very
+    # "unexpected: application started but exited cleanly" line it exists to
+    # prevent — one case class narrower than its own rule. Both spellings are
+    # the CLI-help arm now.
+    printf '%s\\t%s\\n' INFO "probe invoked CLI-help arm (rc=0, usage banner, argv: \${ep_bin:-unknown}) — not the missing-config path: \$(grep -m1 -iE '^usage:' "\$logfile")"
   else
     printf '%s\\t%s\\n' INFO "unexpected: application started but exited cleanly on missing config (rc=\$rc)"
   fi
@@ -1790,6 +1821,24 @@ elif [ -f pyproject.toml ]; then
   if [ -n "\$BIN" ] && command -v \$BIN >/dev/null 2>&1; then
     EP_HELP=\$(timeout 10 \$BIN --help 2>/dev/null)
     EP_SUB=\$(printf '%s\\n' "\$EP_HELP" | grep -oE '^[[:space:]]{2,}(serve|server|daemon|start)[[:space:]]' | awk '{print \$1}' | head -1)
+    # QA-GITREINS-2 (2026-10-23): the daemon-first pass assumed a long-running
+    # subcommand NEEDS config, so probing it without one would refuse fast. For a
+    # CLI whose serve/server command runs happily on defaults that assumption is
+    # false: the probe starts a service, blocks, and only stops at its own bound.
+    # gitreins 'serve' is the judgment browser — it announced its port and reached
+    # rc=124 on EVERY battery, so chaos-errorpath read "timed out — error-path
+    # UNVERIFIED" forever while the real missing-config path ('guard' ->
+    # 'no .gitreins/config.yaml — run gitreins init first', rc=1) was never
+    # executed. A command that is meant to stay up has no error path to reach, so
+    # CALIBRATE instead of guessing: trial the candidate in a scratch dir under a
+    # short bound and drop it when it neither refuses nor exits.
+    if [ -n "\$EP_SUB" ]; then
+      EP_TRIAL=\$(mktemp -d 2>/dev/null || printf '/tmp/ep-trial-%s' "\$\$")
+      ( cd "\$EP_TRIAL" && timeout 5 \$BIN \$EP_SUB </dev/null ) >/dev/null 2>&1
+      EP_TRIAL_RC=\$?
+      rm -rf "\$EP_TRIAL" 2>/dev/null || true
+      if [ "\$EP_TRIAL_RC" -eq 124 ]; then EP_SUB=""; fi
+    fi
     if [ -z "\$EP_SUB" ]; then
       EP_SUB=\$(printf '%s\\n' "\$EP_HELP" | grep -oE '^[[:space:]]{2,}run[[:space:]]' | awk '{print \$1}' | head -1)
     fi
@@ -2720,11 +2769,15 @@ disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 # guarantees it; the subshell pin below leaves the outer PATH untouched for
 # every other consumer and is a no-op when the file is absent). The same pin
 # rides the native leg above.
-( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off timeout \$disc_window bash -c "\$native_cmd" ) >\$LOGD/disc.log 2>&1; disc_rc=\$?
+# QA-HERMES-CANOPY-44: emit an auditable marker before the command starts. The
+# marker is part of disc.log, so rc=0 can never stand alone as disconnect evidence.
+printf '%s\\n' 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9' >\$LOGD/disc.log
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off timeout \$disc_window bash -c "\$native_cmd" ) >>\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
 if [ -n "\${nat_rc:-}" ] && [ "\$nat_rc" -ne 0 ] 2>/dev/null; then cell chaos-disconnect UNVERIFIED "ci-pass native suite FAILED first (nat_rc=\$nat_rc) — the disconnect verdict is not derivable from a failing suite; fix the ci-pass failure before reading this cell (QA-HERMES-DAGGER-26); disconnect probe rc=\$disc_rc: \$(head -2 \$LOGD/disc.log)"
-elif vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
-elif [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (no network dep)"
+elif [ ! -s \$LOGD/disc.log ] || vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
+elif ! disconnect_log_valid \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disconnect evidence incomplete: disc.log must contain NETWORK_CUT_APPLIED and a non-zero suite pass/fail result; rc=\$disc_rc is not sufficient (log: \$(head -3 \$LOGD/disc.log | tr '\\n' ' ' | cut -c1-300))"
+elif [ \$disc_rc -eq 0 ]; then cell chaos-disconnect INFO "passes with network cut (NETWORK_CUT_APPLIED; suite result: \$(disconnect_suite_counts \$LOGD/disc.log))"
 elif [ \$disc_rc -eq 124 ]; then cell chaos-disconnect FAIL "HANGS when network is cut (timeout \${disc_window}s, sized from the \${native_dur}s suite: 2x+30s; override floor BUNKER_QA_DISCONNECT_TIMEOUT=\${BUNKER_QA_DISCONNECT_TIMEOUT:-240}s) — \$(head -3 \$LOGD/disc.log)"
 elif [ \$disc_rc -eq 127 ]; then cell chaos-disconnect UNVERIFIED "command not found (rc=127) — the suite NEVER RAN, so the network cut was never exercised; INFRA-FAIL, not a disconnect result: \$(tail -2 \$LOGD/disc.log)"
 elif build_incomplete \$LOGD/disc.log; then cell chaos-disconnect INFO "disconnect UNVERIFIED: the build never completed, so the network cut was NEVER exercised — no disconnect finding either way (rc=\$disc_rc; environment or code, never network): \$(build_incomplete_cause \$LOGD/disc.log)"
@@ -2984,7 +3037,7 @@ elif [ -n "\$BIN" ]; then
   ep_out=\$(ep_probe "\$BIN" "\$EP_DIR" "\$LOGD")
   EP_STARTED=\$(printf '%s' "\$ep_out" | cut -f1)
   ep_rc=\$(printf '%s' "\$ep_out" | cut -f2)
-  ep_result=\$(ep_grade "\$ep_rc" "\$LOGD/ep.log" "\$EP_STARTED")
+  ep_result=\$(ep_grade "\$ep_rc" "\$LOGD/ep.log" "\$EP_STARTED" "\$BIN")
   ep_status=\$(printf '%s' "\$ep_result" | cut -f1)
   ep_detail=\$(printf '%s' "\$ep_result" | cut -f2-)
   cell chaos-errorpath "\$ep_status" "\$ep_detail"
@@ -3273,7 +3326,15 @@ launch() {
   local repo="${1:?usage: bunker-qa.sh launch <repo-dir> [--keep]}"
   shift
   local keep=0
-  for a in "$@"; do [ "$a" = "--keep" ] && keep=1; done
+  # DF-GITREINS-POC-99: parse --evidence so launch writes to the caller's path
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --keep) keep=1; shift ;;
+      --evidence) EVIDENCE="${2:?--evidence needs a value}"; shift 2 ;;
+      --evidence=*) EVIDENCE="${1#--evidence=}"; shift ;;
+      *) shift ;;
+    esac
+  done
 
   local PROJ; PROJ=$(basename "$repo")
   : > "$EVIDENCE"
@@ -3599,6 +3660,17 @@ PY
       ;;
   esac
 
+  # QA-HERMES-CANOPY-44: collect the complete disconnect log before teardown.
+  # The cell detail is intentionally a short summary; this sidecar preserves the
+  # marker and every suite result after collect destroys the agent.
+  local disconnect_artifact="${evidence}.chaos-disconnect.log" disconnect_pull_rc
+  : > "$disconnect_artifact"
+  BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh 'for f in ~/qa-logs-*/disc.log; do if [ -f "$f" ]; then cat "$f"; exit 0; fi; done; exit 1' > "$disconnect_artifact" 2>/dev/null
+  disconnect_pull_rc=$?
+  if [ "$disconnect_pull_rc" -ne 0 ]; then
+    : > "$disconnect_artifact"
+  fi
+
   local tmp errf pull_rc
   tmp=$(mktemp); errf=$(mktemp)
   BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh "cat ~/qa-evidence.jsonl 2>/dev/null" > "$tmp" 2>"$errf"
@@ -3687,6 +3759,11 @@ PY
   rm -f "$tmp"
 
   local detail="agent=$agent ($SERVER) — pulled ${pulled:-0} evidence row(s), merge-deduped by ts"
+  if [ -s "$disconnect_artifact" ]; then
+    detail="$detail; chaos-disconnect log captured at $disconnect_artifact ($(wc -c < "$disconnect_artifact") bytes)"
+  else
+    detail="$detail; chaos-disconnect log unavailable/empty at $disconnect_artifact — cell evidence remains UNVERIFIED"
+  fi
   if [ "$keep" = 1 ]; then
     detail="$detail; agent KEPT (launched with --keep) — destroy it manually"
   else

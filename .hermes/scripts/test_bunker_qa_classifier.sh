@@ -90,6 +90,35 @@ check "missing file -> treated vacuous (fail-closed)"     vacuous     "$(nv "$TM
 if vacuous_native_suite "$TMPD/empty.log"; then v=1; else v=0; fi
 check "0-byte disc.log (real file) -> vacuous -> UNVERIFIED"  UNVERIFIED "$(classify_disconnect 0 0 $v)"
 
+# QA-HERMES-CANOPY-44: rc=0 is not evidence by itself. The real log contract
+# requires the network-cut marker and a non-zero suite result. Keep these tests
+# independent of the rendered chain so they catch a weakened validator too.
+disconnect_suite_counts() {
+  local f="$1" pass fail
+  pass=$(grep -Eo '[0-9]+[[:space:]]+passed' "$f" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+  fail=$(grep -Eo '[0-9]+[[:space:]]+(failed|errors?)' "$f" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+  [ "$pass" -eq 0 ] && pass=$(grep -Ec '^ok[[:space:]]' "$f" 2>/dev/null || true)
+  [ "$fail" -eq 0 ] && fail=$(grep -Ec '^(FAIL|--- FAIL)' "$f" 2>/dev/null || true)
+  printf '%s %s\n' "${pass:-0}" "${fail:-0}"
+}
+disconnect_log_valid() {
+  local f="$1" counts pass fail
+  [ -s "$f" ] || return 1
+  grep -qE '^NETWORK_CUT_APPLIED([[:space:]]|$)' "$f" || return 1
+  counts=$(disconnect_suite_counts "$f")
+  pass=${counts%% *}; fail=${counts##* }
+  [ "${pass:-0}" -gt 0 ] || [ "${fail:-0}" -gt 0 ]
+}
+: > "$TMPD/canopy-empty.log"
+printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\n' > "$TMPD/canopy-marker-only.log"
+printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\n12 passed in 1.2s\n' > "$TMPD/canopy-valid.log"
+if disconnect_log_valid "$TMPD/canopy-empty.log"; then v=valid; else v=UNVERIFIED; fi
+check "QA-HERMES-CANOPY-44 empty log -> UNVERIFIED" UNVERIFIED "$v"
+if disconnect_log_valid "$TMPD/canopy-marker-only.log"; then v=valid; else v=UNVERIFIED; fi
+check "QA-HERMES-CANOPY-44 marker without result -> UNVERIFIED" UNVERIFIED "$v"
+if disconnect_log_valid "$TMPD/canopy-valid.log"; then v=valid; else v=UNVERIFIED; fi
+check "QA-HERMES-CANOPY-44 marker + suite counts -> valid" valid "$v"
+
 echo
 echo "=== harness lockstep (the predicates above must exist in the harness)"
 if [ -f "$HARNESS" ]; then
@@ -151,15 +180,17 @@ if [ -f "$HARNESS" ]; then
       echo 'suite_deps_missing() { return 1; }'
       echo 'native_runner_missing() { return 1; }'
       echo 'vacuous_native_suite() { [ ! -s "$1" ]; }'
+      echo 'disconnect_suite_counts() { printf "12 0\\n"; }'
+      echo 'disconnect_log_valid() { [ -s "$1" ] && grep -q "^NETWORK_CUT_APPLIED" "$1"; }'
       sed -n "${_s},${_e}p" "$HARNESS" | sed 's/[\\][$]/$/g'
     } > "$RENDER"
     bd() { LOGD="$TMPD" disc_rc="$1" bash "$RENDER" 2>/dev/null | head -1 | awk '{print $1" "$2}'; }
     : > "$TMPD/disc.log"
     check "behavioral: 0-byte disc.log + rc=0 -> UNVERIFIED" "chaos-disconnect UNVERIFIED" "$(bd 0)"
     check "behavioral: 0-byte disc.log + rc=1 -> UNVERIFIED" "chaos-disconnect UNVERIFIED" "$(bd 1)"
-    printf 'tests passed: 12 ok\n' > "$TMPD/disc.log"
-    check "behavioral: populated disc.log + rc=0 -> INFO"    "chaos-disconnect INFO"       "$(bd 0)"
-    check "behavioral: populated disc.log + rc=1 -> OK"      "chaos-disconnect OK"         "$(bd 1)"
+    printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\ntests passed: 12 ok\n' > "$TMPD/disc.log"
+    check "behavioral: valid disc.log + rc=0 -> INFO"    "chaos-disconnect INFO"       "$(bd 0)"
+    check "behavioral: valid disc.log + rc=1 -> OK"      "chaos-disconnect OK"         "$(bd 1)"
   else
     check "behavioral: could extract the disc chain" yes no
   fi
