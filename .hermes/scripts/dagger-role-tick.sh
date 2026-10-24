@@ -65,7 +65,16 @@ case "$PIPELINE" in
     # v3: QA_TARGETS (comma) or QA_PROJECT (single) = targeted; empty = random
     # discovery (qa_discover.py). Pass the target through only when named.
     if [ -n "$PROJECT" ] && [ "$PROJECT" != "qa" ]; then
-      ENV_BASE="QA_TARGETS=$PROJECT,QA_REPO=/home/kara/$PROJECT,REAL_MODE=$REAL_MODE"
+      # QA_REPO is an OVERRIDE that beats the DAGger node's scheduler.db
+      # workdir lookup. Only pass it when $HOME/$PROJECT is a real checkout:
+      # role lanes (-docs/-review/-foreman/…) live under .hermes/stand-in/…,
+      # so the guess sent 251/278 enabled -qa lanes at a nonexistent repo and
+      # file_findings died in qa_board_append (DF-HERMES-DAGGER-62).
+      REPO_ENV=""
+      if [ -d "/home/kara/$PROJECT/.git" ] || [ -d "/home/kara/$PROJECT/.coding-hermes" ]; then
+        REPO_ENV=",QA_REPO=/home/kara/$PROJECT"
+      fi
+      ENV_BASE="QA_TARGETS=$PROJECT$REPO_ENV,REAL_MODE=$REAL_MODE"
     else
       ENV_BASE="QA_DISCOVER_N=${QA_DISCOVER_N:-2},REAL_MODE=$REAL_MODE"
     fi
