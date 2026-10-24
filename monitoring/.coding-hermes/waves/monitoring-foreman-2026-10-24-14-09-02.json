@@ -1,0 +1,14 @@
+{
+  "tick": "monitoring-foreman-2026-10-24-14-09-02",
+  "mode": "serial-idle-light-audit",
+  "wave_budget": 12,
+  "census": {
+    "pending_actionable": [],
+    "owner_gated": ["MON-GAP-040", "MON-GAP-037", "RELEASE-MON-009"],
+    "verification_only": ["MON-MONITORING-B8283F46-20261024", "MON-MONITORING-35F12147-20261024"],
+    "documentation_or_external_repo": ["DOC-002", "DOC-005", "DOC-006", "DOC-007", "DOC-008", "DOC-009", "DOC-010", "DOC-011", "DOC-012", "DOC-013", "DOC-014", "DOC-015", "DOC-018", "DOC-021", "DOC-022"]
+  },
+  "workers": [],
+  "reason": "No two independent implementation rows were selected. Current alerts are verification/owner-gated; documentation and release rows belong to the canonical fleet-monitoring repository, not this monitoring meta-repo. WAVE_BUDGET=12 is a ceiling, not a target.",
+  "finished_at": "2026-10-24T14:15:00Z"
+}
