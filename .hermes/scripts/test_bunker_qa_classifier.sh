@@ -7,6 +7,11 @@
 set -uo pipefail
 
 HARNESS="${BUNKER_QA_SH:-$HOME/.hermes/scripts/bunker-qa.sh}"
+# Prefer the checkout-local deployed harness when this regression script is run
+# from the Hermes meta-repo; callers can still override BUNKER_QA_SH explicitly.
+if [ -z "${BUNKER_QA_SH:-}" ] && [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/.hermes/scripts/bunker-qa.sh" ]; then
+  HARNESS="$(git rev-parse --show-toplevel)/.hermes/scripts/bunker-qa.sh"
+fi
 pass=0; fail=0
 check() { # <desc> <expected> <actual>
   if [ "$2" = "$3" ]; then echo "  ok   $1 -> $3"; pass=$((pass+1))
