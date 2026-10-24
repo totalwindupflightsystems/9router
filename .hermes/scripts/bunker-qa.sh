@@ -1036,7 +1036,12 @@ sync_repo() {
 # ─── build the remote cell script (all quoting handled HERE, once) ───
 build_remote_script() { # args: proj install_cmd ci_cmd native_cmd
   local proj="$1" install_cmd="$2" ci_cmd="$3" native_cmd="$4"
-  local install_cmd_q; install_cmd_q=$(printf '%q' "$install_cmd")
+  local install_cmd_q native_cmd_q
+  install_cmd_q=$(printf '%q' "$install_cmd")
+  # Keep the suite command as one shell-safe value in the generated script.
+  # In particular, the pnpm command must be expanded on the agent, not by the
+  # controller's render shell or by an unset remote-side variable.
+  native_cmd_q=$(printf '%q' "$native_cmd")
   local qa_docker_lifecycle_enabled="${BUNKER_QA_ENABLE_DOCKER_LIFECYCLE:-0}"
   local qa_docker_lifecycle_host_block="${BUNKER_QA_DOCKER_LIFECYCLE_HOST_BLOCK:-0}"
   # QA-BUNKER-65: the unquoted heredoc below expands $QA_HEAD_SHA/$QA_HEAD_PULL.
@@ -2083,6 +2088,9 @@ for wf in \$QA_CI_SELECT; do
 done
 ACT_WF_COUNT=\$(ls -1 \$ACT_WF_DIR 2>/dev/null | wc -l)
 QA_CI_CMD="$ci_cmd"
+# QA-DUCKBRAIN-015: bake the detected suite command as one shell-safe value.
+# The command is interpreted by bash on the agent, from the agent checkout.
+QA_NATIVE_CMD=$native_cmd_q
 if [ "\$ACT_WF_COUNT" -gt 0 ]; then QA_CI_CMD="\$QA_CI_CMD -W \$ACT_WF_DIR"; fi
 if [ "\$ACT_WF_COUNT" -gt 0 ]; then
 ( timeout -k 30 \${BUNKER_QA_ACT_TIMEOUT:-2400} bash -c "\$QA_CI_CMD" ) >\$LOGD/ci.log 2>&1; ci_rc=\$?
@@ -2107,7 +2115,7 @@ else
   # execs its COMMAND verbatim: a bare VAR=val prefix after the duration is
   # treated as the command name (measured: "failed to execute process" rc=127,
   # 2026-10-20 verification battery).
-  ( timeout -k 30 \${BUNKER_QA_NATIVE_TEST_TIMEOUT:-5400} env PATH="\$HOME/tools/go/bin:\$PATH" $native_cmd ) >\$LOGD/native.log 2>&1; nat_rc=\$?
+  ( timeout -k 30 \${BUNKER_QA_NATIVE_TEST_TIMEOUT:-5400} env PATH="\$HOME/tools/go/bin:\$PATH" bash -c "\$QA_NATIVE_CMD" ) >\$LOGD/native.log 2>&1; nat_rc=\$?
   suite_end=\$(date +%s)
   suite_dur=\$(( suite_end - suite_start ))
   if [ \$nat_rc -eq 0 ]; then
@@ -2780,7 +2788,7 @@ disc_window=\$(( \${suite_dur:-0} * 2 + 30 ))
 # QA-HERMES-CANOPY-44: emit an auditable marker before the command starts. The
 # marker is part of disc.log, so rc=0 can never stand alone as disconnect evidence.
 printf '%s\\n' 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9' >\$LOGD/disc.log
-( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off timeout \$disc_window bash -c "\$native_cmd" ) >>\$LOGD/disc.log 2>&1; disc_rc=\$?
+( HTTP_PROXY=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9 PATH="\$HOME/tools/go/bin:\$PATH" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off timeout \$disc_window bash -c "\$QA_NATIVE_CMD" ) >>\$LOGD/disc.log 2>&1; disc_rc=\$?
 native_dur=\$suite_dur
 # A keyed live test can fail with a real FAIL line when the dead proxy refuses
 # its classifier request. That is exercised disconnect evidence, not an empty
@@ -3082,7 +3090,7 @@ fence_check() {
   # Intended controller-side substitutions (the render's own inputs). Everything
   # else in the body must carry a backslash so the remote script sees a variable.
   local -a fence_allow=(
-    proj agent install_cmd install_cmd_q ci_cmd native_cmd
+    proj agent install_cmd install_cmd_q native_cmd native_cmd_q ci_cmd
     QA_HEAD_SHA QA_HEAD_PULL QA_HEAD_TS ACT_URL MAKE_URL
     qa_docker_lifecycle_enabled qa_docker_lifecycle_host_block
     DETECT_INSTALL DETECT_CI DETECT_NATIVE DETECT_BIN DETECT_TAG_COUNT

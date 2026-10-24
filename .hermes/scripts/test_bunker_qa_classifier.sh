@@ -201,6 +201,44 @@ if [ -f "$HARNESS" ]; then
   fi
 fi
 
+echo "=== pnpm chaos-disconnect command boundary (QA-DUCKBRAIN-015)"
+if [ -f "$HARNESS" ]; then
+  PNPM_REPO="$TMPD/pnpm-repo"
+  mkdir -p "$PNPM_REPO" "$TMPD/pnpm-bin"
+  printf '%s\n' '{"name":"qa-pnpm-fixture","scripts":{"test":"vitest run"}}' > "$PNPM_REPO/package.json"
+  : > "$PNPM_REPO/pnpm-lock.yaml"
+  printf '%s\n' '#!/bin/sh' 'printf "RUN v4.0.0\\n"' 'printf "Test Files 1 passed (1)\\n"' 'printf "HTTP_PROXY=%s\\n" "${HTTP_PROXY:-unset}"' > "$TMPD/pnpm-bin/pnpm"
+  chmod +x "$TMPD/pnpm-bin/pnpm"
+  DETECT=$(bash "$HARNESS" __detect-cmds "$PNPM_REPO" qa015-agent 2>/dev/null)
+  case "$DETECT" in
+    *'DETECT_NATIVE=pnpm test'*) check "pnpm fixture detects native pnpm test" yes yes ;;
+    *) check "pnpm fixture detects native pnpm test" yes no ;;
+  esac
+  QA_HEAD_SHA=9749c41c QA_HEAD_PULL=test bash "$HARNESS" __gen-remote-detected "$PNPM_REPO" 2>/dev/null > "$TMPD/pnpm-render.sh"
+  check "rendered pnpm command is nonempty and shell-safe" yes "$(grep -qF 'QA_NATIVE_CMD=pnpm\ test' "$TMPD/pnpm-render.sh" && echo yes || echo no)"
+  check "native leg uses the baked command boundary" yes "$(grep -qF 'bash -c "$QA_NATIVE_CMD" ) >$LOGD/native.log' "$TMPD/pnpm-render.sh" && echo yes || echo no)"
+  check "disconnect leg uses the same baked command boundary" yes "$(grep -qF 'bash -c "$QA_NATIVE_CMD" ) >>$LOGD/disc.log' "$TMPD/pnpm-render.sh" && echo yes || echo no)"
+  check "disconnect leg has no unset native_cmd expansion" yes "$(grep -qF 'bash -c "$native_cmd"' "$TMPD/pnpm-render.sh" && echo no || echo yes)"
+  # Execute the exact two rendered suite invocations with a deterministic pnpm
+  # shim. The native log is the control; the disconnect log must retain the
+  # network-cut marker and the dead-proxy environment while both reach pnpm.
+  NATIVE_LINE=$(grep -F 'bash -c "$QA_NATIVE_CMD" ) >$LOGD/native.log' "$TMPD/pnpm-render.sh" | head -1)
+  DISC_LINE=$(grep -F 'bash -c "$QA_NATIVE_CMD" ) >>$LOGD/disc.log' "$TMPD/pnpm-render.sh" | head -1)
+  {
+    printf '%s\n' 'set -u' "LOGD=\"$TMPD\"" 'QA_NATIVE_CMD="pnpm test"' 'BUNKER_QA_NATIVE_TEST_TIMEOUT=5' 'disc_window=5' "PATH=\"$TMPD/pnpm-bin:$PATH\"" 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY'
+    printf '%s\n' "$NATIVE_LINE"
+    printf '%s\n' "printf '%s\\n' 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9' >\"$TMPD/disc.log\""
+    printf '%s\n' "$DISC_LINE"
+  } > "$TMPD/pnpm-drive.sh"
+  bash "$TMPD/pnpm-drive.sh" >/dev/null 2>&1
+  check "control/native pnpm invocation emits Vitest output" yes "$(grep -qE '^(RUN v|Test Files)' "$TMPD/native.log" && echo yes || echo no)"
+  check "disconnect log begins with NETWORK_CUT_APPLIED" yes "$(IFS= read -r first < "$TMPD/disc.log"; [ "$first" = 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9' ] && echo yes || echo no)"
+  check "disconnect pnpm invocation emits a Vitest marker" yes "$(grep -qE '^(RUN v|Test Files)' "$TMPD/disc.log" && echo yes || echo no)"
+  check "dead proxy is only present on disconnect leg" yes "$(grep -qF 'HTTP_PROXY=unset' "$TMPD/native.log" && grep -qF 'HTTP_PROXY=http://127.0.0.1:9' "$TMPD/disc.log" && echo yes || echo no)"
+else
+  echo "  SKIP harness not found at $HARNESS"
+fi
+
 echo "=== upgrade cell Go path (QA-OFF-BY-ONE-22, 2026-09-22)"
 # The upgrade cell reported UNVERIFIED for Go-binary repos with release tags:
 # the synced tree carries no .git history, and only pip/npm had install legs.
