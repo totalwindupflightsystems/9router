@@ -438,3 +438,4 @@
 {"id":198,"timestamp":"2026-10-24T16:49:48Z","event_type":"task_completed","task_id":"MON-MONITORING-TICKNOTE-20261024-1648","actor":"foreman","detail":"{\"status\":\"complete\"}"}
 {"id":199,"timestamp":"2026-10-24T17:02:00Z","event_type":"task_created","task_id":"MON-MONITORING-TICKNOTE-20261024-1654","actor":"foreman","detail":"{\"id\":\"MON-MONITORING-TICKNOTE-20261024-1654\",\"status\":\"pending\"}"}
 {"id":200,"timestamp":"2026-10-24T17:02:00Z","event_type":"task_completed","task_id":"MON-MONITORING-TICKNOTE-20261024-1654","actor":"foreman","detail":"{\"status\":\"complete\"}"}
+{"id":"MON-MONITORING-52548650-20261024-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskWillFillIn24h","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-24 21:30:15","endsAt":"2026-10-24T21:27:45.919Z"}
