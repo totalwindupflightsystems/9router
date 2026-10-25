@@ -439,3 +439,6 @@
 {"id":199,"timestamp":"2026-10-24T17:02:00Z","event_type":"task_created","task_id":"MON-MONITORING-TICKNOTE-20261024-1654","actor":"foreman","detail":"{\"id\":\"MON-MONITORING-TICKNOTE-20261024-1654\",\"status\":\"pending\"}"}
 {"id":200,"timestamp":"2026-10-24T17:02:00Z","event_type":"task_completed","task_id":"MON-MONITORING-TICKNOTE-20261024-1654","actor":"foreman","detail":"{\"status\":\"complete\"}"}
 {"id":"MON-MONITORING-52548650-20261024-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskWillFillIn24h","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-24 21:30:15","endsAt":"2026-10-24T21:27:45.919Z"}
+{"id":"MON-MONITORING-FA5F538B-20261025-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"OOMKillsLowPressure","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-25 01:34:38","endsAt":"2026-10-25T01:33:38.579Z"}
+{"id":"MON-MONITORING-EE32DFF5-20261025-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskWillFillIn24h","host":"karahermes-mde-7840hs","severity":"warning","resolved_at":"2026-10-25 03:04:15","endsAt":"2026-10-25T03:00:45.919Z"}
+{"id":201,"timestamp":"2026-10-25T05:06:10Z","event_type":"task_created","task_id":"MON-GAP-041","actor":"foreman","detail":"{\"id\":\"MON-GAP-041\",\"status\":\"pending\"}"}
