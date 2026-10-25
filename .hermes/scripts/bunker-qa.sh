@@ -186,7 +186,24 @@ spawn_agent() {
   local out id drc
   for attempt in 1 2 3; do
     out=$(bunker spawn --server "$SERVER" --ttl "$TTL" 2>&1)
-    id=$(echo "$out" | grep -oP 'keys/\K[a-f0-9]+' | head -1)
+    # PERF-002 (2026-10-25): id extraction must survive CLI output changes.
+    # Primary: the bundle's key-path line ("SSH Key: (saved to ~/.bunker/keys/<id> ...").
+    # Charset widened from [a-f0-9]+ to the CLI's documented agent-id charset
+    # ^[a-z0-9-]{1,64}$ — the old hex-only class SILENTLY TRUNCATED non-hex ids
+    # (e.g. keys/dec-1) → "dec", which ssh-probes a nonexistent id while the REAL
+    # agent leaks to TTL: the exact orphan class QA-HERMES-CANOPY-16 guards.
+    # Fallbacks cover the same id reworded (no keys/ prefix, different label) so a
+    # CLI phrasing change degrades to a retry/FAIL, never a wrong-id handoff.
+    id=$(echo "$out" | grep -oE 'keys/[a-z0-9-]+' | head -1 | cut -d/ -f2)
+    if [ -z "$id" ]; then
+      id=$(echo "$out" | grep -oE '\bAgent created: [a-z0-9-]+' | head -1 | awk '{print $3}')
+    fi
+    if [ -z "$id" ]; then
+      id=$(echo "$out" | grep -oE '\bagent [a-z0-9-]+ (created|spawned)\b' | head -1 | awk '{print $2}')
+    fi
+    # Non-negotiable shape gate (bunker CLI: ^[a-z0-9-]{1,64}$): a reworded
+    # output must never hand a garbage extraction to the ssh probe.
+    [[ "$id" =~ ^[a-z0-9-]{1,64}$ ]] || id=""
     if [ -z "$id" ]; then
       [ $attempt -lt 3 ] && { echo "  spawn attempt $attempt failed: $(echo "$out" | tail -1)" >&2; sleep "${BUNKER_QA_RETRY_SLEEP:-5}"; }
       continue
