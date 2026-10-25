@@ -442,3 +442,6 @@
 {"id":"MON-MONITORING-FA5F538B-20261025-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"OOMKillsLowPressure","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-25 01:34:38","endsAt":"2026-10-25T01:33:38.579Z"}
 {"id":"MON-MONITORING-EE32DFF5-20261025-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskWillFillIn24h","host":"karahermes-mde-7840hs","severity":"warning","resolved_at":"2026-10-25 03:04:15","endsAt":"2026-10-25T03:00:45.919Z"}
 {"id":201,"timestamp":"2026-10-25T05:06:10Z","event_type":"task_created","task_id":"MON-GAP-041","actor":"foreman","detail":"{\"id\":\"MON-GAP-041\",\"status\":\"pending\"}"}
+{"id":"MON-MONITORING-33D26594-20261025-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"BunkerSpawnFailures","host":"bunker-mvp","severity":"warning","resolved_at":"2026-10-25 07:55:08","endsAt":"2026-10-25T07:54:38.579Z"}
+{"id":"MON-MONITORING-5439C9BE-20261025-RESOLVED","type":"alert-resolved","lane":"monitoring","alertname":"DiskFull","host":"karahermes-mde-7840hs","severity":"critical","resolved_at":"2026-10-25 08:24:55","endsAt":"2026-10-25T08:23:45.919Z"}
+{"id":202,"timestamp":"2026-10-25T09:09:27Z","event_type":"task_created","task_id":"MON-BACKUP-20261025-HOLLOW-CUBE","actor":"foreman","detail":"{\"id\":\"MON-BACKUP-20261025-HOLLOW-CUBE\",\"status\":\"pending\"}"}
