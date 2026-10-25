@@ -1706,6 +1706,37 @@ if command -v make >/dev/null 2>&1; then
 elif [ -f Makefile ]; then
   cell toolchain-bootstrap INFO "no make on agent and user-space bootstrap failed — make-based cells will grade ENV-BLOCKED (\$(tail -2 \$LOGD/make.log 2>/dev/null | tr '\n' ' '))"
 fi
+# QA-CODING-HERMES-TOOLS-6 (2026-10-24): jq is a hard prerequisite of the
+# target repos' own documented batteries (README "jq without root", Makefile
+# verify jq guard, probe scripts asserting through jq -e), but the bootstrap
+# below provisioned go/make/gcc/node and NOT jq — so on a fresh agent every
+# probe leg died "jq: command not found" (bash 127) and ci-pass graded a bare
+# native rc=1 with seven red tests that are green on a box with jq (agent
+# 1d4fd817/bunker-mvp, 2026-10-23). Install a STATIC jq user-space (no sudo)
+# when none is on PATH, into the existing ~/tools/bin qa bin dir. QA_JQ_PATH
+# feeds the ci-pass cell's detail so a jq-less red is attributable at the cell.
+# NOTE: the curl carries -L on purpose — releases/latest/download is a 302
+# redirect and -o WITHOUT -L writes the empty redirect body rc=0, which then
+# passes [ -x ] as a 0-byte "jq" (false-OK install). The OK grade requires a
+# real --version string from the binary itself, never mere file presence.
+export QA_JQ_PATH=""
+if ! command -v jq >/dev/null 2>&1; then
+  if ! { [ -x ~/tools/bin/jq ] && [ -n "\$( ~/tools/bin/jq --version 2>/dev/null | head -1 )" ]; }; then
+    mkdir -p ~/tools/bin
+    ( curl -fsSLo ~/tools/bin/jq https://github.com/stedolan/jq/releases/latest/download/jq-linux64 && chmod +x ~/tools/bin/jq ) >\$LOGD/jq.log 2>&1
+  fi
+  JQV="\$( ~/tools/bin/jq --version 2>/dev/null | head -1 )"
+  if [ -n "\$JQV" ]; then
+    export PATH="\$HOME/tools/bin:\$PATH"
+    export QA_JQ_PATH="\$HOME/tools/bin/jq"
+    cell toolchain-bootstrap OK "jq installed (static jq-linux64 -> \$JQV at \$QA_JQ_PATH)"
+  else
+    cell toolchain-bootstrap FAIL "\$(tail -2 \$LOGD/jq.log 2>/dev/null) — jq absent and static install failed; probe legs will die jq: command not found (QA-CODING-HERMES-TOOLS-6)"
+  fi
+else
+  export QA_JQ_PATH="\$(command -v jq)"
+  cell toolchain-bootstrap OK "jq present (\$QA_JQ_PATH)"
+fi
 # FIX 1 · system-dep probe (QA-WARPFS-9 rework 3, 2026-09-19): the zig leg above
 # supplies a C toolchain, but a rust repo ALSO links against system libraries
 # whose DEVELOPMENT files ship in separate packages — and nothing in user space
@@ -1753,7 +1784,23 @@ command -v go >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && cell toolcha
 # ENV-BLOCKED fires only when BOTH halves hold — the probe found missing system
 # deps (RUST_MISSING_SYS_DEPS) AND the log carries the *-sys build-script shape —
 # and the INFO detail names the missing list so the row is actionable.
-if [ \$inst_rc -eq 0 ]; then cell fresh-install OK "\$(tail -1 \$LOGD/inst.log)"
+# QA-CODING-HERMES-TOOLS-5: require artifact presence before grading OK
+_inst_artifact=""
+if [ \$inst_rc -eq 0 ]; then
+  # Check for installed binary or PREFIX artifact
+  if command -v toolsd >/dev/null 2>&1; then
+    _inst_artifact="\$(command -v toolsd)"
+  elif [ -n "\${PREFIX:-}" ] && [ -x "\${PREFIX}/bin/toolsd" ]; then
+    _inst_artifact="\${PREFIX}/bin/toolsd"
+  elif [ -x "\$HOME/.local/bin/toolsd" ]; then
+    _inst_artifact="\$HOME/.local/bin/toolsd"
+  fi
+  if [ -n "\$_inst_artifact" ] && [ -s "\$_inst_artifact" ]; then
+    _inst_stat="\$(stat -c '%s bytes' "\$_inst_artifact" 2>/dev/null || echo 'stat failed')"
+    cell fresh-install OK "artifact=\$_inst_artifact (\$_inst_stat); \$(tail -1 \$LOGD/inst.log)"
+  else
+    cell fresh-install FAIL "install rc=0 but no artifact found (toolsd not in PATH, PREFIX/bin/toolsd missing, or zero-size); \$(tail -1 \$LOGD/inst.log)"
+  fi
 elif [ \$inst_rc -eq 127 ] || grep -qi 'command not found' \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: the agent lacks a build tool the install step calls (\$(grep -m1 -oE '[a-zA-Z0-9_.-]+: command not found' \$LOGD/inst.log || echo rc=\$inst_rc)) and has no sudo to install it — harness env, not a repo defect: \$(tail -1 \$LOGD/inst.log)"
 elif build_env_failure \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: agent has no C toolchain (build-script link failure) — not a repo defect; README documents build-essential"
 elif [ -n "\$RUST_MISSING_SYS_DEPS" ] && build_sys_dep_failure \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: agent is missing system deps [\$RUST_MISSING_SYS_DEPS] and the build died in a *-sys build script — no sudo to apt install, not a repo defect; README documents the full dependency set: \$( { grep -m1 -E 'failed to run custom build command' \$LOGD/inst.log 2>/dev/null || grep -m1 'development packages' \$LOGD/inst.log 2>/dev/null; } | cut -c1-200 )"
@@ -2102,8 +2149,12 @@ fi
 # NOTE: the first test is a STRING compare on purpose — ci_rc is the literal
 # "skip" when there was no triggerable workflow, and \`[ skip -eq 0 ]\` makes bash
 # print "integer expression expected" and take the wrong branch.
+# QA-CODING-HERMES-TOOLS-6: every ci-pass detail names the jq the suite ran
+# through (bootstrap-provisioned static binary or distro jq) or jq=MISSING.
+JQCTX=" jq=\${QA_JQ_PATH:-MISSING}"
+
 if [ "\$ci_rc" = "0" ]; then
-  cell ci-pass OK "act: \$(grep -cE 'Job succeeded|✅ Success' \$LOGD/ci.log || true) jobs green — rc=0 (\$ACT_WF_COUNT triggerable workflow(s))"
+  cell ci-pass OK "act: \$(grep -cE 'Job succeeded|✅ Success' \$LOGD/ci.log || true) jobs green — rc=0 (\$ACT_WF_COUNT triggerable workflow(s))\$JQCTX"
 else
   suite_start=\$(date +%s)
   # QA-HIVEMIND-WORK-18(c): the native leg previously had NO timeout at all —
@@ -2130,11 +2181,11 @@ else
     # evidence), so this shape grades FAIL, not UNVERIFIED, and names the
     # summary line so the row is diagnosable without the agent.
     if vacuous_native_suite \$LOGD/native.log; then
-      cell ci-pass UNVERIFIED "native suite NEVER RAN (vacuous no-test-path placeholder) — no repo signal"
+      cell ci-pass UNVERIFIED "native suite NEVER RAN (vacuous no-test-path placeholder) — no repo signal\$JQCTX"
     elif native_zero_tests \$LOGD/native.log; then
-      cell ci-pass FAIL "vacuous pass: native runner exited 0 but ZERO tests ran (summary: \$(grep -E '(passed|failed|error|no tests ran)' \$LOGD/native.log | tail -1 | cut -c1-160)) — a zero-test suite is never repo evidence (QA-AUGER-1)"
+      cell ci-pass FAIL "vacuous pass: native runner exited 0 but ZERO tests ran (summary: \$(grep -E '(passed|failed|error|no tests ran)' \$LOGD/native.log | tail -1 | cut -c1-160)) — a zero-test suite is never repo evidence (QA-AUGER-1)\$JQCTX"
     elif [ "\$ci_rc" = "skip" ]; then
-      cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS"
+      cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS\$JQCTX"
     else
       # QA-CHIMERA-V2-39 (2026-10-04): an act leg that FAILED (e.g. every job
       # dying at 'Set up Python' inside act) must NOT be folded into a single
@@ -2142,9 +2193,9 @@ else
       # a pass. Emit the native verdict on ci-pass and the act leg separately
       # as ci-act, so an act-leg failure can never read OK.
       if [ "\$ci_rc" = "skip" ]; then
-        cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS"
+        cell ci-pass OK "act: no triggerable workflow\$QA_ACT_NOTE — native suite PASS\$JQCTX"
       else
-        cell ci-pass OK "native suite PASS (see ci-act for the act leg)"
+        cell ci-pass OK "native suite PASS (see ci-act for the act leg)\$JQCTX"
         cell ci-act UNVERIFIED "act failed rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log)\$ACTCTXOK — a failed act leg is never graded OK; hosted CI is authoritative for the workflow verdict"
       fi
     fi
@@ -2165,17 +2216,17 @@ else
       # the suite NEVER RAN, so this leg carries no repo signal. The harness
       # picked the runner by repo shape but could not provision it (PEP-735
       # dependency-group repos); grade the environment gap, not a repo defect.
-      cell ci-pass UNVERIFIED "native runner missing (rc=\$nat_rc) - the suite NEVER RAN, no repo signal; INFRA-FAIL, not a result: \$(native_runner_missing_cause \$LOGD/native.log)"
+      cell ci-pass UNVERIFIED "native runner missing (rc=\$nat_rc) - the suite NEVER RAN, no repo signal; INFRA-FAIL, not a result: \$(native_runner_missing_cause \$LOGD/native.log)\$JQCTX"
     elif [ "\$ci_rc" = "skip" ]; then
-      cell ci-pass FAIL "no triggerable workflow\$QA_ACT_NOTE — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX"
+      cell ci-pass FAIL "no triggerable workflow\$QA_ACT_NOTE — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$JQCTX"
     elif ci_only_failure \$LOGD/ci.log; then
       # QA-9ROUTER-19 class 2: the act leg's ONLY failures are the workflow's own
       # registry/package coordinates (a private image login/pull outside a real
       # runner) — never a branch-push regression. Grade it INFO with the reason
       # named, so the row is informational instead of a false product FAIL.
-      cell ci-pass INFO "act's failures are the workflow's own registry/package coordinates, not a branch-push regression (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX"
+      cell ci-pass INFO "act's failures are the workflow's own registry/package coordinates, not a branch-push regression (\$(act_failure_context \$LOGD/ci.log)) — native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX\$JQCTX"
     else
-      cell ci-pass FAIL "native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX (act leg rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log))"
+      cell ci-pass FAIL "native rc=\$nat_rc: \$NFAIL\$NCTX\$GOCTX\$ACTCTX (act leg rc=\$ci_rc: \$(act_failure_context \$LOGD/ci.log))\$JQCTX"
     fi
   fi
 fi
