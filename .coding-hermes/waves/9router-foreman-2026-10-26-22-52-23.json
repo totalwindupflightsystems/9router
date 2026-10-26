@@ -1,0 +1,19 @@
+{
+  "tick_id": "9router-foreman-2026-10-26-22-52-23",
+  "project": "9router",
+  "block_id": "REL-9ROUTER-018",
+  "wave_size": 1,
+  "mode": "serial-fallback",
+  "selection": ["REL-9ROUTER-017"],
+  "reason": "block_drive selected REL-9ROUTER-018 as the highest-ranked DRIVE block; REL-9ROUTER-017 is its pending rolling release-readiness successor. The rows share the same release seam, so they are not independent. Host nproc=16 and loadavg=11.75 gives slots=5, but one row is selected for this one-block tick.",
+  "workers": [{
+    "task_id": "REL-9ROUTER-017",
+    "worktree": "/home/kara/worktrees/9router-REL-9ROUTER-017",
+    "branch": "wt/REL-9ROUTER-017",
+    "model": "gpt-5.6-terra",
+    "provider": "openai-codex",
+    "brief": "/tmp/9router-foreman-2026-10-26-22-52-23-REL-9ROUTER-017.md",
+    "base": "9296f4a98174367f36c9385ce71484c63da30cbf",
+    "status": "dispatched"
+  }]
+}
