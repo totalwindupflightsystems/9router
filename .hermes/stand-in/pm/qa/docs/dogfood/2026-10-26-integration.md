@@ -67,7 +67,7 @@ The home checkout had unrelated in-flight changes at verification time, includin
 
 Trace
 
-ch:trace row=QA-AUDIT-HARNESS-002 spec=none:no-shipped-spec wave=qa-audit-dogfood-2026-10-26-15-11-01 test=live:literal-target-and-scoped-bunker-battery doc=docs/dogfood/2026-10-26-integration.md prompt=~/.hermes/skills/coding-hermes-dogfood/SKILL.md evidence=docs/dogfood/evidence/2026-10-26/qa-audit-scoped.jsonl witness=live:bunker-mvp verdict=none:read-only-dogfood-no-judge commit=none:artifact-write-not-yet-committed memory=none:no-duckbrain-write-this-tick
+ch:trace row=QA-AUDIT-HARNESS-002 spec=none:no-shipped-spec wave=qa-audit-dogfood-2026-10-26-15-11-01 test=live:literal-target-and-scoped-bunker-battery doc=docs/dogfood/2026-10-26-integration.md prompt=~/.hermes/skills/coding-hermes-dogfood/SKILL.md evidence=docs/dogfood/evidence/2026-10-26/qa-audit-scoped.jsonl witness=live:bunker-mvp verdict=none:read-only-dogfood-no-judge commit=106396116f0568767b87315a88e650c18fa157d3 memory=none:no-duckbrain-write-this-tick
 
 Closeout
 
