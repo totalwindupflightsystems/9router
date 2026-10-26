@@ -12,11 +12,11 @@
 #   project      — fleet project name (default: derived from pipeline)
 #   extra_env_csv— optional "K=V,K2=V2" added to DAGGER_ENV (overrides)
 #
-# Env contract (all optional, defaults shown):
+# Env contract (all optional):
 #   REAL_MODE    — 0 (default): dry-run / report-only, no board/ns writes
 #                  1: perform writes (file findings, ns keys, scratch)
-#   DAGGER_BIN   — default /home/kara/hermes-dagger/dagger
-#   DAGGER_HOME  — default /home/kara/hermes-dagger
+#   DAGGER_BIN   — path to dagger binary (resolved via PATH/command -v by default)
+#   DAGGER_HOME  — dagger home directory (resolved relative to DAGGER_BIN)
 #   ROLE_PORT    — force a port (default: free-port scan 11000-16999)
 #   DELIVER      — print the report to stdout (cron delivery) — default yes
 #
@@ -42,8 +42,20 @@ PROJECT="${2:-}"
 EXTRA_ENV="${3:-}"
 [ -z "$PIPELINE" ] && { echo "dagger-role-tick: pipeline required (qa|dogfooding|duckbrain-sync|pm|bankai|plus-ultra)" >&2; exit 2; }
 
-DAGGER_BIN="${DAGGER_BIN:-/home/kara/hermes-dagger/dagger}"
-DAGGER_HOME="${DAGGER_HOME:-/home/kara/hermes-dagger}"
+# Resolve dagger via PATH (command -v), falling back to the canonical install path.
+# Env overrides DAGGER_BIN and DAGGER_HOME take priority.
+if [ -z "$DAGGER_BIN" ]; then
+  _dagger=$(command -v dagger 2>/dev/null || echo "")
+  if [ -n "$_dagger" ]; then
+    DAGGER_BIN="$_dagger"
+    DAGGER_HOME="$(dirname "$DAGGER_BIN")/.."
+  else
+    DAGGER_BIN="/home/kara/Hermes-DAGger/hermes-dagger/dagger"
+    DAGGER_HOME="/home/kara/Hermes-DAGger/hermes-dagger"
+  fi
+else
+  DAGGER_HOME="${DAGGER_HOME:-$(dirname "$DAGGER_BIN")/..}"
+fi
 REAL_MODE="${REAL_MODE:-0}"
 [ -x "$DAGGER_BIN" ] || { echo "dagger-role-tick: $DAGGER_BIN not found" >&2; exit 2; }
 
