@@ -1,3 +1,19 @@
+# 9Router dogfood diagnostics
+
+This file records source-grounded build and real-use diagnostics. Older entries are preserved below; the 2026-10-26 run adds the current-HEAD boundary.
+
+## 2026-10-26 current HEAD
+
+Target tree: federation `e6003215bf35d0ca1031dac6aaeb463d640dc369`.
+
+Clean local setup used a detached worktree with `npm ci`, isolated `HOME`, isolated `DATA_DIR`, and port 20226. The server answered `/api/health` 200, `/api/version` 200 with `0.5.111`, `/v1/models` 200 with one model (`mmf/mimo-auto`), `/v1/models/embedding` 200 with zero entries, and `/v1/models/info` 200. Login with the empty-store fallback password returned success. The server exited before the authenticated client-key continuation; do not call this a completed chat workflow.
+
+The host already ran several 9Router/Next processes, so the run used a detached worktree, a separate port, a separate HOME, and a separate DATA_DIR. The isolated process later disappeared before the continuation. That lifecycle result is not attributed to the product because no server log or deployment identity was captured for the exit.
+
+The fresh-agent battery used `/home/kara/.hermes/scripts/bunker-qa.sh launch /home/kara/9router --keep` with `BUNKER_QA_SSH_PORT=22`, then `collect`. Agent `e660f02d` was created on `bunker-mvp`, the evidence journal recorded 20 rows, and `bunker info e660f02d` returned `not_found` after collection. The battery's fresh-install detector looked for `toolsd`, not the Node/Next 9Router artifact; its FAIL is therefore harness evidence, not a proven 9Router install failure. The same battery reported no triggerable workflow, a previous-release upgrade build failure, and a UI probe redirect during Next login compilation. These remain unverified product claims.
+
+No code, board row, scheduler state, credentials, provider connection, or real data was changed. No performance row was filed: measured local route calls were below a user-noticeable threshold after startup.
+
 # 9Router Federation — Diagnostics Trail (2026-08-08 dogfood)
 
 _How the federation feature is built, what the dogfood run found, and the right way to
