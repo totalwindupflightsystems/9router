@@ -393,6 +393,18 @@
   `/health` → `status: degraded` (embedding provider unhealthy) at write time, so recall of this
   record may lag until embeddings recover.
 
+## 2026-10-26 — qa-audit-dogfood-2026-10-26-15-11-01
+
+- Verdict: UNKNOWN-VALUE for qa-audit itself; PROMISING-BUT-ROUGH for the underlying bunker-qa harness.
+- Promise tested: the scheduler-resolved qa-audit target can be sent through the documented status → launch → collect lifecycle and produce a correctly identified fresh-machine battery.
+- Target resolution: scheduler workdir `/home/kara/.hermes/stand-in/pm/qa`, owning board `/home/kara/.hermes/stand-in/pm/qa/.coding-hermes/board`, git root `/home/kara`, HEAD `c4b6a56e702a258a2576ddaef6aa079938d944e0`.
+- Real use: `qa_discover.py 1` returned auger-foreman; `bunker-qa.sh status` returned `bunkerd=active docker=yes act=no uidmap=yes` in 0.42s cold and 427.9ms ± 1.6ms warm. The literal target launch refused in 0.03s because the target is a subdirectory of `/home/kara` and the parent would be the wrong product.
+- Scoped diagnostic: `BUNKER_QA_SUBDIR=.hermes/stand-in/pm/qa bunker-qa.sh launch /home/kara` took 29.76s, launched agent `acdd91d8`, but reported `project=kara`; collect took 54.51s, pulled 19 rows, and teardown was verified (`bunker info` not_found and no id in the later bunker census). The resulting cells were not a qa-audit verdict: fresh-install INFO/ENV-BLOCKED (pnpm absent), ci-pass UNVERIFIED, upgrade FAIL (npm absent), and remaining cells N/A/UNVERIFIED/INFO as recorded in the integration report.
+- Install leg: PARTIAL, not PASS and not silently skipped. bunker3 and bunker4 timed out; bunker2 and bunker-mvp answered. The alternate run did not prove qa-audit because identity became `kara` and the agent lacked pnpm/npm.
+- Findings: re-proved existing `QA-AUDIT-HARNESS-002`; no duplicate row minted. No PERF row: launch/collect waits were remote provisioning/teardown with near-zero local CPU.
+- Left behind: `docs/dogfood/2026-10-26-integration.md`, `docs/dogfood/evidence/2026-10-26/qa-audit-scoped.jsonl`, `docs/dogfood/evidence/2026-10-26/target-resolution.txt`, updated `docs/dogfood/diagnostics.md`, and updated `skills/qa-audit-usage/SKILL.md`.
+- Foreman not woken; no code, board, scheduler, visibility, permission, or credential changes.
+
 ## 2026-10-23 (13:43Z tick) — NO-OP RESUME (third fire): verified, nothing re-run, nothing missing
 
 - **HEAD == origin/main == `f4b3431827de…`**, unpushed 0, behind 0 (`git fetch` + `rev-list --count`).

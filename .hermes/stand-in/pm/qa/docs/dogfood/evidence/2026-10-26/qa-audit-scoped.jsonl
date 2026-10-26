@@ -1,0 +1,22 @@
+{"project":"kara","cell":"repo-head","status":"OK","detail":"tested HEAD=c4b6a56e702a258a2576ddaef6aa079938d944e0 at launch=2026-10-26T15:22:34Z (pull=clone dirty — pull skipped, testing recorded sha)","ts":"2026-10-26T15:22:04Z"}
+{"project":"kara","cell":"launch","status":"OK","detail":"agent=acdd91d8 server=bunker-mvp ttl=4h script_bytes=147058 — battery started detached (qa-run.sh); phase B: bunker-qa.sh collect --evidence /tmp/qa-audit-dogfood-20261026-1511-scoped.jsonl","ts":"2026-10-26T15:22:34Z"}
+{"project":"kara","cell":"repo-head","status":"OK","detail":"tested HEAD=c4b6a56e702a258a2576ddaef6aa079938d944e0 (pull: clone dirty — pull skipped, testing recorded sha)","ts":"2026-10-26T15:22:34.201529+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"go 1.27.3 installed (~/tools/go; floor=none distro=1.27.3)","ts":"2026-10-26T15:22:37.327880+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"system gcc/g++ toolchain (~/tools/bin wrappers -> gcc/g++) — preferred over zig-cc for C++ cgo deps (MCP-008)","ts":"2026-10-26T15:22:44.722445+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"make available (preinstalled) — GNU Make 4.3","ts":"2026-10-26T15:22:44.774530+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"jq installed (static jq-linux64 -> jq-1.8.2 at /home/bunker-acdd91d8/tools/bin/jq)","ts":"2026-10-26T15:22:45.560616+00:00"}
+{"project":"kara","cell":"fresh-install","status":"INFO","detail":"ENV-BLOCKED: the agent lacks a build tool the install step calls (pnpm: command not found) and has no sudo to install it — harness env, not a repo defect","ts":"2026-10-26T15:24:40.818873+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"compose plugin installed (~/.docker/cli-plugins/docker-compose)","ts":"2026-10-26T15:24:42.553600+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"buildx plugin installed (github.com/docker/buildx v0.38.1)","ts":"2026-10-26T15:24:44.012916+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"OK","detail":"HARNESS-COMPOSE=ok (docker compose version passes)","ts":"2026-10-26T15:24:44.319445+00:00"}
+{"project":"kara","cell":"toolchain-bootstrap","status":"INFO","detail":"HARNESS_NODE=missing — node/npm unavailable; ui-probe frontend arm will grade ENV-BLOCKED","ts":"2026-10-26T15:24:44.364017+00:00"}
+{"project":"kara","cell":"ci-pass","status":"UNVERIFIED","detail":"native runner missing (rc=127) - suite NEVER RAN; INFRA-FAIL, not a result: pnpm: command not found","ts":"2026-10-26T15:26:53.446372+00:00"}
+{"project":"kara","cell":"upgrade","status":"FAIL","detail":"previous release kara@0.6.0-federation.1 would not install: npm command not found","ts":"2026-10-26T15:27:04.912484+00:00"}
+{"project":"kara","cell":"docker-deploy","status":"N/A","detail":"no compose file","ts":"2026-10-26T15:27:04.986722+00:00"}
+{"project":"kara","cell":"ui-probe","status":"N/A","detail":"no web UI detected: no npm dev/start script and no go.mod HTTP server source","ts":"2026-10-26T15:27:11.263947+00:00"}
+{"project":"kara","cell":"chaos-disconnect","status":"UNVERIFIED","detail":"ci-pass native suite failed first; disconnect verdict is not derivable","ts":"2026-10-26T15:28:50.724444+00:00"}
+{"project":"kara","cell":"chaos-shutdown","status":"N/A","detail":"no compose file","ts":"2026-10-26T15:28:50.781932+00:00"}
+{"project":"kara","cell":"chaos-corruption","status":"N/A","detail":"no db/state files in repo","ts":"2026-10-26T15:28:50.826989+00:00"}
+{"project":"kara","cell":"chaos-resource","status":"UNVERIFIED","detail":"command not found under cap; suite NEVER RAN; INFRA-FAIL, not a result","ts":"2026-10-26T15:28:56.672014+00:00"}
+{"project":"kara","cell":"chaos-errorpath","status":"INFO","detail":"no start command detected / entrypoint not observable — missing-config behavior UNVERIFIED","ts":"2026-10-26T15:28:58.525876+00:00"}
+{"cell":"collect","status":"OK","detail":"agent=acdd91d8 (bunker-mvp) — pulled 19 evidence rows, merge-deduped; temp agent destroyed","ts":"2026-10-26T15:29:10Z"}

@@ -1,0 +1,36 @@
+qa-audit dogfood target-resolution evidence
+Tick: qa-audit-dogfood-2026-10-26-15-11-01
+
+Scheduler DB:
+qa-audit-dogfood -> workdir /home/kara/.hermes/stand-in/dogfood/qa-audit
+repo_url local:/home/kara/.hermes/stand-in/pm/qa
+owning board /home/kara/.hermes/stand-in/pm/qa/.coding-hermes/board
+resolved git root /home/kara
+resolved HEAD c4b6a56e702a258a2576ddaef6aa079938d944e0
+
+Literal target command:
+bash ~/.hermes/scripts/bunker-qa.sh launch /home/kara/.hermes/stand-in/pm/qa
+rc=1
+real=0.03s
+stderr=ERROR: /home/kara/.hermes/stand-in/pm/qa is a SUBDIRECTORY of git repo /home/kara — bunker-qa.sh would sync the whole parent repo and grade the wrong product. Set BUNKER_QA_SUBDIR=<subdir-relative-to-repo> ...
+
+Scope workaround:
+BUNKER_QA_SUBDIR=.hermes/stand-in/pm/qa BUNKER_QA_EVIDENCE=/tmp/qa-audit-dogfood-20261026-1511-scoped.jsonl bunker-qa.sh launch /home/kara
+rc=0
+real=29.76s
+agent=acdd91d8
+reported project=kara
+expected project=qa-audit
+
+Collection:
+bunker-qa.sh collect --evidence /tmp/qa-audit-dogfood-20261026-1511-scoped.jsonl
+rc=0
+real=54.51s
+rows=19
+teardown: bunker info acdd91d8 -> not_found; later bunker list --server bunker-mvp --status all contained no acdd91d8
+
+Bunker reachability:
+bunker3 / las-bunker-03: SSH timeout
+bunker2 / las-bunker-02: systemctl is-active bunkerd -> active
+bunker4 / las-bunker-04: SSH timeout
+bunker-mvp: bunker-qa status -> bunkerd=active docker=yes act=no uidmap=yes
