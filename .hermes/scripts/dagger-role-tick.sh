@@ -44,9 +44,16 @@ EXTRA_ENV="${3:-}"
 
 # Resolve dagger via PATH (command -v), falling back to the canonical install path.
 # Env overrides DAGGER_BIN and DAGGER_HOME take priority.
-if [ -z "$DAGGER_BIN" ]; then
+# NB: `${DAGGER_BIN:-}` — `set -u` above makes the bare form an unbound-variable
+# death (exit 1 in ~1s, before RUN_DIR/any log line). That regression took all
+# 238 command-route *-qa lanes down from 2026-10-26T00:12 (a9bef919f6) until
+# 2026-10-27T12:1x. Keep the guard.
+if [ -z "${DAGGER_BIN:-}" ]; then
   _dagger=$(command -v dagger 2>/dev/null || echo "")
-  if [ -n "$_dagger" ]; then
+  # A bare BINARY COPY on PATH (e.g. ~/.local/bin/dagger) resolves ../ to a home
+  # that has no examples/ corpus, so the run dies instantly. Only accept a PATH
+  # hit that carries the pipeline corpus; otherwise use the canonical install.
+  if [ -n "$_dagger" ] && [ -d "$(dirname "$_dagger")/../examples/coding-hermes" ]; then
     DAGGER_BIN="$_dagger"
     DAGGER_HOME="$(dirname "$DAGGER_BIN")/.."
   else
@@ -152,6 +159,14 @@ case "$PIPELINE" in
     exit 2
     ;;
 esac
+
+# Hard preflight: prove the resolved install actually carries THIS pipeline.
+# Fail loud and named rather than letting `dagger run` die on a relative path
+# (the old symptom was `exit status 1` with an empty failure_reason).
+if [ ! -f "$DAGGER_HOME/examples/coding-hermes/$PIPELINE.ts" ]; then
+  echo "dagger-role-tick: pipeline corpus missing: $DAGGER_HOME/examples/coding-hermes/$PIPELINE.ts (DAGGER_BIN=$DAGGER_BIN DAGGER_HOME=$DAGGER_HOME)" >&2
+  exit 2
+fi
 [ -n "$EXTRA_ENV" ] && ENV_BASE="$ENV_BASE,$EXTRA_ENV"
 
 # DAGGER-115: carry the scheduler/role identity through DAGGER_ENV as part
@@ -244,7 +259,10 @@ cd "$DAGGER_HOME" || exit 1
 SRV=$!
 
 up=0
-for i in $(seq 1 30); do
+# Window: 120 x 0.5s = 60s. Bind+config-persist took >15s under a load-28 host
+# (2026-10-27), which is why the old 30-try/15s loop reported "serve failed" on
+# a perfectly healthy binary. The port is proven free before this loop.
+for i in $(seq 1 120); do
   code=$(curl -s -o /dev/null -w '%{http_code}' -K <(printf 'header = "Authorization: Bearer %s"\n' "$DAGGER_API_TOKEN") "http://127.0.0.1:$PORT/health" 2>/dev/null || echo 000)
   [ "$code" = "200" ] && { up=1; break; }
   sleep 0.5
