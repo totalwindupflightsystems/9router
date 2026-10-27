@@ -367,6 +367,58 @@ else
   check "invalid lifecycle flag is rejected" yes yes
 fi
 
+echo "=== fresh-install go artifact detection (QA-RUNNER-FRESH-1 / QA-HERMES-DAGGER-037)"
+# The rc=0 fresh-install branch keyed on the literal `toolsd` binary and
+# false-FAILED every other go repo (measured 2026-10-27 on crier, guard,
+# hermes-dagger). Lockstep contract: a real install path is exercised; a bare
+# `go build ./...` is a compile check with NO artifact expectation; and the
+# rendered battery never greps a hardcoded binary name.
+if [ -f "$HARNESS" ] && command -v go >/dev/null 2>&1; then
+  GOFIX="$TMPD/go-fixture"
+  mkdir -p "$GOFIX/cmd/toolsd" "$GOFIX/internal/thing" "$TMPD/go-bin"
+  printf 'module example.com/qafixture\n\ngo 1.22\n' > "$GOFIX/go.mod"
+  printf 'package main\n\nfunc main() {}\n' > "$GOFIX/cmd/toolsd/main.go"
+  printf 'package thing\n\nfunc Hi() string { return "hi" }\n' > "$GOFIX/internal/thing/thing.go"
+  DETECT=$(bash "$HARNESS" __detect-cmds "$GOFIX" qa-fresh-agent 2>/dev/null)
+  case "$DETECT" in
+    *'DETECT_INSTALL=GOBIN="$HOME/.local/bin" go install ./cmd/toolsd'*)
+      check "single-main go repo installs its declared binary" yes yes ;;
+    *) check "single-main go repo installs its declared binary" yes "$DETECT" ;;
+  esac
+  case "$DETECT" in
+    *'DETECT_GO_ARTIFACT=toolsd'*) check "artifact expectation follows the detected binary" yes yes ;;
+    *) check "artifact expectation follows the detected binary" yes no ;;
+  esac
+  # Multi-package repo WITHOUT cmd mains: build-only, no artifact expectation
+  # (this is the class that false-failed before the fix).
+  GOFIX2="$TMPD/go-fixture-nomains"
+  mkdir -p "$GOFIX2/internal/thing"
+  printf 'module example.com/qafixture2\n\ngo 1.22\n' > "$GOFIX2/go.mod"
+  printf 'package thing\n\nfunc Hi() string { return "hi" }\n' > "$GOFIX2/internal/thing/thing.go"
+  DETECT2=$(bash "$HARNESS" __detect-cmds "$GOFIX2" qa-fresh-agent 2>/dev/null)
+  case "$DETECT2" in
+    *'DETECT_INSTALL=go build ./...'*) check "no-main go repo stays a build-only compile check" yes yes ;;
+    *) check "no-main go repo stays a build-only compile check" yes "$DETECT2" ;;
+  esac
+  if echo "$DETECT2" | grep -q '^DETECT_GO_ARTIFACT=$'; then
+    check "build-only repo has empty artifact expectation" yes yes
+  else
+    check "build-only repo has empty artifact expectation" yes "$(echo "$DETECT2" | grep 'DETECT_GO_ARTIFACT=' | head -1)"
+  fi
+  QA_HEAD_SHA=9749c41c QA_HEAD_PULL=test bash "$HARNESS" __gen-remote-detected "$GOFIX" 2>/dev/null > "$TMPD/go-render.sh"
+  if bash -n "$TMPD/go-render.sh" 2>/dev/null && ! grep -qF 'no artifact found (toolsd not in PATH' "$TMPD/go-render.sh"; then
+    check "rendered battery parses and carries no hardcoded toolsd probe" yes yes
+  else
+    check "rendered battery parses and carries no hardcoded toolsd probe" yes no
+  fi
+  case "$(grep -oF "QA_GO_ARTIFACT='toolsd'" "$TMPD/go-render.sh")" in
+    "QA_GO_ARTIFACT='toolsd'") check "rendered artifact equals the fixture's binary name" yes yes ;;
+    *) check "rendered artifact equals the fixture's binary name" yes "$(grep -o "QA_GO_ARTIFACT='[^']*'" "$TMPD/go-render.sh" | head -1)" ;;
+  esac
+else
+  echo "  SKIP go toolchain unavailable for fresh-install fixture"
+fi
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
