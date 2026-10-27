@@ -605,7 +605,12 @@ detect_cmds() {
       # hand on the same agent, same tree, completed the job. The -W now comes
       # from the shared staging block like every other workflow: select ci.yml,
       # keep ci_cmd bare, let ACT_WF_DIR staging supply the single -W target.
-      ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull"
+      # QA-HERMES-DAGGER-036: no baked DOCKER_HOST prefix — the generated
+      # script's dual-socket discovery (/run/user/$UID first, /run/bunker
+      # fallback) exports the socket that actually answers BEFORE the act leg
+      # runs; a baked prefix would override that discovery with the legacy
+      # path the agent uid cannot even stat.
+      ci_cmd="~/bin/act -q --pull"
       DETECT_CI_FILES=" .github/workflows/ci.yml"
     else
       # Select the workflows whose `on:` can fire for a push to the branch the
@@ -688,7 +693,8 @@ detect_cmds() {
       done
       if [ -n "$ci_select" ]; then
         DETECT_CI_FILES="$ci_select"           # baked, leading space, repo-relative
-        ci_cmd="DOCKER_HOST=unix:///run/bunker/$agent/docker.sock ~/bin/act -q --pull"
+        # QA-HERMES-DAGGER-036: no baked DOCKER_HOST prefix — see the ci.yml arm.
+        ci_cmd="~/bin/act -q --pull"
       else
         # No workflow can fire on a push to this branch ⇒ act has nothing that
         # says anything about the repo, and its unfiltered run grades the
@@ -2114,30 +2120,93 @@ if [ -f pnpm-lock.yaml ] && ! command -v pnpm >/dev/null 2>&1 && command -v npm 
     echo "WARN: pnpm bootstrap failed (offline agent?) — pnpm repos will grade ENV-BLOCKED rc=127: \$(tail -1 \$LOGD/pnpm.log 2>/dev/null)" >&2
   fi
 fi
-# Point docker at the agent's own rootless daemon — bare 'docker' defaults to
-# /var/run/docker.sock (rootful, permission-denied for the agent uid) or the
-# user-socket guess /run/user/\$UID/docker.sock (proven chimera-v2 run 09-01).
-[ -x ~/bin/docker ] && export DOCKER_HOST="unix:///run/bunker/$agent/docker.sock"
-for i in \$(seq 1 20); do [ -S /run/bunker/$agent/docker.sock ] && break; sleep 2; done
+# QA-HERMES-DAGGER-036 (2026-10-27): DUAL-socket discovery. The agent's REAL
+# rootless socket is /run/user/<uid>/docker.sock (dockerd-rootless-setuptool.sh
+# prints exactly that DOCKER_HOST; measured 2026-10-23 on agent e3567b89 —
+# 'docker version' answered Server 29.8.1 over it). /run/bunker/<agent>/
+# docker.sock is the legacy fallback and /run/bunker is root:root mode 0700 —
+# the agent uid gets 'Permission denied' even stat-ing it, so the old
+# single-path export+poll could never succeed on such an agent. Poll BOTH
+# paths inside the existing ~40s budget (user socket FIRST), then export
+# DOCKER_HOST to the socket that actually ANSWERS 'docker version'; when
+# neither answers, fall back to the first path that exists as a socket so the
+# failure details still name a real path.
+QA_UID=\$(id -u)
+QA_SOCK_USER="/run/user/\$QA_UID/docker.sock"
+QA_SOCK_BUNKER="/run/bunker/$agent/docker.sock"
+if [ -x ~/bin/docker ]; then
+  for i in \$(seq 1 20); do [ -S "\$QA_SOCK_USER" ] || [ -S "\$QA_SOCK_BUNKER" ] && break; sleep 2; done
+  for s in "\$QA_SOCK_USER" "\$QA_SOCK_BUNKER"; do
+    if [ -S "\$s" ] && DOCKER_HOST="unix://\$s" ~/bin/docker version >/dev/null 2>&1; then
+      export DOCKER_HOST="unix://\$s"
+      break
+    fi
+  done
+  if [ -z "\${DOCKER_HOST:-}" ]; then
+    for s in "\$QA_SOCK_USER" "\$QA_SOCK_BUNKER"; do
+      if [ -S "\$s" ]; then export DOCKER_HOST="unix://\$s"; break; fi
+    done
+  fi
+fi
 # QA-CONSENSUS-24 (2026-10-10): when the agent's docker socket never appears
-# (rootless daemon never came up), the old script CONTINUED into docker legs
-# that all fail on "Cannot connect" - or worse, aborted under set -u/pipefail
-# after the upgrade cell, TRUNCATING the battery silently (docker-deploy,
-# ui-probe and all 4 chaos cells never ran, evidence incomplete). Gate every
-# docker leg on one probe and grade them SKIPPED-with-reason instead.
+# (rootless daemon never came up), the pre-CONSENSUS-24 script CONTINUED into
+# docker legs that all fail on "Cannot connect" - or worse, aborted under
+# set -u/pipefail after the upgrade cell, TRUNCATING the battery silently.
+# QA-HERMES-DAGGER-036 (2026-10-27): the CONSENSUS-24 fail-closed block then
+# over-corrected — its final 'exit 2' killed ci-pass/upgrade/ui-probe/
+# chaos-disconnect (NONE of which need docker) and its SKIPPED set lumped the
+# three NON-compose chaos cells (corruption/resource/errorpath run the native
+# binary, no docker) in with the docker legs; measured 2026-10-23 (agent
+# e3567b89): the battery stopped after 3 productive cells — 0% of the
+# suite/CI/upgrade/UI/disconnect coverage ran. The gate is PER-CELL now: only
+# the docker legs (docker-deploy, chaos-shutdown, and the ci-pass act arm
+# below) grade SKIPPED-with-reason; every other cell executes and the battery
+# reaches its normal end (final CELLS-DONE + qa-run.finished marker).
 QA_DOCKER_OK=0
 if [ -x ~/bin/docker ] && ~/bin/docker version >/dev/null 2>&1; then QA_DOCKER_OK=1; fi
+# Fix (a): with NO answering socket AND the operator opt-in
+# (BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=1, baked as QA_DOCKER_LIFECYCLE_ENABLED)
+# AND the live-host block clear, START the rootless daemon the download
+# ladder above vendors (dockerd-rootless.sh / dockerd-rootless-setuptool.sh
+# from docker-rootless-extras) and re-probe. Default (opt-in unset): start
+# NOTHING — the gap is recorded and the non-docker cells still run. The
+# host-block is the same safety the compose lifecycle cells use: never start
+# docker lifecycle against the real host home.
+if [ \$QA_DOCKER_OK = 0 ] && [ "\$QA_DOCKER_LIFECYCLE_ENABLED" = "1" ] && [ "\$QA_DOCKER_LIFECYCLE_HOST_BLOCK" != "1" ]; then
+  echo "QA-HERMES-DAGGER-036: no docker socket answers and the lifecycle opt-in is set - starting rootless dockerd"
+  export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$QA_UID}"
+  if [ ! -x ~/bin/dockerd-rootless.sh ] && [ -x ~/bin/docker ]; then
+    curl -fsSL -o ~/bin/rootless-extras.tgz https://download.docker.com/linux/static/stable/x86_64/docker-rootless-extras-28.5.2.tgz >>\$LOGD/docker-cli.log 2>&1 \
+      && tar -xzf ~/bin/rootless-extras.tgz -C ~/bin --strip-components=1 >>\$LOGD/docker-cli.log 2>&1 \
+      && rm -f ~/bin/rootless-extras.tgz \
+      && chmod +x ~/bin/dockerd-rootless.sh ~/bin/dockerd-rootless-setuptool.sh ~/bin/rootlesskit ~/bin/rootlesskit-docker-proxy ~/bin/vpnkit 2>/dev/null || true
+  fi
+  [ -x ~/bin/dockerd-rootless-setuptool.sh ] && ~/bin/dockerd-rootless-setuptool.sh install >\$LOGD/dockerd-setup.log 2>&1 || true
+  if [ -x ~/bin/dockerd-rootless.sh ]; then
+    ( nohup ~/bin/dockerd-rootless.sh >\$LOGD/dockerd-rootless.log 2>&1 & )
+    for i in \$(seq 1 20); do
+      [ -S "\$QA_SOCK_USER" ] && DOCKER_HOST="unix://\$QA_SOCK_USER" ~/bin/docker version >/dev/null 2>&1 && break
+      sleep 2
+    done
+  fi
+  if [ -x ~/bin/docker ] && ~/bin/docker version >/dev/null 2>&1; then
+    QA_DOCKER_OK=1
+    for s in "\$QA_SOCK_USER" "\$QA_SOCK_BUNKER"; do
+      if [ -S "\$s" ] && DOCKER_HOST="unix://\$s" ~/bin/docker version >/dev/null 2>&1; then
+        export DOCKER_HOST="unix://\$s"
+        break
+      fi
+    done
+    cell toolchain-bootstrap OK "rootless dockerd started by the harness (lifecycle opt-in) - socket answers at \$DOCKER_HOST (QA-HERMES-DAGGER-036)"
+  else
+    echo "QA-HERMES-DAGGER-036: rootless dockerd start attempted but no socket answers - continuing docker-less"
+  fi
+fi
 if [ \$QA_DOCKER_OK = 0 ]; then
-  echo "QA-CONSENSUS-24: docker daemon/socket UNAVAILABLE - docker-dependent cells grade SKIPPED (environment, not the repo)"
+  echo "QA-CONSENSUS-24: docker daemon/socket UNAVAILABLE - docker-dependent cells grade SKIPPED (environment, not the repo); non-docker cells still run (QA-HERMES-DAGGER-036)"
   cell toolchain-bootstrap INFO "docker daemon/socket UNAVAILABLE after the 40s wait - docker-dependent cells grade SKIPPED (agent environment gap, not a repo defect)"
   cell docker-deploy SKIPPED "agent docker socket never appeared - daemon not up on this agent (QA-CONSENSUS-24 fail-closed)"
   cell chaos-shutdown SKIPPED "agent docker socket never appeared - compose chain NOT exercised (QA-CONSENSUS-24 fail-closed)"
-  cell chaos-corruption SKIPPED "agent docker socket never appeared - probe never ran (QA-CONSENSUS-24 fail-closed)"
-  cell chaos-resource SKIPPED "agent docker socket never appeared - suite not re-run under cap (QA-CONSENSUS-24 fail-closed)"
-  cell chaos-errorpath SKIPPED "agent docker socket never appeared - errorpath probe never ran (QA-CONSENSUS-24 fail-closed)"
-  echo CELLS-DONE
-  touch ~/qa-run.finished
-  exit 2
 fi
 # CI-only failure classification (QA-9ROUTER-19 class 2). Pure log predicate:
 # 0 ⇒ every failure act reported is the workflow's own registry/package
@@ -2194,7 +2263,17 @@ QA_CI_CMD="$ci_cmd"
 # The command is interpreted by bash on the agent, from the agent checkout.
 QA_NATIVE_CMD=$native_cmd_q
 if [ "\$ACT_WF_COUNT" -gt 0 ]; then QA_CI_CMD="\$QA_CI_CMD -W \$ACT_WF_DIR"; fi
-if [ "\$ACT_WF_COUNT" -gt 0 ]; then
+CI_ACT_DOCKER_SKIP=0
+if [ "\$ACT_WF_COUNT" -gt 0 ] && [ "\$QA_DOCKER_OK" = "0" ]; then
+  # QA-HERMES-DAGGER-036: act is a docker leg (jobs run in containers) — with
+  # no answering socket it can only fail 'Cannot connect'. Skip the run, grade
+  # the act arm SKIPPED-with-reason (after the ci-pass grading below), and let
+  # the NATIVE suite carry ci-pass.
+  : > \$LOGD/ci.log
+  ci_rc=skip
+  CI_ACT_DOCKER_SKIP=1
+  QA_ACT_NOTE="\$QA_ACT_NOTE — act leg SKIPPED: agent docker socket unavailable (QA-CONSENSUS-24 fail-closed per QA-HERMES-DAGGER-036); native suite is the grade"
+elif [ "\$ACT_WF_COUNT" -gt 0 ]; then
 ( timeout -k 30 \${BUNKER_QA_ACT_TIMEOUT:-2400} bash -c "\$QA_CI_CMD" ) >\$LOGD/ci.log 2>&1; ci_rc=\$?
 else
 : > \$LOGD/ci.log
@@ -2298,6 +2377,14 @@ else
   fi
 fi
 #QA-CELL:ci-pass:end
+# QA-HERMES-DAGGER-036: emit the act arm's explicit SKIPPED grade when the
+# docker gate kept act from running — the ci-pass cell above already carries
+# the native verdict; the ci-act cell keeps the SKIPPED set complete. (Kept
+# AFTER the cell marker: test_bunker_qa_pytest_detect.sh anchors its
+# chain-extraction span on 'fi' directly above #QA-CELL:ci-pass:end.)
+if [ "\$CI_ACT_DOCKER_SKIP" = "1" ]; then
+  cell ci-act SKIPPED "act needs docker: agent docker socket unavailable — the workflow leg never ran (QA-CONSENSUS-24 fail-closed per QA-HERMES-DAGGER-036); ci-pass carries the native suite verdict"
+fi
 
 # QA-DEXDAT-CORE-15 (2026-10-04): act compose legs leak services that bind
 # PUBLISHED host ports (e.g. a repo's CI stack binding 0.0.0.0:5435->5432).
@@ -2310,7 +2397,9 @@ fi
 # act runner's labels (com.docker.compose.project=act-*, and any container
 # whose name starts with 'act-') so a repo's own freshly-upped stack is never
 # touched; best-effort — a teardown failure logs and continues.
-if [ -x \$HOME/bin/docker ] && [ -n "\${DOCKER_HOST:-}" ]; then
+# QA-HERMES-DAGGER-036: with no answering daemon there is nothing to tear
+# down — gate the sweep on the probe so a docker-less agent never shells out.
+if [ -x \$HOME/bin/docker ] && [ -n "\${DOCKER_HOST:-}" ] && [ "\${QA_DOCKER_OK:-0}" = "1" ]; then
   # QA-DEXDAT-CORE-16 (2026-10-04): act CI legs leak containers that have NO
   # compose label (act names them act-<Job>-<id>) but still PUBLISH host ports
   # (e.g. 127.0.0.1:6379 from an act redis) - the label-only sweep missed them
@@ -2427,7 +2516,9 @@ else cell upgrade FAIL "upgrade path UNVERIFIED: the repo has \$QA_TAG_COUNT rel
 # — docker prints the REAL error FIRST and the footer LAST, so the cell read FAIL
 # with no diagnosis and the deployment stayed unverified. FAIL now names the
 # command, its rc, and the log's leading lines via fail_detail().
-if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
+if [ "\$QA_DOCKER_OK" = "0" ]; then
+  : # QA-HERMES-DAGGER-036: graded SKIPPED in the QA-CONSENSUS-24 block above
+elif ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
   docker_lifecycle_reason=\$(qa_docker_lifecycle_block_reason || true)
   if [ -n "\$docker_lifecycle_reason" ]; then
     cell docker-deploy SKIPPED "safety gate: \$docker_lifecycle_reason"
@@ -2937,7 +3028,9 @@ elif native_zero_tests \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "z
 else cell chaos-disconnect OK "fails fast on disconnect (rc=\$disc_rc): \$(head -2 \$LOGD/disc.log)"; fi
 
 # 7 · chaos-shutdown — SIGTERM stop/restart + SIGKILL recovery (docker path)
-if ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
+if [ "\$QA_DOCKER_OK" = "0" ]; then
+  : # QA-HERMES-DAGGER-036: graded SKIPPED in the QA-CONSENSUS-24 block above
+elif ls docker-compose*.yml compose*.yml >/dev/null 2>&1 || ls docker-compose*.yml 2>/dev/null | grep -q . || ls compose*.yml 2>/dev/null | grep -q .; then
   docker_lifecycle_reason=\$(qa_docker_lifecycle_block_reason || true)
   if [ -n "\$docker_lifecycle_reason" ]; then
     cell chaos-shutdown SKIPPED "safety gate: \$docker_lifecycle_reason"
@@ -3444,11 +3537,14 @@ run() {
     | agent_ssh "cat > ~/qa-run.sh && bash ~/qa-run.sh" | tail -1
   battery_rc=${PIPESTATUS[0]}
   set -o pipefail
-  # QA-CONSENSUS-24 fail-closed: rc=2 = the battery graded docker legs
-  # SKIPPED-with-reason (agent docker socket never appeared) or otherwise
-  # ended short of a full cell set. The evidence is still pulled (partial
-  # rows are real data), but run() exits NONZERO — the caller/DAG must see
-  # the run was incomplete, never a green EVIDENCE= over a truncated battery.
+  # QA-CONSENSUS-24 fail-closed / QA-HERMES-DAGGER-036: a nonzero battery rc
+  # means the generated script ended short of a full cell set. Pre-036 the
+  # docker fail-closed block exited 2 after grading the docker legs SKIPPED;
+  # post-036 that gate is per-cell and a docker-less battery completes with
+  # rc=0, so any nonzero rc now is a REAL truncation. The evidence is still
+  # pulled (partial rows are real data), but run() exits NONZERO — the
+  # caller/DAG must see the run was incomplete, never a green EVIDENCE= over
+  # a truncated battery.
   agent_ssh "cat ~/qa-evidence.jsonl 2>/dev/null" >> "$EVIDENCE" || true
   if [ "$battery_rc" -ne 0 ]; then
     log "QA battery INCOMPLETE on agent (rc=$battery_rc) — evidence pulled with SKIPPED/absent cells; run FAILED closed"
@@ -3909,7 +4005,7 @@ PY
   # cell() writer uses python3 json.dumps = spaced separators).
   LAST_CELL_SEEN=$(grep -Ec '"cell": ?"chaos-errorpath"' "$tmp" || true)
   if [ "${LAST_CELL_SEEN:-0}" -eq 0 ]; then
-    append_collect_row FAIL "battery TRUNCATED on agent=$agent ($SERVER): pulled ${pulled:-0} rows and NONE is the final chaos-errorpath cell — qa-run.sh died mid-battery (known cause: docker socket never appeared pre-QA-CONSENSUS-24 fix; also SIGTERM/SIGKILL mid-run). Evidence merged but the run is INCOMPLETE — recover: re-launch (post-fix batteries grade docker legs SKIPPED instead of dying). agent left intact if still live"
+    append_collect_row FAIL "battery TRUNCATED on agent=$agent ($SERVER): pulled ${pulled:-0} rows and NONE is the final chaos-errorpath cell — qa-run.sh died mid-battery (known cause pre-QA-HERMES-DAGGER-036: the docker fail-closed block exited 2 mid-script; also SIGTERM/SIGKILL mid-run). Evidence merged but the run is INCOMPLETE — recover: re-launch (post-036 batteries grade the docker legs SKIPPED per-cell and run to completion). agent left intact if still live"
     echo "COLLECT-FAIL battery-truncated"
     exit 2
   fi
