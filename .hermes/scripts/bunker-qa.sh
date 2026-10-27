@@ -441,27 +441,18 @@ detect_cmds() {
     done
   elif [ -f "$repo/go.mod" ]; then
     DETECT_INSTALL="go build ./..."
-    # QA-RUNNER-FRESH-1 (2026-10-27): derive the binary name the fresh-install
-    # artifact probe expects. The old probe hardcoded `toolsd` (coding-hermes-
-    # tools' binary) and false-FAILED the fresh-install cell of every other go
+    # QA-RUNNER-FRESH-1 (2026-10-27): the fresh-install artifact probe keyed on
+    # `toolsd` (coding-hermes-tools' binary) and false-FAILED every other go
     # repo while ci-pass/upgrade ran green (crier, guard, hermes-dagger
-    # measured 2026-10-27). Exactly one main package under cmd/<dir>/ -> that
-    # dir's name (its binary lands at ./cmd/<name>/<name> from go build ./...);
-    # repo-root main package -> module base name; multiple mains or an install
-    # override -> BUNKER_QA_INSTALL_BIN wins; empty = build-only install (the
-    # probe is skipped and the cell grades on rc + the CI/native legs).
-    if [ -n "${BUNKER_QA_INSTALL_BIN:-}" ]; then
-      DETECT_GO_ARTIFACT="$BUNKER_QA_INSTALL_BIN"
-    elif [ -d "$repo/cmd" ]; then
-      local _qa_main _qa_mains=()
-      for _qa_main in "$repo"/cmd/*; do
-        [ -d "$_qa_main" ] || continue
-        { ls "$_qa_main"/*.go >/dev/null 2>&1 && grep -qs '^package main$' "$_qa_main"/*.go; } && _qa_mains+=("${_qa_main##*/}")
-      done
-      [ "${#_qa_mains[@]}" -eq 1 ] && DETECT_GO_ARTIFACT="${_qa_mains[0]}"
-    elif { ls "$repo"/*.go >/dev/null 2>&1 && grep -qs '^package main$' "$repo"/*.go; }; then
-      DETECT_GO_ARTIFACT="$(basename "$repo")"
-    fi
+    # measured 2026-10-27). `go build ./...` on a multi-package repo DISCARDS
+    # the objects by design (go: "when compiling multiple packages ... build
+    # discards the resulting object") — it is a compile check, so the honest
+    # classification is build-only: empty artifact, cell grades on rc, and the
+    # suite evidence lives in the ci-pass/native legs. A repo whose install
+    # DOES produce a binary (go install, make install, go build -o) names it
+    # via BUNKER_QA_INSTALL_BIN and the rendered probe checks PATH + repo
+    # root for it.
+    DETECT_GO_ARTIFACT="${BUNKER_QA_INSTALL_BIN:-}"
   elif [ -f "$repo/pyproject.toml" ]; then
     # QA-HIVEMIND-WORK-25 (2026-10-13): Python 3.12+ images (3.14 on bunker-mvp
     # agent 6a748db5) are PEP 668 externally-managed — bare `pip install`
