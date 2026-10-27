@@ -4,16 +4,30 @@
   "block_id": "REL-9ROUTER-018",
   "wave_size": 1,
   "mode": "serial-fallback",
-  "selection": ["REL-9ROUTER-017"],
+  "selection": [
+    "REL-9ROUTER-017"
+  ],
   "reason": "block_drive selected REL-9ROUTER-018 as the highest-ranked DRIVE block; REL-9ROUTER-017 is its pending rolling release-readiness successor. The rows share the same release seam, so they are not independent. Host nproc=16 and loadavg=11.75 gives slots=5, but one row is selected for this one-block tick.",
-  "workers": [{
-    "task_id": "REL-9ROUTER-017",
-    "worktree": "/home/kara/worktrees/9router-REL-9ROUTER-017",
-    "branch": "wt/REL-9ROUTER-017",
-    "model": "gpt-5.6-terra",
-    "provider": "openai-codex",
-    "brief": "/tmp/9router-foreman-2026-10-26-22-52-23-REL-9ROUTER-017.md",
-    "base": "9296f4a98174367f36c9385ce71484c63da30cbf",
-    "status": "dispatched"
-  }]
+  "workers": [
+    {
+      "task_id": "REL-9ROUTER-017",
+      "worktree": "/home/kara/worktrees/9router-REL-9ROUTER-017",
+      "branch": "wt/REL-9ROUTER-017",
+      "model": "gpt-5.6-terra",
+      "provider": "openai-codex",
+      "brief": "/tmp/9router-foreman-2026-10-26-22-52-23-REL-9ROUTER-017.md",
+      "base": "9296f4a98174367f36c9385ce71484c63da30cbf",
+      "status": "dispatched"
+    }
+  ],
+  "finished_at": "2026-10-27T11:00:00-05:00",
+  "recovery": {
+    "status": "closed",
+    "worker_commit": "912816b4b57c166d0455f290d142f7ed2515105e",
+    "result": "already landed on federation as 0474b4696f0acd9242ec9de254198f1d261a1081; recovered branch was stale and its product diff was redundant",
+    "branch_gate": "FAIL on inherited branch: secrets/tests PASS, pre-existing lint FAIL",
+    "merged_tree_gate": "PASS: gitreins guard --full",
+    "remote_parity": "PASS: origin/federation..HEAD=0",
+    "board_truth": "REL-9ROUTER-017 remains pending because acceptance is NO-GO; explicit blockers retained"
+  }
 }
