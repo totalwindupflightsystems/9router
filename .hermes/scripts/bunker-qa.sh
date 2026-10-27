@@ -1417,6 +1417,44 @@ native_zero_tests() { # <logfile> -> 0 when the native leg provably ran zero tes
     pytest_zero_collected "\$f"
   fi
 }
+# ─── ENOSPC (disk-capacity) classifiers — DF-GITREINS-POC-104, 2026-10-26 ───
+# The gitreins POC battery's native leg exited rc=120 while the agent log
+# carried \`OSError: [Errno 28] No space left on device\`. That rc is a STORAGE
+# refusal upstream of the suite, not a repository verdict — the same class as
+# build_env_failure / suite_deps_missing / native_runner_missing — yet the
+# ci-pass cell graded it as a product FAIL and chaos-disconnect could only say
+# "native suite FAILED first", so a disk-capped agent manufactured a repo
+# finding and left the disconnect cell ungraded-by-reason. Only the errno-28
+# signatures match here; every non-ENOSPC path keeps its existing grading.
+enospc_signature() { # <logfile> -> print the line proving the disk filled up
+  grep -m1 -E 'No space left on device|ENOSPC|errno 28|errno=28|Errno 28' "\$1" 2>/dev/null | cut -c1-220
+}
+enospc_failure() { # <logfile> -> 0 when the log proves a disk-capacity failure
+  [ -n "\$(enospc_signature "\$1")" ]
+}
+# enospc_artifact — write the STRUCTURED failure artifact that names
+# disk-capacity as the cause, beside the leg's log so collect() can pull it
+# (the cell detail also names the path, so the verdict stays re-readable after
+# the agent is destroyed). Class is "infrastructure-failure" and environment
+# "environment-blocked": the graded cell status stays UNVERIFIED (the harness's
+# ledger vocabulary) rather than inventing a status word downstream readers
+# would silently drop.
+enospc_artifact() { # <leg> <logfile> <rc> -> print the artifact path (empty on failure)
+  local leg="\$1" log="\$2" rc="\$3" art sig
+  art="\$LOGD/enospc-\$leg.json"
+  sig=\$(enospc_signature "\$log" | tr '"' "'" | tr -d '\\\\')
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys,datetime,os,shutil
+leg,log,rc,sig=sys.argv[1:5]
+try: du=shutil.disk_usage(os.path.expanduser("~"))
+except OSError: du=None
+print(json.dumps({"cause":"disk-capacity","class":"infrastructure-failure","environment":"environment-blocked","leg":leg,"rc":rc,"log":log,"signature":sig,"disk_total_bytes":getattr(du,"total",None),"disk_free_bytes":getattr(du,"free",None),"ts":datetime.datetime.now(datetime.timezone.utc).isoformat()}))' "\$leg" "\$log" "\$rc" "\$sig" > "\$art" 2>/dev/null
+  fi
+  if [ ! -s "\$art" ]; then
+    printf '{"cause":"disk-capacity","class":"infrastructure-failure","environment":"environment-blocked","leg":"%s","rc":"%s","log":"%s","signature":"%s","ts":"%s"}\\n' "\$leg" "\$rc" "\$log" "\$sig" "\$(date -u +%FT%TZ)" > "\$art" 2>/dev/null || art=""
+  fi
+  printf '%s' "\$art"
+}
 # disconnect_suite_counts — derive pass/fail package or test counts from the
 # disconnect log. The marker and this summary are written by the chaos cell so
 # evidence carries more than the subprocess rc. A zero count is intentionally
@@ -2228,7 +2266,19 @@ else
     # act rc=1 checkout-token + native rc=127 make-missing, both harness env).
     # Name that context in the FAIL detail so nobody files it as a repo defect.
     ACTCTX=""; grep -q 'Input required and not supplied: token' \$LOGD/ci.log 2>/dev/null && ACTCTX=" (act sandbox has no GITHUB_TOKEN — checkout/setup steps cannot run in act; act leg not repo evidence, hosted CI is authoritative)"
-    if native_runner_missing \$LOGD/native.log; then
+    # DF-GITREINS-POC-104 (2026-10-26): a disk-capped agent is not a repo
+    # verdict. The native leg's rc (measured 120 on the gitreins POC battery)
+    # came from the log line \`OSError: [Errno 28] No space left on device\` —
+    # ENOSPC is an infra prerequisite failure UPSTREAM of the suite (same class
+    # as build_env_failure / native_runner_missing), so it grades UNVERIFIED
+    # with the class named and NEVER a product FAIL. Both namings are literal
+    # ("environment-blocked", "infrastructure-failure") and the structured
+    # artifact path rides the detail so the cause is re-readable, not re-derived
+    # from prose. Every non-ENOSPC rc keeps the grading below unchanged.
+    if enospc_failure \$LOGD/native.log; then
+      ENOSPC_ART=\$(enospc_artifact native \$LOGD/native.log "\$nat_rc")
+      cell ci-pass UNVERIFIED "environment-blocked — infrastructure-failure (cause=disk-capacity): the agent ran out of disk during the native suite (No space left on device / ENOSPC, errno 28), so nat_rc=\$nat_rc (the native suite rc) is a STORAGE refusal upstream of the suite, never a repo verdict; artifact=\$ENOSPC_ART signature: \$(enospc_signature \$LOGD/native.log)\$JQCTX"
+    elif native_runner_missing \$LOGD/native.log; then
       # QA-TERMINAL-JAIL-9 (2026-09-25): rc=127 '<runner>: command not found' -
       # the suite NEVER RAN, so this leg carries no repo signal. The harness
       # picked the runner by repo shape but could not provision it (PEP-735
@@ -2862,7 +2912,16 @@ native_dur=\$suite_dur
 # its classifier request. That is exercised disconnect evidence, not an empty
 # or never-ran log: name the external transport dependency before the generic
 # native-suite and vacuity branches so it can never be graded as EMPTY.
-if live_test_transport_cut \$LOGD/disc.log; then cell chaos-disconnect INFO "network cut exercised; TestLiveJevRoutesKnownCases hit a live-test transport dependency (proxyconnect/connection refused/dial tcp), so the live classifier was unavailable under cut (rc=\$disc_rc) — non-live suite output was preserved: \$(disconnect_suite_counts \$LOGD/disc.log)"
+# DF-GITREINS-POC-104 (2026-10-26): a battery that died of a FULL DISK never
+# gave the disconnect probe a prerequisite suite, so the cell must say WHY it is
+# ungraded instead of falling through to a derived verdict. Same errno-28
+# signature as ci-pass; cites nat_rc (the native verdict stays coupled) and the
+# structured artifact, so a disk-capped run is UNVERIFIED-by-reason and can
+# never be graded OK "fails fast on disconnect".
+if enospc_failure \$LOGD/native.log || enospc_failure \$LOGD/disc.log; then
+  DISC_ENOSPC_LOG=\$LOGD/native.log; enospc_failure \$LOGD/native.log || DISC_ENOSPC_LOG=\$LOGD/disc.log
+  cell chaos-disconnect UNVERIFIED "environment-blocked — infrastructure-failure (cause=disk-capacity): the battery hit ENOSPC (No space left on device, errno 28) before the network cut could be read (ci-pass nat_rc=\${nat_rc:-unknown}); artifact=\$(enospc_artifact disconnect \$DISC_ENOSPC_LOG "\$disc_rc") signature: \$(enospc_signature \$DISC_ENOSPC_LOG) — the disconnect cell is UNVERIFIED because its prerequisite suite never produced a verdict (DF-GITREINS-POC-104)"
+elif live_test_transport_cut \$LOGD/disc.log; then cell chaos-disconnect INFO "network cut exercised; TestLiveJevRoutesKnownCases hit a live-test transport dependency (proxyconnect/connection refused/dial tcp), so the live classifier was unavailable under cut (rc=\$disc_rc) — non-live suite output was preserved: \$(disconnect_suite_counts \$LOGD/disc.log)"
 elif [ -n "\${nat_rc:-}" ] && [ "\$nat_rc" -ne 0 ] 2>/dev/null; then cell chaos-disconnect UNVERIFIED "ci-pass native suite FAILED first (nat_rc=\$nat_rc) — the disconnect verdict is not derivable from a failing suite; fix the ci-pass failure before reading this cell (QA-HERMES-DAGGER-26); disconnect probe rc=\$disc_rc: \$(head -2 \$LOGD/disc.log)"
 elif [ ! -s \$LOGD/disc.log ] || vacuous_native_suite \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disc.log is EMPTY (0 bytes) or never-ran (no-test-path marker) -- the suite produced NO output, so the network cut was NEVER exercised; rc=\$disc_rc is not a disconnect result (QA-WARPFS-17; QA-BUNKER-29 vacuity class)"
 elif ! disconnect_log_valid \$LOGD/disc.log; then cell chaos-disconnect UNVERIFIED "disconnect evidence incomplete: disc.log must contain NETWORK_CUT_APPLIED and a non-zero suite pass/fail result; rc=\$disc_rc is not sufficient (log: \$(head -3 \$LOGD/disc.log | tr '\\n' ' ' | cut -c1-300))"
@@ -3753,6 +3812,15 @@ PY
   # The cell detail is intentionally a short summary; this sidecar preserves the
   # marker and every suite result after collect destroys the agent.
   local disconnect_artifact="${evidence}.chaos-disconnect.log" disconnect_pull_rc
+  # DF-GITREINS-POC-104: the structured ENOSPC artifact is pulled beside the
+  # disconnect subject log — the cell detail names the agent-side path, this is
+  # the durable copy that survives teardown. Absent artifact ⇒ empty file, no
+  # claim in the detail (never a fabricated cause).
+  local enospc_artifact_file="${evidence}.enospc.json" enospc_pull_rc
+  : > "$enospc_artifact_file"
+  BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh 'for f in ~/qa-logs-*/enospc-*.json; do if [ -f "$f" ]; then cat "$f"; exit 0; fi; done; exit 1' > "$enospc_artifact_file" 2>/dev/null
+  enospc_pull_rc=$?
+  [ "$enospc_pull_rc" -eq 0 ] || : > "$enospc_artifact_file"
   : > "$disconnect_artifact"
   BUNKER_QA_SSH_TIMEOUT="$ssh_to" agent_ssh 'for f in ~/qa-logs-*/disc.log; do if [ -f "$f" ]; then cat "$f"; exit 0; fi; done; exit 1' > "$disconnect_artifact" 2>/dev/null
   disconnect_pull_rc=$?
@@ -3852,6 +3920,9 @@ PY
     detail="$detail; chaos-disconnect log captured at $disconnect_artifact ($(wc -c < "$disconnect_artifact") bytes)"
   else
     detail="$detail; chaos-disconnect log unavailable/empty at $disconnect_artifact — cell evidence remains UNVERIFIED"
+  fi
+  if [ -s "$enospc_artifact_file" ]; then
+    detail="$detail; ENOSPC artifact captured at $enospc_artifact_file ($(wc -c < "$enospc_artifact_file") bytes)"
   fi
   if [ "$keep" = 1 ]; then
     detail="$detail; agent KEPT (launched with --keep) — destroy it manually"
