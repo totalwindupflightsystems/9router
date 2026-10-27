@@ -414,6 +414,7 @@ detect_cmds() {
   local repo="$1" agent="$2"
   local tpkg="" start_script="" gofirst=""
   DETECT_PYTEST_REPO=0   # QA-AUGER-1: baked into the render for the pytest venv bootstrap
+  DETECT_GO_ARTIFACT=""  # QA-RUNNER-FRESH-1: reset per call — no cross-repo leakage
   # escape hatches when the auto-detect guesses wrong (e.g. suite needs extras)
   DETECT_INSTALL="${BUNKER_QA_INSTALL_CMD:-}"
   if [ -z "$DETECT_INSTALL" ]; then
@@ -438,7 +439,29 @@ detect_cmds() {
         break
       fi
     done
-  elif [ -f "$repo/go.mod" ]; then DETECT_INSTALL="go build ./..."
+  elif [ -f "$repo/go.mod" ]; then
+    DETECT_INSTALL="go build ./..."
+    # QA-RUNNER-FRESH-1 (2026-10-27): derive the binary name the fresh-install
+    # artifact probe expects. The old probe hardcoded `toolsd` (coding-hermes-
+    # tools' binary) and false-FAILED the fresh-install cell of every other go
+    # repo while ci-pass/upgrade ran green (crier, guard, hermes-dagger
+    # measured 2026-10-27). Exactly one main package under cmd/<dir>/ -> that
+    # dir's name (its binary lands at ./cmd/<name>/<name> from go build ./...);
+    # repo-root main package -> module base name; multiple mains or an install
+    # override -> BUNKER_QA_INSTALL_BIN wins; empty = build-only install (the
+    # probe is skipped and the cell grades on rc + the CI/native legs).
+    if [ -n "${BUNKER_QA_INSTALL_BIN:-}" ]; then
+      DETECT_GO_ARTIFACT="$BUNKER_QA_INSTALL_BIN"
+    elif [ -d "$repo/cmd" ]; then
+      local _qa_main _qa_mains=()
+      for _qa_main in "$repo"/cmd/*; do
+        [ -d "$_qa_main" ] || continue
+        { ls "$_qa_main"/*.go >/dev/null 2>&1 && grep -qs '^package main$' "$_qa_main"/*.go; } && _qa_mains+=("${_qa_main##*/}")
+      done
+      [ "${#_qa_mains[@]}" -eq 1 ] && DETECT_GO_ARTIFACT="${_qa_mains[0]}"
+    elif { ls "$repo"/*.go >/dev/null 2>&1 && grep -qs '^package main$' "$repo"/*.go; }; then
+      DETECT_GO_ARTIFACT="$(basename "$repo")"
+    fi
   elif [ -f "$repo/pyproject.toml" ]; then
     # QA-HIVEMIND-WORK-25 (2026-10-13): Python 3.12+ images (3.14 on bunker-mvp
     # agent 6a748db5) are PEP 668 externally-managed — bare `pip install`
@@ -1074,6 +1097,11 @@ build_remote_script() { # args: proj install_cmd ci_cmd native_cmd
   # real values keep them; the defaults only fire when unset/empty.
   QA_HEAD_SHA="${QA_HEAD_SHA:-unknown}"
   QA_HEAD_PULL="${QA_HEAD_PULL:-none}"
+  # QA-RUNNER-FRESH-1: same set -u guard class as QA_HEAD_SHA above — the
+  # fixed-placeholder render path (__gen-remote / default hook) never calls
+  # detect_cmds, so without a default the render aborts unbound and ships a
+  # 0-byte battery (GUARD-DF-009 class).
+  DETECT_GO_ARTIFACT="${DETECT_GO_ARTIFACT:-}"
   # QA-RENDER-FENCE (2026-10-13): the unquoted heredoc below is the whole
   # render — its $-expansions are intentional, but ANY unescaped `...` or
   # $(...) anywhere in the body (INCLUDING lines that look like shell
@@ -1116,7 +1144,28 @@ mkdir -p \$TMPDIR
 # the battery is DONE (whichever exit path it took), absent + no live process
 # ⇒ the agent/process is gone. The EXIT trap guarantees the marker even on the
 # early "no repo dir" bail; the explicit touch after CELLS-DONE is the normal path.
-trap 'touch ~/qa-run.finished' EXIT
+# The battery's EXIT trap runs before the remote shell returns to the controller.
+# Stop exact-name daemon sessions left by test cells before bunker destroy tries
+# to remove the agent. The agent has a dedicated uid, so this is scoped to this
+# disposable battery identity (never a host-wide name-only kill).
+qa_cleanup_daemons() {
+  local name pid uid
+  uid=\$(id -u)
+  for name in dbus-daemon sshd; do
+    # TERM first to let sessions close; bound the wait, then force any survivor.
+    pkill -TERM -u "\$uid" -x "\$name" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      pgrep -u "\$uid" -x "\$name" >/dev/null 2>&1 || break
+      sleep 1
+    done
+    while IFS= read -r pid; do
+      case "\$pid" in ''|*[!0-9]*) continue ;; esac
+      [ "\$pid" -gt 1 ] || continue
+      kill -KILL "\$pid" 2>/dev/null || true
+    done < <(pgrep -u "\$uid" -x "\$name" 2>/dev/null || true)
+  done
+}
+trap 'qa_cleanup_daemons; touch ~/qa-run.finished' EXIT
 cell() {
   if command -v python3 >/dev/null 2>&1; then
     python3 -c 'import json,sys,datetime; print(json.dumps({"project":"'\$PROJ'","cell":sys.argv[1],"status":sys.argv[2],"detail":sys.argv[3],"ts":datetime.datetime.now(datetime.timezone.utc).isoformat()}))' "\$1" "\$2" "\$3" >> \$EVID
@@ -1169,14 +1218,28 @@ fail_detail() { # <rc> <logfile> <cmd...> — ACTIONABLE-FAILURE CONTRACT
   local frc="\$1" flog="\$2"; shift 2
   printf 'rc=%s cmd=[%s] — %s' "\$frc" "\$*" "\$(grep -v '^[[:space:]]*\$' "\$flog" 2>/dev/null | head -40 | tr '\n' '|' | cut -c1-1500)"
 }
-# act_failure_context — act's '❌ Failure - Main <step> [Xs]' line names the step
-# but never the cause; the step's own output is printed ABOVE the marker, so
-# return the 18 lines preceding the first ❌ plus the marker itself.
+# act_failure_context — NAME the failing job/step first, then the cause.
+# (QA-DUCKBRAIN-017, 2026-10-25.) The old shape returned the 18 lines ABOVE
+# the first ❌ marker truncated at 1400 chars — the '❌ Failure - Main <step>'
+# line itself fell off the tail, so a ci-act detail could not answer "which
+# job/step concluded failed" and a green 'Run tests' step could not be told
+# apart from a post-test-step failure (measured on the duckbrain 2026-10-25
+# evidence: the real failing step 'Run integration tests' was hidden behind
+# the vitest summary while 'Run tests' was green at 233/233). Two rules now:
+#   (1) the ❌ marker line (act names the step ON it) is emitted FIRST, then a
+#       compact 4-line cause window around it;
+#   (2) a log with NO ❌ marker but a failed job (act prints
+#       "exitcode '1': failure" after a step that never printed ❌) names the
+#       last step that STARTED plus the log tail, so the detail stays
+#       attributable instead of being an unanchored context blob.
 act_failure_context() { # <act log>
   local lf="\$1" n
   n=\$(grep -n '❌' "\$lf" 2>/dev/null | head -1 | cut -d: -f1)
-  if [ -n "\$n" ]; then sed -n "\$(( n > 18 ? n - 18 : 1 )),\${n}p" "\$lf" | tr '\n' '|' | cut -c1-1400
-  else tail -8 "\$lf" 2>/dev/null | tr '\n' '|' | cut -c1-1400; fi
+  if [ -n "\$n" ]; then
+    printf 'failed-step: %s || cause-window: %s' "\$(sed -n "\${n}p" "\$lf" | cut -c1-200)" "\$(sed -n "\$(( n > 4 ? n - 4 : 1 )),\$(( n + 4 ))p" "\$lf" | tr '\n' '|' | cut -c1-1000)"
+  else
+    printf 'job-failed-no-marker: last-started-step [%s] tail [%s]' "\$(grep '⭐ Run' "\$lf" 2>/dev/null | tail -1 | cut -c1-160)" "\$(tail -4 "\$lf" 2>/dev/null | tr '\n' '|' | cut -c1-800)"
+  fi
 }
 # build_env_failure — is this failure the AGENT's missing C toolchain instead of a
 # repo defect? (QA-WARPFS-9, 2026-09-19.) rust links EVERY crate build script
@@ -1837,6 +1900,34 @@ command -v go >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && cell toolcha
 
 # 1 · fresh-install — REAL rc through a log file
 ( $install_cmd ) >\$LOGD/inst.log 2>&1; inst_rc=\$?
+# QA-RUNNER-FRESH-1 (2026-10-27): the artifact probe now keys on the repo-derived
+# binary name (QA_GO_ARTIFACT, substituted at render time; the old literal
+# 'toolsd' false-failed every non-tools go repo — crier/guard/hermes-dagger
+# measured 2026-10-27). An empty name means build-only install: no standalone
+# artifact is expected, grade on rc (+ the CI/native legs carry the suite).
+QA_GO_ARTIFACT='$DETECT_GO_ARTIFACT'
+if [ \$inst_rc -eq 0 ]; then
+  _inst_artifact=""
+  if [ -n "\$QA_GO_ARTIFACT" ]; then
+    if command -v "\$QA_GO_ARTIFACT" >/dev/null 2>&1; then
+      _inst_artifact="\$(command -v "\$QA_GO_ARTIFACT")"
+    elif [ -x "\$QA_GO_ARTIFACT" ]; then
+      _inst_artifact="\$QA_GO_ARTIFACT"
+    elif [ -x "cmd/\$QA_GO_ARTIFACT/\$QA_GO_ARTIFACT" ]; then
+      _inst_artifact="cmd/\$QA_GO_ARTIFACT/\$QA_GO_ARTIFACT"
+    elif [ -f go.mod ] && [ -n "\$(sed -n 's/^module //p' go.mod | head -1)" ]; then
+      _qa_mod_root="\$(sed -n 's/^module //p' go.mod | head -1)"
+      [ -x "\$_qa_mod_root/\$QA_GO_ARTIFACT" ] && _inst_artifact="\$_qa_mod_root/\$QA_GO_ARTIFACT"
+    fi
+  fi
+  if [ -z "\$QA_GO_ARTIFACT" ]; then
+    cell fresh-install OK "build-only install (rc=0); no standalone artifact expected — suite evidence carried by ci-pass/native legs; \$(tail -1 \$LOGD/inst.log)"
+  elif [ -n "\$_inst_artifact" ] && [ -s "\$_inst_artifact" ]; then
+    _inst_stat="\$(stat -c '%s bytes' "\$_inst_artifact" 2>/dev/null || echo 'stat failed')"
+    cell fresh-install OK "artifact=\$_inst_artifact (\$_inst_stat); \$(tail -1 \$LOGD/inst.log)"
+  else
+    cell fresh-install FAIL "install rc=0 but artifact '\$QA_GO_ARTIFACT' not found (not in PATH, repo root, cmd/, or module-root path); \$(tail -1 \$LOGD/inst.log)"
+  fi
 # FIX 2 / QA-WARPFS-9 rework 3 (2026-09-19): the condition above catches the bare
 # C toolchain. The OTHER environment failure the live agent produced is a rust
 # repo whose crates link a system library (openssl via git2, fuse3 via hilo-fuse):
@@ -1845,23 +1936,9 @@ command -v go >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && cell toolcha
 # ENV-BLOCKED fires only when BOTH halves hold — the probe found missing system
 # deps (RUST_MISSING_SYS_DEPS) AND the log carries the *-sys build-script shape —
 # and the INFO detail names the missing list so the row is actionable.
-# QA-CODING-HERMES-TOOLS-5: require artifact presence before grading OK
-_inst_artifact=""
-if [ \$inst_rc -eq 0 ]; then
-  # Check for installed binary or PREFIX artifact
-  if command -v toolsd >/dev/null 2>&1; then
-    _inst_artifact="\$(command -v toolsd)"
-  elif [ -n "\${PREFIX:-}" ] && [ -x "\${PREFIX}/bin/toolsd" ]; then
-    _inst_artifact="\${PREFIX}/bin/toolsd"
-  elif [ -x "\$HOME/.local/bin/toolsd" ]; then
-    _inst_artifact="\$HOME/.local/bin/toolsd"
-  fi
-  if [ -n "\$_inst_artifact" ] && [ -s "\$_inst_artifact" ]; then
-    _inst_stat="\$(stat -c '%s bytes' "\$_inst_artifact" 2>/dev/null || echo 'stat failed')"
-    cell fresh-install OK "artifact=\$_inst_artifact (\$_inst_stat); \$(tail -1 \$LOGD/inst.log)"
-  else
-    cell fresh-install FAIL "install rc=0 but no artifact found (toolsd not in PATH, PREFIX/bin/toolsd missing, or zero-size); \$(tail -1 \$LOGD/inst.log)"
-  fi
+# QA-CODING-HERMES-TOOLS-5 (repointed by QA-RUNNER-FRESH-1): require artifact
+# presence before grading the rc=0 branch OK — the probe above keys on the
+# repo-derived QA_GO_ARTIFACT instead of a hardcoded binary name.
 elif [ \$inst_rc -eq 127 ] || grep -qi 'command not found' \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: the agent lacks a build tool the install step calls (\$(grep -m1 -oE '[a-zA-Z0-9_.-]+: command not found' \$LOGD/inst.log || echo rc=\$inst_rc)) and has no sudo to install it — harness env, not a repo defect: \$(tail -1 \$LOGD/inst.log)"
 elif build_env_failure \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: agent has no C toolchain (build-script link failure) — not a repo defect; README documents build-essential"
 elif [ -n "\$RUST_MISSING_SYS_DEPS" ] && build_sys_dep_failure \$LOGD/inst.log; then cell fresh-install INFO "ENV-BLOCKED: agent is missing system deps [\$RUST_MISSING_SYS_DEPS] and the build died in a *-sys build script — no sudo to apt install, not a repo defect; README documents the full dependency set: \$( { grep -m1 -E 'failed to run custom build command' \$LOGD/inst.log 2>/dev/null || grep -m1 'development packages' \$LOGD/inst.log 2>/dev/null; } | cut -c1-200 )"
@@ -2503,10 +2580,32 @@ elif [ "\$QA_ECOSYSTEM" = "pip" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_V
   else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME==\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd_q)"; fi
 elif [ "\$QA_ECOSYSTEM" = "npm" ] && [ -n "\$QA_PKG_NAME" ] && [ -n "\$QA_PREV_VERSION" ]; then
   ( npm install -g "\$QA_PKG_NAME@\$QA_PREV_VERSION" ) >\$LOGD/up1.log 2>&1; up1_rc=\$?
+  # QA-DUCKBRAIN-017 (2026-10-25): a previous release can be UNPUBLISHABLE,
+  # not broken — duckbrain has NEVER been in the npm registry (npm view
+  # duckbrain -> 404, registry-verified 2026-10-25) while the repo sits at
+  # v1.1.0 with the v1.0.0 tag present, so 'npm install -g duckbrain@1.0.0'
+  # dies E404 on every run and the cell graded a product FAIL for a
+  # release-publishing gap (the RELEASE-002 class), not an upgrade defect.
+  # Classify the E404 shape BEFORE the HEAD install: probe the package index
+  # (network is up — the install itself just used it). Index 404 for the
+  # package NAME means NO version was ever published: the upgrade premise
+  # has no registry artifact at all -> N/A not-published (a reason-bearing
+  # null naming the E404 and the first-publish gap). Any other probe result
+  # (200, or a version-scoped 404 with the package known) stays a FAIL.
+  if [ \$up1_rc -ne 0 ] && grep -q 'E404' \$LOGD/up1.log 2>/dev/null; then
+    pkg_enc=\$(printf '%s' "\$QA_PKG_NAME" | sed 's|/|%2F|g')
+    reg_rc=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://registry.npmjs.org/\$pkg_enc" 2>/dev/null)
+    if [ "\$reg_rc" = "404" ]; then
+      cell upgrade N/A "not-published: \$QA_PKG_NAME has never been in the npm registry (index probe 404; \$(grep -m1 'is not in this registry' \$LOGD/up1.log | cut -c1-120)) — previous-release install \$QA_PKG_NAME@\$QA_PREV_VERSION E404s on every run until first publish (release task, RELEASE-002 class), not an upgrade defect"
+    else
+      cell upgrade FAIL "previous release \$QA_PKG_NAME@\$QA_PREV_VERSION would not install (tag \$QA_PREV_TAG): \$(fail_detail \$up1_rc \$LOGD/up1.log "npm install -g \$QA_PKG_NAME@\$QA_PREV_VERSION")"
+    fi
+  else
   ( $install_cmd ) >\$LOGD/up2.log 2>&1; up2_rc=\$?
   if [ \$up1_rc -eq 0 ] && [ \$up2_rc -eq 0 ]; then cell upgrade OK "npm -g \$QA_PKG_NAME@\$QA_PREV_VERSION (tag \$QA_PREV_TAG, the previous release) → HEAD install clean"
   elif [ \$up1_rc -ne 0 ]; then cell upgrade FAIL "previous release \$QA_PKG_NAME@\$QA_PREV_VERSION would not install (tag \$QA_PREV_TAG): \$(fail_detail \$up1_rc \$LOGD/up1.log "npm install -g \$QA_PKG_NAME@\$QA_PREV_VERSION")"
   else cell upgrade FAIL "upgrade install from \$QA_PKG_NAME@\$QA_PREV_VERSION to HEAD failed: \$(fail_detail \$up2_rc \$LOGD/up2.log $install_cmd_q)"; fi
+  fi
 else cell upgrade FAIL "upgrade path UNVERIFIED: the repo has \$QA_TAG_COUNT release tag(s) (previous \$QA_PREV_TAG) but the synced tree carries no history to check out and no installable previous release was detected (ecosystem='\$QA_ECOSYSTEM' package='\$QA_PKG_NAME') — treat the cell as untested, not as not-applicable"; fi
 
 # 4 · docker-deploy — compose up + probe + down
@@ -3315,7 +3414,7 @@ fence_check() {
     qa_docker_lifecycle_enabled qa_docker_lifecycle_host_block
     DETECT_INSTALL DETECT_CI DETECT_NATIVE DETECT_BIN DETECT_TAG_COUNT
     DETECT_PREV_TAG DETECT_PREV_VERSION DETECT_PKG_NAME DETECT_PKG_ECOSYSTEM
-    DETECT_GO_URL DETECT_CI_FILES DETECT_ACT_NOTE DETECT_UP_PREV_DIR
+    DETECT_GO_URL DETECT_GO_ARTIFACT DETECT_CI_FILES DETECT_ACT_NOTE DETECT_UP_PREV_DIR
     DETECT_PYTEST_REPO
   )
   awk -v allow="${fence_allow[*]}" '
