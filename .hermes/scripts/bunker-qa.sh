@@ -410,6 +410,20 @@ is_pytest_repo() { # <repo> -> 0 when a pytest-suite declaration is present
 # start scripts may materialize console shims only once deps exist); DETECT_BIN
 # exists so tests and callers can assert the ladder without spawning an agent.
 # KEEP THE TWO LADDERS IN SYNC.
+# QA-HERMES-DAGGER-037 (QA-RUNNER-FRESH-1): return the dir name iff exactly one
+# cmd/<dir>/ main package exists — the single installable binary this repo
+# declares. Empty = none/multiple (callers fall back to build-only).
+_qa_single_cmd_main() {
+  local repo="$1" d
+  local mains=()
+  for d in "$repo"/cmd/*; do
+    [ -d "$d" ] || continue
+    { ls "$d"/*.go >/dev/null 2>&1 && grep -qs '^package main$' "$d"/*.go; } && mains+=("${d##*/}")
+  done
+  [ "${#mains[@]}" -eq 1 ] && printf '%s' "${mains[0]}"
+  return 0
+}
+
 detect_cmds() {
   local repo="$1" agent="$2"
   local tpkg="" start_script="" gofirst=""
@@ -440,19 +454,26 @@ detect_cmds() {
       fi
     done
   elif [ -f "$repo/go.mod" ]; then
-    DETECT_INSTALL="go build ./..."
     # QA-RUNNER-FRESH-1 (2026-10-27): the fresh-install artifact probe keyed on
     # `toolsd` (coding-hermes-tools' binary) and false-FAILED every other go
     # repo while ci-pass/upgrade ran green (crier, guard, hermes-dagger
-    # measured 2026-10-27). `go build ./...` on a multi-package repo DISCARDS
-    # the objects by design (go: "when compiling multiple packages ... build
-    # discards the resulting object") — it is a compile check, so the honest
-    # classification is build-only: empty artifact, cell grades on rc, and the
-    # suite evidence lives in the ci-pass/native legs. A repo whose install
-    # DOES produce a binary (go install, make install, go build -o) names it
-    # via BUNKER_QA_INSTALL_BIN and the rendered probe checks PATH + repo
-    # root for it.
+    # measured 2026-10-27). Generalizes QA-CODING-HERMES-TOOLS-5-R2 from the
+    # coding-hermes-tools mirror (this file is the AUTHORITATIVE copy after
+    # QA-HERMES-DAGGER-037): a declared install path is exercised for real,
+    # everything else is an honest build-only compile check — `go build ./...`
+    # on a multi-package repo DISCARDS the objects by design, so demanding a
+    # binary from it manufactures a false FAIL. BUNKER_QA_INSTALL_BIN /
+    # BUNKER_QA_INSTALL_CMD override when detection guesses wrong.
     DETECT_GO_ARTIFACT="${BUNKER_QA_INSTALL_BIN:-}"
+    if [ -f "$repo/Makefile" ] && grep -qE '^install([[:space:]]*:|[[:space:]]*\t)' "$repo/Makefile"; then
+      DETECT_INSTALL='make install PREFIX="$HOME/.local"'
+      [ -z "$DETECT_GO_ARTIFACT" ] && DETECT_GO_ARTIFACT="$(_qa_single_cmd_main "$repo")"
+    elif [ -n "$(_qa_single_cmd_main "$repo")" ]; then
+      DETECT_GO_ARTIFACT="${DETECT_GO_ARTIFACT:-$(_qa_single_cmd_main "$repo")}"
+      DETECT_INSTALL="GOBIN=\"\$HOME/.local/bin\" go install ./cmd/$DETECT_GO_ARTIFACT"
+    else
+      DETECT_INSTALL="go build ./..."
+    fi
   elif [ -f "$repo/pyproject.toml" ]; then
     # QA-HIVEMIND-WORK-25 (2026-10-13): Python 3.12+ images (3.14 on bunker-mvp
     # agent 6a748db5) are PEP 668 externally-managed — bare `pip install`
@@ -1904,6 +1925,8 @@ if [ \$inst_rc -eq 0 ]; then
       _inst_artifact="\$(command -v "\$QA_GO_ARTIFACT")"
     elif [ -x "\$QA_GO_ARTIFACT" ]; then
       _inst_artifact="\$QA_GO_ARTIFACT"
+    elif [ -x "\$HOME/.local/bin/\$QA_GO_ARTIFACT" ]; then
+      _inst_artifact="\$HOME/.local/bin/\$QA_GO_ARTIFACT"
     elif [ -x "cmd/\$QA_GO_ARTIFACT/\$QA_GO_ARTIFACT" ]; then
       _inst_artifact="cmd/\$QA_GO_ARTIFACT/\$QA_GO_ARTIFACT"
     elif [ -f go.mod ] && [ -n "\$(sed -n 's/^module //p' go.mod | head -1)" ]; then
@@ -4158,7 +4181,7 @@ case "${1:-}" in
   # actual QA_CI_SELECT / QA_ACT_NOTE / QA_PKG_NAME a battery run would ship.
   # Opt-in on purpose — the default hook stays a fixed-placeholder render so
   # existing callers keep byte-identical output.
-  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\nDETECT_BIN=%s\nDETECT_PKG_NAME=%s\nDETECT_PKG_ECOSYSTEM=%s\nDETECT_CI_SELECT=%s\nDETECT_ACT_NOTE=%s\nDETECT_PYTEST_REPO=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" "$DETECT_BIN" "$DETECT_PKG_NAME" "$DETECT_PKG_ECOSYSTEM" "$DETECT_CI_FILES" "$DETECT_ACT_NOTE" "$DETECT_PYTEST_REPO" ;;
+  __detect-cmds) detect_cmds "$2" "${3:-test-agent-0000}"; printf 'DETECT_INSTALL=%s\nDETECT_NATIVE=%s\nDETECT_CI=%s\nDETECT_BIN=%s\nDETECT_PKG_NAME=%s\nDETECT_PKG_ECOSYSTEM=%s\nDETECT_CI_SELECT=%s\nDETECT_ACT_NOTE=%s\nDETECT_PYTEST_REPO=%s\nDETECT_GO_ARTIFACT=%s\n' "$DETECT_INSTALL" "$DETECT_NATIVE" "$DETECT_CI" "$DETECT_BIN" "$DETECT_PKG_NAME" "$DETECT_PKG_ECOSYSTEM" "$DETECT_CI_FILES" "$DETECT_ACT_NOTE" "$DETECT_PYTEST_REPO" "$DETECT_GO_ARTIFACT" ;;
   # QA-9ROUTER-19/20: render with the REAL detection for $2, so a test can
   # assert what a battery run would actually ship (see the hook's comment).
   __gen-remote-detected) agent="${agent:-test-agent-0000}"; detect_cmds "$2" "${3:-test-agent-0000}"; build_remote_script "$2" "$DETECT_INSTALL" "$DETECT_CI" "$DETECT_NATIVE" ;;
