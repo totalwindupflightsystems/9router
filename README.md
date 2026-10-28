@@ -1699,9 +1699,10 @@ Model: cc/claude-opus-5
 ### VPS Deployment
 
 ```bash
-# Clone and install
-git clone https://github.com/decolua/9router.git
+# Clone and install (federation fork — the federation feature lives on the `federation` branch)
+git clone https://github.com/totalwindupflightsystems/9router.git
 cd 9router
+git checkout federation
 npm install
 npm run build
 
@@ -1754,8 +1755,10 @@ docker run -d \
 **Build from source (dev):**
 
 ```bash
-git clone https://github.com/decolua/9router.git
+# Clone and install (federation fork — the federation feature lives on the `federation` branch)
+git clone https://github.com/totalwindupflightsystems/9router.git
 cd 9router
+git checkout federation
 docker build -t 9router .
 docker run -d --name 9router -p 20128:20128 \
   -v "$HOME/.9router:/app/data" -e DATA_DIR=/app/data 9router
