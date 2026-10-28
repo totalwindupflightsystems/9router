@@ -1,0 +1,40 @@
+{
+  "tick_id": "9router-2026-09-25-03-43-40",
+  "project": "9router",
+  "workdir": "/home/kara/9router",
+  "base": "origin/federation",
+  "base_sha": "624e042e",
+  "created_at": "2026-09-25T03:55:00-05:00",
+  "status": "finished",
+  "guard_context": "Pre-commit guard is FLEET-RED on an EXTERNAL break: ~/.hermes/scripts/bunker-qa.sh ed35aac (2026-09-24 21:28) broke __gen-remote -> tests/federation/qa-harness-cell-detection.test.js 17-fail at unchanged HEAD (FLAKE-9ROUTER-003, fleet-script-owned, NOT this repo). Worker commits may use documented --no-verify when the hook fails ONLY on pre-existing/external failures (tick-414 precedent, commit 624e042e). Merge gate = foreman-run focused tests + verify-no-regression regression-diff in the MAIN tree, not the worktree guard result (wave-worktree-gate-equivalence).",
+  "tasks": [
+    {
+      "id": "FLAKE-9ROUTER-002",
+      "worktree": "/home/kara/worktrees/9router-FLAKE-9ROUTER-002",
+      "branch": "wt/FLAKE-9ROUTER-002",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "brief": "/tmp/9r415-brief-flake2.md",
+      "status": "dispatched"
+    },
+    {
+      "id": "DF-9ROUTER-39",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-39",
+      "branch": "wt/DF-9ROUTER-39",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "brief": "/tmp/9r415-brief-df39.md",
+      "status": "dispatched"
+    },
+    {
+      "id": "DF-9ROUTER-41",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-41",
+      "branch": "wt/DF-9ROUTER-41",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "brief": "/tmp/9r415-brief-df41.md",
+      "status": "dispatched"
+    }
+  ],
+  "finished_at": "2026-09-25T00:15:00-05:00"
+}

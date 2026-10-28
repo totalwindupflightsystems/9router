@@ -1,0 +1,45 @@
+{
+  "tick_id": "9router-2026-09-20-19-34-02",
+  "project": "9router",
+  "workdir": "/home/kara/9router",
+  "base": "origin/federation",
+  "base_sha": "fb1e2971",
+  "created_at": "2026-09-20T14:45:00-05:00",
+  "status": "finished",
+  "tasks": [
+    {
+      "id": "DF-9ROUTER-34",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-34",
+      "branch": "wt/DF-9ROUTER-34",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "status": "dispatched"
+    },
+    {
+      "id": "DF-9ROUTER-35",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-35",
+      "branch": "wt/DF-9ROUTER-35",
+      "model": "ocg/glm-5.3-flash",
+      "provider": "9router",
+      "status": "dispatched"
+    },
+    {
+      "id": "DF-9ROUTER-36",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-36",
+      "branch": "wt/DF-9ROUTER-36",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "status": "dispatched"
+    },
+    {
+      "id": "DF-9ROUTER-37",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-37",
+      "branch": "wt/DF-9ROUTER-37",
+      "model": "ocg/glm-5.3-flash",
+      "provider": "9router",
+      "status": "dispatched"
+    }
+  ],
+  "finished_at": "2026-09-21T04:05:00-05:00",
+  "recovered": "tick 411 completed wave (4/4 judged PASS, merged + pushed); recovery-tick re-verified verdicts, board rows, CI green; closed leftover branch wt/DF-9ROUTER-37 + tasks.yaml chore b5e61b90"
+}

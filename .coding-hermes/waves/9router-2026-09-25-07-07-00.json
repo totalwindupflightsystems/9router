@@ -1,0 +1,55 @@
+{
+  "tick_id": "9router-2026-09-25-07-07-00",
+  "tick_number": 416,
+  "project": "9router",
+  "created_at": "2026-09-25T07:20:00Z",
+  "base_sha": "c2b05ddb",
+  "workers": [
+    {
+      "task": "DF-9ROUTER-42",
+      "worktree": "~/worktrees/9router-DF-9ROUTER-42",
+      "branch": "wt/DF-9ROUTER-42",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "brief": "/tmp/9r416_brief_DF-9ROUTER-42.txt"
+    },
+    {
+      "task": "DF-9ROUTER-43",
+      "worktree": "~/worktrees/9router-DF-9ROUTER-43",
+      "branch": "wt/DF-9ROUTER-43",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "brief": "/tmp/9r416_brief_DF-9ROUTER-43.txt"
+    },
+    {
+      "task": "DF-9ROUTER-44",
+      "worktree": "~/worktrees/9router-DF-9ROUTER-44",
+      "branch": "wt/DF-9ROUTER-44",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "brief": "/tmp/9r416_brief_DF-9ROUTER-44.txt"
+    }
+  ],
+  "status": "closed",
+  "finished_at": "2026-09-25T09:30:00Z",
+  "outcomes": [
+    {
+      "task": "DF-9ROUTER-42",
+      "result": "merged",
+      "commit": "3470bf5c",
+      "verdict": "PASS 1b55cfae"
+    },
+    {
+      "task": "DF-9ROUTER-43",
+      "result": "merged",
+      "commit": "ece5f053",
+      "verdict": "PASS e8ca4fce"
+    },
+    {
+      "task": "DF-9ROUTER-44",
+      "result": "merged",
+      "commit": "42f8a26a",
+      "verdict": "tier2 PASS 85eab2b0; tier1 artifact (pre-merge judge) resolved at HEAD, suite 34/34 live"
+    }
+  ]
+}

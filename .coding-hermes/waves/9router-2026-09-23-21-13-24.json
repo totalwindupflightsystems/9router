@@ -1,0 +1,56 @@
+{
+  "tick_id": "9router-2026-09-23-21-13-24",
+  "project": "9router",
+  "workdir": "/home/kara/9router",
+  "base": "origin/federation",
+  "base_sha": "c84fc034",
+  "created_at": "2026-09-23T16:40:00-05:00",
+  "status": "recovered",
+  "finished_at": "2026-09-24T05:47:00-05:00",
+  "recovery": {
+    "tick": "9router-2026-09-24-10-08-39",
+    "merges": { "DEPS-004": "8ca7fce3", "QA-9ROUTER-20": "3819ce0d" },
+    "gates": "lint:gate PASS x2; verify-no-regression PASS x2 (74 fails / 76 known); eslint10 probe BLOCKED (deferred, correct)",
+    "judges": {
+      "QA-9ROUTER-20": "6b327d3a PASS (tier2)",
+      "DEPS-004": "762715bb fast-flip PASS; async tier2 job-a96135c74bfa43af8af501eac61256d9 dispatched (first judge hit the 1200s wall)",
+      "recovery_worker": "46cc00df APPROVED both tasks (fresh-worktree independent re-gate)"
+    }
+  },
+  "merge_order": ["DEPS-004", "QA-9ROUTER-20"],
+  "tasks": [
+    {
+      "id": "DEPS-004",
+      "worktree": "/home/kara/worktrees/9router-DEPS-004",
+      "branch": "wt/DEPS-004",
+      "base": "origin/federation",
+      "base_sha": "c84fc034",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "brief": "/tmp/brief-DEPS-004.txt",
+      "commit_msg_file": "/tmp/wave9r_DEPS-004_msg.txt",
+      "paths": ["package.json", "package-lock.json"],
+      "status": "dispatched"
+    },
+    {
+      "id": "QA-9ROUTER-20",
+      "worktree": "/home/kara/worktrees/9router-QA-9ROUTER-20",
+      "branch": "wt/QA-9ROUTER-20",
+      "base": "origin/federation",
+      "base_sha": "c84fc034",
+      "model": "cmc/deepseek/deepseek-v4-flash",
+      "provider": "9router",
+      "brief": "/tmp/brief-QA-9ROUTER-20.txt",
+      "commit_msg_file": "/tmp/wave9r_QA-9ROUTER-20_msg.txt",
+      "paths": [".hermes/scripts/bunker-qa.sh (topology repo /home/kara)", "tests/federation/qa-harness-cell-detection.test.js"],
+      "status": "dispatched",
+      "note": "cross-repo: harness fix commits in the /home/kara topology repo (narrow pathspec), test fix commits in the 9router worktree"
+    }
+  ],
+  "held": [
+    {
+      "id": "QA-9ROUTER-19",
+      "reason": "shares .hermes/scripts/bunker-qa.sh with QA-9ROUTER-20 (the ci-pass act leg) — not path-disjoint, held to the next wave"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "tick": "9router-2026-09-26-14-14-25",
+  "project": "9router",
+  "base": "origin/federation",
+  "base_sha": "b083bef7",
+  "budget": 4,
+  "workers": [
+    {"task":"DF-9ROUTER-48","worktree":"/home/kara/worktrees/9router-DF-9ROUTER-48","branch":"wt/DF-9ROUTER-48"},
+    {"task":"README-2","worktree":"/home/kara/worktrees/9router-README-2","branch":"wt/README-2"},
+    {"task":"DF-9ROUTER-49","worktree":"/home/kara/worktrees/9router-DF-9ROUTER-49","branch":"wt/DF-9ROUTER-49"},
+    {"task":"README-1","worktree":"/home/kara/worktrees/9router-README-1","branch":"wt/README-1"}
+  ]
+}

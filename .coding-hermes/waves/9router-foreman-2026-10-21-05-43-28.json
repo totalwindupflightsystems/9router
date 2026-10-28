@@ -1,0 +1,41 @@
+{
+  "tick_id": "9router-foreman-2026-10-21-05-43-28",
+  "block": "DOC-27",
+  "wave_size": 2,
+  "slots": 2,
+  "reason": "Box loaded (loadavg 13.06/16 cores), slots=2 per formula",
+  "rows": [
+    {
+      "id": "DOC-12",
+      "title": "gitbook content lags v0.5.95+ provider registry",
+      "worktree": "/home/kara/worktrees/9router-DOC-12",
+      "branch": "wt/DOC-12",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "gitbook/content/en/getting-started/quick-start.md",
+        "gitbook/content/en/features/combos.md",
+        "open-sse/providers/registry/iflow.js",
+        "open-sse/providers/registry/cc/claude.js"
+      ]
+    },
+    {
+      "id": "DOC-13",
+      "title": "docs/api-reference.md omits 4 live /v1 endpoints",
+      "worktree": "/home/kara/worktrees/9router-DOC-13",
+      "branch": "wt/DOC-13",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "docs/api-reference.md",
+        "src/app/api/v1/systemone/route.js",
+        "src/app/api/v1/api/chat/route.js",
+        "src/app/api/v1/models/[...model]/route.js",
+        "src/app/api/v1beta/models/[...path]/route.js"
+      ]
+    }
+  ],
+  "finished_at": "2026-10-21T15:11:58-05:00",
+  "recovered_by": "9router-foreman-2026-10-21-15-11-58",
+  "status": "recovered"
+}

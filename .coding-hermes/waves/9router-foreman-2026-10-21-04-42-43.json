@@ -1,0 +1,28 @@
+{
+  "tick_id": "9router-foreman-2026-10-21-04-42-43",
+  "block": "DOC-27",
+  "rows": [
+    "DOC-17",
+    "DOC-25",
+    "DOC-26",
+    "DOC-16",
+    "DOC-14"
+  ],
+  "worktrees": {
+    "DOC-17": "9router-wt-DOC-17",
+    "DOC-25": "9router-wt-DOC-25",
+    "DOC-26": "9router-wt-DOC-26",
+    "DOC-16": "9router-wt-DOC-16",
+    "DOC-14": "9router-wt-DOC-14"
+  },
+  "briefs": {
+    "DOC-17": "/tmp/brief-DOC-17.txt",
+    "DOC-25": "/tmp/brief-DOC-25.txt",
+    "DOC-26": "/tmp/brief-DOC-26.txt",
+    "DOC-16": "/tmp/brief-DOC-16.txt",
+    "DOC-14": "/tmp/brief-DOC-14.txt"
+  },
+  "finished_at": "2026-10-21T05:00:25Z",
+  "recovered_by": "9router-foreman-2026-10-21-04-53-37",
+  "status": "recovered"
+}

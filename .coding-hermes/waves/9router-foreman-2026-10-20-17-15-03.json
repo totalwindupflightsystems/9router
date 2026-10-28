@@ -1,0 +1,89 @@
+{
+  "tick_id": "9router-foreman-2026-10-20-17-15-03",
+  "recovers": "9router-foreman-2026-10-20-10-08-31",
+  "recovery_verdict": "PHANTOM WAVE — all three recovered branches (wt/DF-9ROUTER-2-R2, wt/DF-9ROUTER-63, wt/DF-9ROUTER-64) were zero-commit, worktrees clean, manifest unfinished (no finished_at). Nothing to merge; recovery = re-dispatch.",
+  "reassignments": [
+    {
+      "from_row": "DF-9ROUTER-2-R2",
+      "to_row": "DF-9ROUTER-62",
+      "reason": "DF-9ROUTER-62 (P1, every-commit-blocked regression) is the highest-priority pending row of the same defect family; clean-machine QA battery 2026-10-20 15:54 reconfirmed the 8 pass->fail set. Worktree 9router-DF-9ROUTER-2-R2 reassigned to DF-9ROUTER-62's brief, branch wt/DF-9ROUTER-62."
+    }
+  ],
+  "block": "DF-9ROUTER-64",
+  "branch": "federation",
+  "base": "8c83dd0e (origin/federation at dispatch)",
+  "budget": 9,
+  "slots": 2,
+  "slots_note": "nproc=16, loadavg=13.35 -> slots=min(6, 16-14)=2; box loaded, host load not an idle reason",
+  "workers": [
+    {
+      "row": "DF-9ROUTER-62",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-2-R2",
+      "branch": "wt/DF-9ROUTER-62",
+      "base_sha": "8c83dd0e",
+      "files_owned": [
+        "tests/ (4 regression files)",
+        "tests/__baseline__/known-fails.txt",
+        "product code for the 4 files"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "brief": "/tmp/brief-DF-9ROUTER-62.txt",
+      "status": "merged"
+    },
+    {
+      "row": "DF-9ROUTER-63",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-63",
+      "branch": "wt/DF-9ROUTER-63",
+      "base_sha": "8c83dd0e",
+      "files_owned": [
+        "src/app/api/providers/route.js",
+        "src/lib/db/repos/connectionsRepo.js",
+        "src/lib/db/repos/nodesRepo.js",
+        "tests/"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "brief": "/tmp/brief-DF-9ROUTER-63.txt",
+      "status": "merged"
+    },
+    {
+      "row": "DF-9ROUTER-64",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-64",
+      "branch": "wt/DF-9ROUTER-64",
+      "base_sha": "8c83dd0e",
+      "files_owned": [
+        "cli/cli.js",
+        "cli/README.md",
+        "cli/tests/"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "brief": "/tmp/brief-DF-9ROUTER-64.txt",
+      "status": "merged"
+    }
+  ],
+  "created_at": "2026-10-20T17:15:03-05:00",
+  "finished_at": "2026-10-20T14:04:04-05:00",
+  "merges": [
+    {
+      "row": "DF-9ROUTER-62",
+      "commit": "be404bfc",
+      "merge": "ae2cfeac",
+      "pushed": "origin/federation verified 0"
+    },
+    {
+      "row": "DF-9ROUTER-63",
+      "commit": "2504b646",
+      "merge": "bf12e26a",
+      "pushed": "origin/federation verified 0"
+    },
+    {
+      "row": "DF-9ROUTER-64",
+      "commit": "d098a318",
+      "merge": "c39990f7",
+      "pushed": "origin/federation verified 0"
+    }
+  ],
+  "merged_tree_gate": "npm test --reporter=json /tmp/9r-merged-gate.json: 4543 total / 4386 passed / 58 failed; verify-no-regression flags ONLY the 4 host-harness qa-harness-cell-detection tests (external fleet script class, pre-existing, proven by clean-machine battery + A/B)"
+}

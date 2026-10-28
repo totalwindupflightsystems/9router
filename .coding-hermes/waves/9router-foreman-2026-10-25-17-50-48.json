@@ -1,0 +1,16 @@
+{
+  "tick_id": "9router-foreman-2026-10-25-17-50-48",
+  "project": "9router",
+  "block_id": "DOC-32",
+  "wave_size": 2,
+  "mode": "wave",
+  "selection": ["DOC-22-R2", "DOC-32"],
+  "reason": "DOC-22-R2 and DOC-32 were the two ready rows in DRIVE block DOC-32 after inherited DOC-29 recovery. They had no dependency edge between them and touched separate documentation/audit artifacts.",
+  "workers": [
+    {"task_id":"DOC-22-R2","worktree":"/home/kara/worktrees/9router-DOC-22-R2","branch":"wt/DOC-22-R2","model":"gpt-5.6-terra","provider":"openai-codex","status":"failed","commit":"53ab4a2e99b67f8ee658586e8e53dcb0a00e4e08","reason":"Implementation and full guard passed on preserved branch; merge and Tier 2 readback did not complete within tick."},
+    {"task_id":"DOC-32","worktree":"/home/kara/worktrees/9router-DOC-32","branch":"wt/DOC-32","model":"gpt-5.6-terra","provider":"openai-codex","status":"failed","commit":"481e514023ec748a0936142bf79dee99d9cdba86","verdict":"ab9125fb","reason":"Implementation and full guard passed on preserved branch; Tier 2 failed against stale inherited criterion; merge did not complete within tick."}
+  ],
+  "recovery": {"recovered_tick":"9router-foreman-2026-10-25-16-33-17","task_id":"DOC-29","implementation_commit":"1a0b21a63d5735b4fc03aa124ec926e3e8d72185","already_merged_at":"4d4f44009f460f1fb4409912c7b5503349112ff8","manifest_closed":true,"remote_parity":true},
+  "finished_at":"2026-10-25T18:15:00-05:00",
+  "closeout":"Board rows DOC-22-R2 and DOC-32 failed with explicit reasons; preserved branches remain as evidence; no new product merge landed. Main remains at 1c1e4801 before board closeout. Remote CI is blocked/stale and existing CI-9ROUTER-005 owns the outage."
+}

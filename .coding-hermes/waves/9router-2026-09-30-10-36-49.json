@@ -1,0 +1,17 @@
+{
+  "tick": "9router-2026-09-30-10-36-49",
+  "project": "9router",
+  "base": "origin/federation",
+  "base_sha": "414c219a",
+  "budget": 4,
+  "mode": "wave",
+  "deferred": [
+    {"task": "QA-9ROUTER-34", "reason": "adjacent Docker surface to QA-9ROUTER-33; serialized to the next tick to avoid two writers on the Dockerfile image contract"}
+  ],
+  "workers": [
+    {"task":"QA-9ROUTER-36","worktree":"/home/kara/worktrees/9router-QA-9ROUTER-36","branch":"wt/QA-9ROUTER-36","brief":"/tmp/9r-wave-QA-9ROUTER-36-brief.md","files":["tests/auth/saml.test.js","tests/unit/cline-auth.test.js","tests/unit/kimchi-strip-reasoning.test.js","tests/unit/db-benchmark.test.js","tests/unit/embeddings.cloud.test.js"]},
+    {"task":"QA-9ROUTER-33","worktree":"/home/kara/worktrees/9router-QA-9ROUTER-33","branch":"wt/QA-9ROUTER-33","brief":"/tmp/9r-wave-QA-9ROUTER-33-brief.md","files":["Dockerfile"]},
+    {"task":"QA-9ROUTER-37","worktree":"/home/kara/worktrees/9router-QA-9ROUTER-37","branch":"wt/QA-9ROUTER-37","brief":"/tmp/9r-wave-QA-9ROUTER-37-brief.md","files":["tests/federation/replication.test.js"]},
+    {"task":"README-2","worktree":"/home/kara/worktrees/9router-README-2","branch":"wt/README-2","brief":"/tmp/9r-wave-README-2-brief.md","files":["README.md"]}
+  ]
+}

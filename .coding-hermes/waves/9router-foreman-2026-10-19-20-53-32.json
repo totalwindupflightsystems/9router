@@ -1,0 +1,22 @@
+{
+  "tick_id": "9router-foreman-2026-10-19-20-53-32",
+  "block": "DF-9ROUTER",
+  "wave_size": 2,
+  "rows": [
+    {
+      "id": "DF-9ROUTER-59",
+      "title": "Unkeyed /v1 latency is 2-3x keyed latency on the same surface",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-59",
+      "branch": "wt/DF-9ROUTER-59",
+      "recovery": "already closed on main as stale/refuted; no branch commit to merge"
+    },
+    {
+      "id": "DF-9ROUTER-61",
+      "title": "Non-stream thinking models surface reasoning under TWO different message keys",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-61",
+      "branch": "wt/DF-9ROUTER-61",
+      "recovery": "implementation commit 2e91f3e5 already merged on main as e6f73db5; no re-merge"
+    }
+  ],
+  "finished_at": "2026-10-19T19:14:28-05:00"
+}

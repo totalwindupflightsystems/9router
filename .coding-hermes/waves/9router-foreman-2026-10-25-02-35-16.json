@@ -1,0 +1,35 @@
+{
+  "tick": "9router-foreman-2026-10-25-02-35-16",
+  "type": "wave-recovery",
+  "recovered_from": "9router-foreman-2026-10-24-23-49-40",
+  "project": "9router",
+  "workdir": "/home/kara/9router",
+  "started_at": "2026-10-25T02:35:16-05:00",
+  "finished_at": "2026-10-25T03:10:00-05:00",
+  "workers": [
+    {
+      "task_id": "DF-9ROUTER-70",
+      "title": "Fix CI test failure on fresh machine: cli-no-tray-headless.test.js exits 1 on clean Debian 13 / Node 22",
+      "worktree": "/home/kara/worktrees/9router-df-9router-70",
+      "branch": "wt/df-9router-70",
+      "base": "56e618ad",
+      "commit": "88ea2390",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "status": "merged-to-branch",
+      "pushed": true,
+      "remote_parity": 0,
+      "gates": {
+        "vitest": "PASS (6/6 unit/cli-no-tray-headless.test.js)",
+        "lint_baseline": "PASS (refreshed, 282 keys)",
+        "secrets": "PASS (clean)"
+      },
+      "verdict": "none (judge timed out; task deleted)",
+      "notes": "Worker stalled at 12min/0%CPU after producing diff. Foreman killed it, verified diff was real (non-TTY early-exit in cli.js + test hardening), committed, pushed. Fix: detect process.stdin.isTTY before loading interactive menu stack; exit 0 directly on non-TTY. Satisfies DF-9ROUTER-64 promise on clean box."
+    }
+  ],
+  "wave_budget": 7,
+  "slots_used": 1,
+  "board_updated": true,
+  "main_commit": "pending (board-close commit on federation)"
+}

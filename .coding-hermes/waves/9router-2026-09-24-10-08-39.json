@@ -1,0 +1,54 @@
+{
+  "tick_id": "9router-2026-09-24-10-08-39",
+  "project": "9router",
+  "workdir": "/home/kara/9router",
+  "note": "RECOVERY tick: first recovered wave 9router-2026-09-23-21-13-24 (DEPS-004, QA-9ROUTER-20) — merged as 8ca7fce3 + 3819ce0d, gates PASS, pushed; recovery judge worker dispatched below. WT-9ROUTER-001 is the recovery row. FED-GAP-15 is this tick's post-recovery wave task (P1, only dispatchable row).",
+  "base": "origin/federation",
+  "base_sha": "3819ce0d",
+  "created_at": "2026-09-24T05:25:00-05:00",
+  "manifest_backfilled_at": "2026-09-24T05:28:00-05:00",
+  "status": "finished",
+  "merge_order": [
+    "WT-9ROUTER-001",
+    "FED-GAP-15"
+  ],
+  "tasks": [
+    {
+      "id": "WT-9ROUTER-001",
+      "worktree": "/home/kara/worktrees/9router-WT-9ROUTER-001",
+      "branch": "wt/WT-9ROUTER-001",
+      "base": "origin/federation",
+      "base_sha": "3819ce0d",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "brief": "/tmp/wt-001-brief.md",
+      "commit_msg_file": "/tmp/wt-001-msg.txt",
+      "paths": [
+        "docs/dogfood/2026-09-24-waverec-recovery-verdict.md"
+      ],
+      "status": "dispatched",
+      "dispatched_at": "2026-09-24T05:22:00-05:00",
+      "note": "recovery judge worker — independent re-gate of the two merged wave commits; expected output = single verdict commit"
+    },
+    {
+      "id": "FED-GAP-15",
+      "worktree": "/home/kara/worktrees/9router-FED-GAP-15",
+      "branch": "wt/FED-GAP-15",
+      "base": "origin/federation",
+      "base_sha": "3819ce0d",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "brief": "/tmp/fedgap15-brief.md",
+      "commit_msg_file": "/tmp/fedgap15-msg.txt",
+      "paths": [
+        "src/lib/federation/replication.js",
+        "tests/federation/replication-redact.test.js"
+      ],
+      "status": "dispatched",
+      "dispatched_at": "2026-09-24T05:27:00-05:00",
+      "note": "gitreins task FED-GAP-15 created+started pre-dispatch; P1 REDACT_FIELDS wiring"
+    }
+  ],
+  "finished_at": "2026-09-24T15:35:00-05:00",
+  "recovery_note": "closed by recovery tick 9router-2026-09-23-21-13-24-nudge1: both workers landed as merges 8ca7fce3(merge wt/DEPS-004)+3819ce0d(merge wt/QA-9ROUTER-20)+08d19a55(merge wt/FED-GAP-15); FED-GAP-15 commit 716e6335; tier2 verdicts on disk (DEPS-004 9c8cab2e PASS, QA-9ROUTER-20 6f172f8c PASS, FED-GAP-15 08fe772e PASS); board rows DEPS-004/QA-9ROUTER-20/WT-9ROUTER-001/FED-GAP-15 complete (tick 412 commits 4fc9a34a/eb8fee31); branches wt/DEPS-004, wt/QA-9ROUTER-20, wt/FED-GAP-15 verified 0-ahead of federation and deleted; pushed origin/federation"
+}

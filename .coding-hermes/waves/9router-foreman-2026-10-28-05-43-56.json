@@ -1,0 +1,27 @@
+{
+  "tick_id": "9router-foreman-2026-10-28-05-43-56",
+  "project": "9router",
+  "block_id": "README-22",
+  "resumed_block": true,
+  "resume_reason": "Tick 9router-foreman-2026-10-27-14-14-29 dispatched README-10-R2 in this block but the worktree was provisioned from origin/main (a tree without README.md); dispatch failed with zero diff. Block still has 3 ready rows; repair + resume this tick.",
+  "wave_size": 1,
+  "wave_budget": 1,
+  "slots": "max(1, min(6, 16 - ceil(17.41))) = 1",
+  "mode": "serial-fallback",
+  "reason": "Host load 17.41 on 16 cores -> slots=1; WAVE_BUDGET=1. README-10-R2/README-21/README-22 are mutually independent as rows but all edit README.md (same seam), so they also could not share a wave; they are worked one per tick in priority order.",
+  "rows": [
+    {
+      "task_id": "README-10-R2",
+      "worktree": "/home/kara/worktrees/9router-README-10-R2",
+      "branch": "wt/README-10-R2",
+      "base": "origin/federation",
+      "base_sha": "9d31645d",
+      "base_repair": "10-27 tick based the failed worktree on origin/main (no README.md); this tick bases on origin/federation per AGENTS.md work-branch rule",
+      "brief": "/tmp/9router-README-10-R2-brief.txt"
+    }
+  ],
+  "created_before_dispatch": true,
+  "recovery_outcome": "no-op: row README-10-R2 already closed in commit 4bcd4b9f; worktree never provisioned (dispatch failed: base was origin/main which lacks README.md)",
+  "finished_at": "2026-10-28T15:43:16.818714Z",
+  "recovered_by": "9router-foreman-2026-10-28-15-40-59"
+}

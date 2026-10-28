@@ -1,0 +1,69 @@
+{
+  "tick_id": "9router-foreman-2026-10-20-10-08-31",
+  "project": "9router",
+  "base": "0a59cbaf3ecc82b4bc11e5caf755a8be4658b178",
+  "branch": "federation",
+  "budget": 12,
+  "slots": 6,
+  "selection": {
+    "block": "DF-9ROUTER-64",
+    "reason": "block_drive ranked DF-9ROUTER-64 first among actionable blocks; five ready rows remain in the same block"
+  },
+  "workers": [
+    {
+      "row": "DF-9ROUTER-2-R2",
+      "worktree": "~/worktrees/9router-DF-9ROUTER-2-R2",
+      "branch": "wt/DF-9ROUTER-2-R2",
+      "base_sha": "0a59cbaf3ecc82b4bc11e5caf755a8be4658b178",
+      "files_owned": [
+        "src/app/api/v1/models/route.js",
+        "tests/"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "prepared"
+    },
+    {
+      "row": "DF-9ROUTER-63",
+      "worktree": "~/worktrees/9router-DF-9ROUTER-63",
+      "branch": "wt/DF-9ROUTER-63",
+      "base_sha": "0a59cbaf3ecc82b4bc11e5caf755a8be4658b178",
+      "files_owned": [
+        "src/app/api/providers/route.js",
+        "src/lib/db/repos/connectionsRepo.js",
+        "src/lib/db/repos/nodesRepo.js",
+        "tests/"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "prepared"
+    },
+    {
+      "row": "DF-9ROUTER-64",
+      "worktree": "~/worktrees/9router-DF-9ROUTER-64",
+      "branch": "wt/DF-9ROUTER-64",
+      "base_sha": "0a59cbaf3ecc82b4bc11e5caf755a8be4658b178",
+      "files_owned": [
+        "cli/cli.js",
+        "cli/README.md",
+        "cli/tests/"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "prepared"
+    }
+  ],
+  "deferred": [
+    {
+      "row": "DF-9ROUTER-55-R2",
+      "reason": "same stream/chat seam as DF-9ROUTER-2-R2 and shared open-sse files; not independent"
+    },
+    {
+      "row": "DF-9ROUTER-62",
+      "reason": "regression overlaps open-sse non-stream/usage seam and requires separate bisect/fix"
+    }
+  ],
+  "created_before_dispatch": true,
+  "finished_at": "2026-10-20T14:04:04-05:00",
+  "outcome": "RECOVERED AS PHANTOM: all 3 workers zero-commit; recovery tick re-dispatched as wave 9router-foreman-2026-10-20-17-15-03 (DF-9ROUTER-2-R2 reassigned to DF-9ROUTER-62)"
+}

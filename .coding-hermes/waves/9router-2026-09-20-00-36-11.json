@@ -1,0 +1,44 @@
+{
+  "tick_id": "9router-2026-09-20-00-36-11",
+  "project": "9router",
+  "workdir": "/home/kara/9router",
+  "base": "origin/federation",
+  "base_sha": "76e96a08",
+  "created_at": "2026-09-20T00:36:11-05:00",
+  "status": "finished",
+  "tasks": [
+    {
+      "id": "FED-024",
+      "worktree": "/home/kara/worktrees/9router-FED-024",
+      "branch": "wt/FED-024",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "status": "merged"
+    },
+    {
+      "id": "DF-9ROUTER-29",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-29",
+      "branch": "wt/DF-9ROUTER-29",
+      "model": "ocg/glm-5.3-flash",
+      "provider": "9router",
+      "status": "merged"
+    },
+    {
+      "id": "DF-9ROUTER-30",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-30",
+      "branch": "wt/DF-9ROUTER-30",
+      "model": "z-ai/glm-5.3-flash",
+      "provider": "xkiro",
+      "status": "merged"
+    },
+    {
+      "id": "DF-9ROUTER-31",
+      "worktree": "/home/kara/worktrees/9router-DF-9ROUTER-31",
+      "branch": "wt/DF-9ROUTER-31",
+      "model": "ocg/glm-5.3-flash",
+      "provider": "9router",
+      "status": "merged"
+    }
+  ],
+  "finished_at": "2026-09-20T04:40:00-05:00"
+}

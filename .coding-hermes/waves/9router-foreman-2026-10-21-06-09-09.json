@@ -1,0 +1,86 @@
+{
+  "tick_id": "9router-foreman-2026-10-21-06-09-09",
+  "block": "DOC-27",
+  "wave_size": 6,
+  "slots": 6,
+  "reason": "DOC-27 block recovery + new wave: load 3.55/16 = 6 slots, 6 independent P4 doc tasks",
+  "rows": [
+    {
+      "id": "DOC-19",
+      "title": "Node.js minimum runtime contradictory in README (>=22 / >=18 / >=20 / unspecified)",
+      "worktree": "/home/kara/worktrees/9router-DOC-19",
+      "branch": "wt/DOC-19",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "README.md",
+        "cli/README.md",
+        "docs/ARCHITECTURE.md",
+        "docs/federation-spec.md"
+      ]
+    },
+    {
+      "id": "DOC-20",
+      "title": "9 of 10 translated READMEs predate the fork: no federation/upstream distinction, no DATA_DIR",
+      "worktree": "/home/kara/worktrees/9router-DOC-20",
+      "branch": "wt/DOC-20",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "README.*.md"
+      ]
+    },
+    {
+      "id": "DOC-21",
+      "title": "gitbook deployment guide clones wrong repo (decolua instead of fork)",
+      "worktree": "/home/kara/worktrees/9router-DOC-21",
+      "branch": "wt/DOC-21",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "gitbook/content/*/deployment/*.md"
+      ]
+    },
+    {
+      "id": "DOC-22",
+      "title": "request-path timeout knobs undocumented (STREAM_STALL_TIMEOUT_MS, STREAM_FIRST_CHUNK_TIMEOUT_MS)",
+      "worktree": "/home/kara/worktrees/9router-DOC-22",
+      "branch": "wt/DOC-22",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "docs/api-reference.md",
+        "docs/ARCHITECTURE.md"
+      ]
+    },
+    {
+      "id": "DOC-23",
+      "title": "supported-tools enumeration stale (28 cards in CLI Tools config, only 22 match)",
+      "worktree": "/home/kara/worktrees/9router-DOC-23",
+      "branch": "wt/DOC-23",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "docs/integrations/README.md",
+        "src/shared/constants/cliTools.js"
+      ]
+    },
+    {
+      "id": "DOC-27",
+      "title": "13-skill agent library unreachable from README: zero mentions of skills/",
+      "worktree": "/home/kara/worktrees/9router-DOC-27",
+      "branch": "wt/DOC-27",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "files": [
+        "README.md",
+        "docs/README.md"
+      ]
+    }
+  ],
+  "closed_at": "2026-10-21T06:20:00-05:00",
+  "note": "Wave dispatch failed: worktrees pointed to wrong repo (S3/kara-hermes not GitHub 9router); all 6 workers died with zero commits; rows reset to pending",
+  "finished_at": "2026-10-21T15:11:58-05:00",
+  "recovered_by": "9router-foreman-2026-10-21-15-11-58",
+  "status": "recovered"
+}
