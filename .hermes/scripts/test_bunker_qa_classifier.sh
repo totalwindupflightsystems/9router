@@ -420,5 +420,104 @@ else
 fi
 
 echo
+
+# QA-DEXDAT-CORE-22 (2026-10-28): pytest -q under a network cut emits only
+# per-char progress and NO final summary, so a suite that COMPLETED rc=0 under
+# the cut graded UNVERIFIED forever. The harness now appends a
+# DISCONNECT_SUITE_SUMMARY rc=<n> outcomes=<c> line (outcomes = progress/outcome
+# chars outside marker/summary lines) and the chain has:
+#   - a relaxed OK arm  (summary outcomes>=3, rc=0)
+#   - a relaxed FAIL arm (summary outcomes>=3, rc!=0)
+#   - the incomplete-evidence UNVERIFIED arm skipped when the summary proves
+#     >=3 outcomes; rc=124 hang and vacuity keep their grades.
+if [ -f "$HARNESS" ]; then
+  grep -qF 'DISCONNECT_SUITE_SUMMARY' "$HARNESS" \
+    && check "QA22 summary capture present" yes yes \
+    || check "QA22 summary capture present" yes no
+  grep -qF 'disc_outcomes' "$HARNESS" \
+    && check "QA22 outcomes extraction present" yes yes \
+    || check "QA22 outcomes extraction present" yes no
+  grep -qF 'cell chaos-disconnect OK "passes with network cut (NETWORK_CUT_APPLIED; rc=0 under cut' "$HARNESS" \
+    && check "QA22 relaxed OK arm present" yes yes \
+    || check "QA22 relaxed OK arm present" yes no
+  grep -qF 'cell chaos-disconnect FAIL "suite FAILED under network cut' "$HARNESS" \
+    && check "QA22 relaxed FAIL arm present" yes yes \
+    || check "QA22 relaxed FAIL arm present" yes no
+
+  # Behavioral: render the REAL battery via the harness's own generator (the
+  # same mechanism the pnpm QA-DUCKBRAIN-015 block uses, so the escaping is
+  # correct by construction), extract the QA22 capture + grading chain from the
+  # RENDERED script, and drive all four verdict scenarios.
+  mkdir -p "$TMPD/qa22-fixture"
+  printf '%s\n' '{"name":"qa22-fixture","scripts":{"test":"echo qa22"}}' > "$TMPD/qa22-fixture/package.json"
+  _r="$TMPD/qa22-render.sh"
+  if QA_HEAD_SHA=9749c41c QA_HEAD_PULL=test bash "$HARNESS" __gen-remote-detected "$TMPD/qa22-fixture" 2>/dev/null > "$_r" \
+     && grep -q 'DISCONNECT_SUITE_SUMMARY rc=' "$_r"; then
+    _sr=$(grep -n '^disc_outcomes=""$' "$_r" | head -1 | cut -d: -f1)
+    _er=$(grep -n 'else cell chaos-disconnect OK "fails fast on disconnect' "$_r" | head -1 | cut -d: -f1)
+    if [ -n "$_sr" ] && [ -n "$_er" ] && [ "$_er" -gt "$_sr" ]; then
+      RENDER2="$TMPD/qa22-chain.sh"
+      {
+        echo 'cell() { printf "%s %s\n" "$1" "$2"; }'
+        echo 'enospc_failure() { return 1; }'
+        echo 'live_test_transport_cut() { return 1; }'
+        echo 'vacuous_native_suite() { return 1; }'
+        echo 'build_incomplete() { return 1; }'
+        echo 'go_suite_env_failure() { return 1; }'
+        echo 'go_toolchain_floor_failure() { return 1; }'
+        echo 'suite_deps_missing() { return 1; }'
+        echo 'native_runner_missing() { return 1; }'
+        echo 'native_zero_tests() { return 1; }'
+        # mirror the REAL counters (as the canopy-44 block does) so a counted
+        # log grades through the pre-existing arms, not the new summary arms
+        echo 'disconnect_suite_counts() { local f="$1" pass fail; '
+        echo '  pass=$(grep -Eo "[0-9]+[[:space:]]+passed" "$f" 2>/dev/null | awk "{s+=\$1} END {print s+0}"); '
+        echo '  fail=$(grep -Eo "[0-9]+[[:space:]]+(failed|errors?)" "$f" 2>/dev/null | awk "{s+=\$1} END {print s+0}"); '
+        echo '  [ "$pass" -eq 0 ] && pass=$(grep -Ec "^ok[[:space:]]" "$f" 2>/dev/null || true); '
+        echo '  [ "$fail" -eq 0 ] && fail=$(grep -Ec "^(FAIL|--- FAIL)" "$f" 2>/dev/null || true); '
+        echo '  printf "%s %s\\n" "${pass:-0}" "${fail:-0}"; }'
+        echo 'disconnect_log_valid() { local f="$1" counts pass fail; '
+        echo '  [ -s "$f" ] || return 1; '
+        echo '  grep -qE "^NETWORK_CUT_APPLIED([[:space:]]|$)" "$f" || return 1; '
+        echo '  counts=$(disconnect_suite_counts "$f"); pass=${counts%% *}; fail=${counts##* }; '
+        echo '  [ "${pass:-0}" -gt 0 ] || [ "${fail:-0}" -gt 0 ]; }'
+        echo 'disc_window=240'
+        echo 'native_dur=100'
+        sed -n "${_sr},${_er}p" "$_r"
+      } > "$RENDER2"
+      bd2() { LOGD="$TMPD/qa22logs" disc_rc="$1" bash "$RENDER2" 2>/dev/null | head -1 | awk '{print $1" "$2}'; }
+      mkdir -p "$TMPD/qa22logs"
+      # (a) exact QA-DEXDAT-CORE-22 tick-463 shape: progress-only suite log with
+      # a summary line, rc=0 -> OK (was UNVERIFIED forever)
+      printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\n' > "$TMPD/qa22logs/disc.log"
+      printf 'ssssssssssssssssssss [  9%%]\n' >> "$TMPD/qa22logs/disc.log"
+      printf 'DISCONNECT_SUITE_SUMMARY rc=0 outcomes=20\n' >> "$TMPD/qa22logs/disc.log"
+      check "QA22 behavioral: progress+summary rc=0 -> OK"         "chaos-disconnect OK"         "$(bd2 0)"
+      # (b) summary present, rc=1 (suite genuinely failed under the cut) -> FAIL
+      printf 'DISCONNECT_SUITE_SUMMARY rc=1 outcomes=6\n' > "$TMPD/qa22logs/disc.log"
+      printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\n' >> "$TMPD/qa22logs/disc.log"
+      printf 'ssFFss [  9%%]\n' >> "$TMPD/qa22logs/disc.log"
+      check "QA22 behavioral: progress+summary rc=1 -> FAIL"       "chaos-disconnect FAIL"       "$(bd2 1)"
+      # (c) marker-only rc=0, no summary, no counts -> UNVERIFIED (old gate kept)
+      printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\n' > "$TMPD/qa22logs/disc.log"
+      check "QA22 behavioral: marker-only rc=0 -> UNVERIFIED"      "chaos-disconnect UNVERIFIED" "$(bd2 0)"
+      # (d) counted log (12 passed), rc=1, NO summary marker -> pre-existing
+      # "evidence incomplete" UNVERIFIED is replaced by nothing here because
+      # disconnect_log_valid stub is 1; the OLD chain graded this OK. The real
+      # counts path is covered by the canopy-44 block above; here the summary
+      # absence with rc!=0 must NOT grade the new OK arm.
+      printf 'NETWORK_CUT_APPLIED proxy=http://127.0.0.1:9\n12 passed in 1.2s\n' > "$TMPD/qa22logs/disc.log"
+      case "$(bd2 1)" in
+        "chaos-disconnect OK") check "QA22 behavioral: counted log rc=1 not stolen by new arms" yes yes ;;
+        *) check "QA22 behavioral: counted log rc=1 not stolen by new arms" yes "$(bd2 1)" ;;
+      esac
+    else
+      check "QA22: could extract the rendered chain" yes no
+    fi
+  else
+    check "QA22: battery render for chain extraction failed" yes no
+  fi
+fi
+
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
