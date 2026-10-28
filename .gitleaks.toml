@@ -59,4 +59,11 @@ paths = [
   # fixture value, not a credential (landed in 165f9b90). Same class as
   # above. (Comment elides the literal so this file itself stays clean.)
   '''tests/unit/nous-provider\.test\.js''',
+  # Board narration records: .coding-hermes/board/events.jsonl carries
+  # foreman trace/witness prose (e.g. the "task-com…erge" witness token —
+  # 23-char match for the sk- prefix rule). These are foreman
+  # records, not credentials; every closeout event repeats the shape, and
+  # docs/*.md are allowlisted for the identical reason. Real secrets live
+  # in .env, never in board events.
+  '''.coding-hermes/board/events[.]jsonl''',
 ]
