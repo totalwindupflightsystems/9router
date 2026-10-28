@@ -2741,6 +2741,30 @@ ui_pat_compiles() { # 0 = grep accepts this ERE (match or no-match), 1 = grep re
   printf '\n' | grep -qE "\$1" 2>/dev/null
   [ \$? -le 1 ]
 }
+# QA-CHIMERA-V2-43 (2026-10-28): same contract as ui_go_http_source for Python:
+# 0 = tree has HTTP-serving Python source, 1 = none, 2 = scan untrustworthy.
+# QA-CHIMERA-V2-36b (2026-10-28): on THIS repo the plain -r scan recursed into
+# .venv/ (untracked here, SHIPPED ON THE AGENT) and grep -rl found ~47,000
+# matching files — the arm hung past the collect deadline twice. The scan is
+# therefore bounded: tracked tree + .git (exclude-dir prunes deps/venv trees),
+# files listed with -l, capped at 2000 names before content grep.
+ui_py_http_source() {
+  UI_PY_SCAN='not-scanned'
+  if ui_pat_compiles "\$UI_PY_PAT"; then
+    if [ -n "\$(git ls-files -- '*.py' 2>/dev/null | head -2000 | xargs -r grep -lE \"\$UI_PY_PAT\" 2>/dev/null | head -1)" ]; then
+      UI_PY_SCAN='found'; return 0
+    fi
+    UI_PY_SCAN='none'
+    if [ "\$(git ls-files -- '*.py' 2>/dev/null | wc -l)" -gt 2000 ]; then return 2; fi
+    return 1
+  fi
+  # ERE rejected by grep: same intent, fixed-string terms (grep -F cannot return 2)
+  if [ -n "\$(git ls-files -- '*.py' 2>/dev/null | head -2000 | xargs -r grep -lF -e 'FastAPI(' -e 'Starlette(' -e 'uvicorn' -e 'APIRouter(' -e '.mount(' 2>/dev/null | head -1)" ]; then
+    UI_PY_SCAN='found-degraded'; return 0
+  fi
+  UI_PY_SCAN='degraded'; return 2
+}
+UI_PY_PAT='FastAPI\\(|Starlette\\(|uvicorn|APIRouter\\(|\\.mount\\('
 UI_HTTP_PAT='http\.ListenAndServe|http\.Server|http\.ServeMux|http\.HandleFunc|http\.Handler|chi\.NewRouter|mux\.NewRouter|gin\.Default|echo\.New|fiber\.New|fasthttp|gorilla/mux|net/http|\.Serve\('
 UI_HTTP_SCAN='not-scanned'
 ui_go_http_source() { # 0 = tree has HTTP-serving Go source, 1 = none, 2 = scan untrustworthy
@@ -3063,6 +3087,84 @@ elif [ -f go.mod ] && ui_go_http_source; then
   kill \$UIPID 2>/dev/null; sleep 1; kill -9 \$UIPID 2>/dev/null
   for p in \$UI_ANSWERS; do fuser -k \$p/tcp >/dev/null 2>&1; done
   true
+elif [ -f pyproject.toml ] && ui_py_http_source; then
+  # QA-CHIMERA-V2-43 (2026-10-28): the detector had npm and Go arms but NO
+  # Python arm, so a FastAPI/uvicorn repo serving an HTML SPA (chimera-v2:
+  # /web/ static assets on :8765) graded N/A "no web UI detected" every
+  # cycle — the same false-negative class QA-CRIER-19 fixed for Go. Same
+  # rules apply: the detection pattern is COMPILED before it is trusted (a
+  # grep-rejected ERE degrades to fixed strings and the cell says so), the
+  # probe list prefers the repo's OWN declared ports, and an empty result
+  # grades INFO/HARNESS-DEGRADED — never a bare N/A.
+  UI_PY_PAT='FastAPI\\(|Starlette\\(|uvicorn|APIRouter\\(|\\.mount\\('
+  UI_PY_DECLARED=\$(grep -rhoE '(localhost|127\\.0\\.0\\.1):[0-9]{3,5}' . --include='*.py' --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=vendor 2>/dev/null | grep -oE '[0-9]+\$' | sort -un | head -5 | tr '\\n' ' ')
+  UI_PY_BIN=\$(grep -A8 '^\\[project\\.scripts\\]' pyproject.toml 2>/dev/null | grep -oE '^[a-zA-Z0-9_-]+' | head -1)
+  UI_PY_MOD=\$(grep -oE '^name = \"[^\"]+\"' pyproject.toml 2>/dev/null | head -1 | sed 's/^name = //; s/\"//g' | tr '-' '_')
+  UI_BINS_PY=""
+  [ -n "\$UI_PY_BIN" ] && UI_BINS_PY="\$UI_PY_BIN serve"
+  if [ -n "\$UI_PY_MOD" ]; then
+    UI_BINS_PY="\${UI_BINS_PY:+\$UI_BINS_PY|}python -m \$UI_PY_MOD.cli serve"
+  fi
+  UI_PY_PORTS="\${BUNKER_QA_UI_PORTS:-\$UI_PY_DECLARED 8765 8000 8080 8081 9000 3000}"
+  UI_PATHS_PY="\${BUNKER_QA_UI_PATHS:-/web/ /web / /docs /ui/ /dashboard /index.html /health}"
+  UI_PY_DEGRADE=""
+  case "\${UI_PY_SCAN:-}" in
+    found-degraded) UI_PY_DEGRADE=" (HARNESS-DEGRADED: the Python detection ERE was rejected by grep — the arm ran on fixed-string terms)" ;;
+  esac
+  UI_PY_OCCUPIED=" "
+  for _p in \$UI_PY_PORTS; do
+    _c=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$_p/" 2>/dev/null)
+    if [ -n "\$_c" ] && [ "\$_c" != "000" ]; then UI_PY_OCCUPIED="\$UI_PY_OCCUPIED\$_p "; fi
+  done
+  UI_PY_SURFACES=""; UI_PY_MISS=""; UI_PY_ANSWERS=""; UI_PY_LISTEN=""
+  IFS='|' read -r -a UI_PY_LIST <<< "\$UI_BINS_PY"
+  for UI_B in "\${UI_PY_LIST[@]}"; do
+    [ -z "\$UI_B" ] && continue
+    ( setsid timeout 45 env PATH="\$HOME/tools/venv/bin:\$PATH" \$UI_B ) </dev/null >\$LOGD/ui-probe.log 2>&1 &
+    UIPID=\$!
+    UI_PY_ANSWERS=""; UI_PY_SURFACES=""; UI_PY_MISS=""
+    for _i in \$(seq 1 20); do
+      kill -0 \$UIPID 2>/dev/null || break
+      for _p in \$UI_PY_PORTS; do
+        case "\$UI_PY_OCCUPIED" in *" \$_p "*) continue ;; esac
+        case " \$UI_PY_ANSWERS " in *" \$_p "*) continue ;; esac
+        _c=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$_p/" 2>/dev/null)
+        [ "\$_c" = "000" ] && _c=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:\$_p/web/" 2>/dev/null)
+        case "\$_c" in 000|"") : ;; *) UI_PY_ANSWERS="\$UI_PY_ANSWERS \$_p" ;; esac
+      done
+      [ -n "\$UI_PY_ANSWERS" ] && break
+      sleep 1
+    done
+    for _p in \$UI_PY_ANSWERS; do
+      UI_PY_SURFACES=""
+      for _path in \$UI_PATHS_PY; do
+        _r=\$(curl -s -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' --max-time 3 "http://127.0.0.1:\$_p\$_path" 2>/dev/null)
+        _c=\${_r%%|*}; _rest=\${_r#*|}; _ct=\${_rest%%|*}; _sz=\${_rest##*|}
+        case "\$_c" in
+          2??) case "\$_ct" in
+                 text/html*) UI_PY_SURFACES="\$UI_PY_SURFACES http://127.0.0.1:\$_p\$_path \$_c \${UI_PY_LISTEN:+}" ;;
+                 *) : ;;
+               esac ;;
+        esac
+      done
+      [ -n "\$UI_PY_SURFACES" ] && { UI_PY_LISTEN="\$_p"; break; }
+      UI_PY_MISS="\$UI_PY_MISS :\$_p"
+    done
+    if [ -n "\$UI_PY_SURFACES" ] || [ -n "\$UI_PY_MISS" ] || kill -0 \$UIPID 2>/dev/null; then break; fi
+  done
+  if [ -n "\$UI_PY_SURFACES" ]; then
+    cell ui-probe OK "UI serves text/html on \$UI_PY_SURFACES (port \$UI_PY_LISTEN; probe list [\$UI_PY_PORTS]; start: \$UI_B)\$UI_PY_DEGRADE"
+  elif [ -n "\$UI_PY_MISS" ]; then
+    cell ui-probe INFO "python server answered on\$UI_PY_ANSWERS but NO 2xx text/html surface on any probed path [\$UI_PATHS_PY] (declared default port(s): \${UI_PY_DECLARED:-none}; start: \$UI_B)\$UI_PY_DEGRADE"
+  elif ! kill -0 \$UIPID 2>/dev/null; then
+    cell ui-probe INFO "python start command is not a long-running server (rc/exit in log) — no HTML surface to probe: \$(tail -2 \$LOGD/ui-probe.log)\$UI_PY_DEGRADE"
+  else
+    cell ui-probe INFO "python server ran 20s, no probed port answered [\$UI_PY_PORTS]\${UI_PY_DECLARED:+ (declared default port(s) \$UI_PY_DECLARED were in the list and did not answer)} — surface may be on an unlisted port: \$(tail -2 \$LOGD/ui-probe.log)\$UI_PY_DEGRADE"
+  fi
+  kill -- -\$UIPID 2>/dev/null; sleep 1; kill -9 -- -\$UIPID 2>/dev/null
+  kill \$UIPID 2>/dev/null; sleep 1; kill -9 \$UIPID 2>/dev/null
+  for _p in \$UI_PY_ANSWERS; do fuser -k \$_p/tcp >/dev/null 2>&1; done
+  true
 else
   # QA-CRIER-19-R2 · AC-3: N/A stays for a repo with NO HTML route, but it NAMES
   # what the gate scanned, so a reader can tell "looked, found none" from "never
@@ -3073,7 +3175,7 @@ else
   elif [ -f go.mod ]; then
     cell ui-probe N/A "no web UI detected: go.mod repo with no HTTP-serving source in *.go (scanned: net/http, http.Server, ListenAndServe, ServeMux, HandleFunc, chi/mux/gin/echo/fiber routers, .Serve() ) and no package.json dev/start script"
   else
-    cell ui-probe N/A "no web UI detected: no npm dev/start script (package.json or frontend/package.json) and no go.mod HTTP server source"
+    cell ui-probe N/A "no web UI detected: no npm dev/start script (package.json or frontend/package.json), no go.mod HTTP server source, and no Python/uvicorn HTTP server source in *.py (scanned: FastAPI(, Starlette(, uvicorn, APIRouter(, .mount()"
   fi
 fi
 
