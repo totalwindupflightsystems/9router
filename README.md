@@ -550,11 +550,12 @@ A per-provider entry set from a provider page wins over the global toggle
 ## 🧪 Testing
 
 **The suite is NOT all-green by design** — don't chase a red run as a regression.
-The baseline is ~3730 pass / ~48 fail / ~95 skip (3874 total, verified 2026-10-06), with every
+The baseline is ~4885 pass / ~33 fail / ~95 skip (5014 total, verified 2026-10-28), with every
 known-failing test catalogued in [`tests/__baseline__/known-fails.txt`](tests/__baseline__/known-fails.txt).
 Live-network tests (`real/*.real.test.js`, `unit/mimo-free.live.test.js`) are **opt-in** via
 `RUN_REAL=1` — a default run skips them, and they are deliberately **not** part of the baseline
 because a third-party endpoint is not a deterministic property of this repo.
+<!-- ch:trace row=README-10-R2 spec=.coding-hermes/board/tasks.jsonl#README-10-R2 test=none:doc-prose-no-test doc=README.md prompt=/tmp/9router-README-10-R2-brief.txt evidence=/tmp/9router-vitest-2026-10-28.json witness=none:foreman-reruns-gate-at-merge verdict=none:pending-foreman commit=self memory=none:project-record -->
 
 ```bash
 npm test                          # full vitest suite (runs from tests/, its own npm package)
