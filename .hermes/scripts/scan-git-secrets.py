@@ -740,6 +740,54 @@ def scan_repo(repo_dir, since_iso):
     return findings
 
 
+def _scan_plaintext_file(fpath, base_dir, live_env_files):
+    """Line-scan ONE file for secret patterns. Shared by dir-walk and explicit-list modes."""
+    findings = []
+    if fpath in live_env_files:
+        return findings
+    if not fpath.endswith(('.md', '.sh', '.py', '.js', '.ts', '.txt', '.json', '.yaml',
+                            '.yml', '.toml', '.env', '.key', '.token')):
+        return findings
+    try:
+        with open(fpath, 'r', errors='replace') as f:
+            for i, line in enumerate(f, 1):
+                for pattern, ptype, severity in SECRET_PATTERNS:
+                    m = pattern.search(line)
+                    if not m:
+                        continue
+                    excerpt = fp_window(line, m)
+                    if (is_false_positive(excerpt, fpath)
+                            or is_placeholder_value(m) or is_header_name_value(m)):
+                        continue
+                    findings.append({
+                        'repo': f'plaintext:{base_dir}',
+                        'type': ptype,
+                        'severity': severity,
+                        'file': fpath,
+                        'line': redact_line(f'L{i}: {excerpt.strip()[:200]}'),
+                    })
+    except (OSError, UnicodeDecodeError):
+        pass
+    return findings
+
+
+def scan_plaintext_files(paths, base_dir):
+    """Explicit-list variant of scan_plaintext_dir.
+
+    Why this exists (scan #daily 2026-10-28): the live-secret-copy dimension only sees a
+    plaintext file when its value HASH-MATCHES a credential of Bane's own. The per-person
+    bunker agent env carriers (~/.hermes/{ingrid,jorge,luisa_sossa}[.telegram].env) hold
+    OTHER people's keys — real telegram-bot-token and sk-or- shapes — so they were
+    invisible to BOTH dimensions: outside every PLAINTEXT_DIR and never hash-matched.
+    Explicit paths close that class without walking all of ~/.hermes (sessions/ logs/
+    would flood the report the same way cron/output did).
+    """
+    findings = []
+    for p in paths:
+        findings.extend(_scan_plaintext_file(p, base_dir, set()))
+    return findings
+
+
 def scan_plaintext_dir(base_dir, live_env_files):
     """Scan a non-git directory (skills, backups) line-by-line for secret patterns.
 
@@ -753,30 +801,7 @@ def scan_plaintext_dir(base_dir, live_env_files):
         dirs[:] = [d for d in dirs if not any(p.search(os.path.join(root, d)) for p in SKIP_PATTERNS)]
         for fname in files:
             fpath = os.path.join(root, fname)
-            if fpath in live_env_files:
-                continue
-            if not fname.endswith(('.md', '.sh', '.py', '.js', '.ts', '.txt', '.json', '.yaml', '.yml', '.toml', '.env')):
-                continue
-            try:
-                with open(fpath, 'r', errors='replace') as f:
-                    for i, line in enumerate(f, 1):
-                        for pattern, ptype, severity in SECRET_PATTERNS:
-                            m = pattern.search(line)
-                            if not m:
-                                continue
-                            excerpt = fp_window(line, m)
-                            if (is_false_positive(excerpt, fpath)
-                                    or is_placeholder_value(m) or is_header_name_value(m)):
-                                continue
-                            findings.append({
-                                'repo': f'plaintext:{base_dir}',
-                                'type': ptype,
-                                'severity': severity,
-                                'file': fpath,
-                                'line': redact_line(f'L{i}: {excerpt.strip()[:200]}'),
-                            })
-            except (OSError, UnicodeDecodeError):
-                continue
+            findings.extend(_scan_plaintext_file(fpath, base_dir, live_env_files))
     return findings
 
 
@@ -839,6 +864,39 @@ def main():
         if args.verbose:
             print(f"  Plaintext: {pdir}", file=sys.stderr)
         all_findings.extend(scan_plaintext_dir(pdir, live_env_files))
+
+    # Step 3.55 (2026-10-28): explicit per-person agent env carriers + key stores that sit
+    # in the ~/.hermes root, outside every PLAINTEXT_DIR and invisible to the hash-match
+    # dimension because they hold OTHER people's credentials, not Bane's.
+    extra_files = []
+    for pat in ('~/.hermes/*.env', '~/.hermes/*.telegram.env'):
+        extra_files.extend(sorted(glob.glob(os.path.expanduser(pat))))
+    for kdir in ('~/.hermes/keys', '~/.duckbrain'):
+        d = os.path.expanduser(kdir)
+        if os.path.isdir(d):
+            extra_files.extend(sorted(os.path.join(d, f) for f in os.listdir(d)
+                                      if os.path.isfile(os.path.join(d, f))))
+    if args.verbose:
+        print(f"  Plaintext (explicit): {len(extra_files)} files", file=sys.stderr)
+    carrier_hits = scan_plaintext_files(extra_files, '~/.hermes (credential carriers)')
+    # ONE aggregated INFO line, never N CRITICALs. Rationale: a per-person agent's own
+    # .env IS the legitimate home of its bot token / provider key — the same reason
+    # live_env_files is skipped in the dir walk. Reporting each as CRITICAL every fire
+    # would be 12 standing alarms that teach the reader to ignore the real ones. The
+    # exposure these files actually had was STAGING (uncovered by the old .git/info/exclude),
+    # now closed; this line keeps them visible without crying wolf.
+    if carrier_hits:
+        cnames = sorted({os.path.basename(h['file']) for h in carrier_hits})
+        all_findings.append({
+            'repo': 'plaintext:credential-carriers',
+            'type': 'expected-credential-carrier',
+            'severity': 'INFO',
+            'file': f"{len(cnames)} file(s)",
+            'line': redact_line(f"{len(carrier_hits)} live-shaped credential(s) in legitimate "
+                                f"env/key carriers: {', '.join(cnames[:8])}"
+                                + ('…' if len(cnames) > 8 else '')
+                                + ' — expected home (600, git-excluded); act only if a carrier escapes this host'),
+        })
 
     # Step 3.6: LIVE-SECRET COPY dimension (scan #105) — files outside every PLAINTEXT_DIR
     # whose contents hash-match a credential that is live in a secret store right now.
