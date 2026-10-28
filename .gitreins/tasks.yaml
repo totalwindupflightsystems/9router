@@ -76,3 +76,13 @@ tasks:
   status: complete
   created_at: '2026-10-26T10:25:59.134152+00:00'
   completed_at: '2026-10-26T10:41:19.949235+00:00'
+- id: README-10-R2
+  title: README test-baseline totals stale after 2026-10-26 release
+  criteria:
+  - 'PASS: README.md no longer presents the superseded 2026-10-06 baseline totals
+    (~3730/48/95/3874); the replacement figures are backed by a fresh vitest JSON
+    result and verify-no-regression output quoted in the worker report; the known-fails
+    link and regression-gate command in README remain executable'
+  status: complete
+  created_at: '2026-10-28T05:53:50.544235+00:00'
+  completed_at: '2026-10-28T06:06:55.693874+00:00'
