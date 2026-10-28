@@ -1244,13 +1244,45 @@ fail_detail() { # <rc> <logfile> <cmd...> — ACTIONABLE-FAILURE CONTRACT
 #       "exitcode '1': failure" after a step that never printed ❌) names the
 #       last step that STARTED plus the log tail, so the detail stays
 #       attributable instead of being an unanchored context blob.
+act_failed_step_output() { # <act log> <failure line> — bounded, non-control output
+  local cf="\$1" failure_line="\$2" start_line=1 output
+  start_line=\$(awk -v stop="\$failure_line" 'NR < stop && /⭐ Run/ { last=NR } END { print last + 0 }' "\$cf" 2>/dev/null)
+  [ "\$start_line" -gt 0 ] || start_line=1
+  if [ "\$failure_line" -le "\$((start_line + 1))" ]; then
+    output=""
+  else
+    output=\$(sed -n "\$((start_line + 1)),\$((failure_line - 1))p" "\$cf" 2>/dev/null \\
+      | grep -vE '⭐ Run|✅ Success|❌ Failure|exitcode .*[=:].*failure|Error: Job' \\
+      | sed -E 's/([[:alnum:]_-]*(token|password|secret|api[_-]?key)[[:alnum:]_-]*[=:])[^[:space:]|]+/\1[REDACTED]/Ig' \\
+      | sed 's/[|]/\\\\|/g' | tr '\\n' '|' | sed 's/|$//' | cut -c1-800)
+  fi
+  if [ -n "\$output" ]; then
+    printf 'captured-output: %s' "\$output"
+  else
+    printf 'captured-output: unavailable (no non-control output before failed step)'
+  fi
+}
+# act_failure_context — NAME the failing job/step first, then the cause.
+# (QA-DUCKBRAIN-017, 2026-10-25.) The old shape returned the 18 lines ABOVE
+# the first ❌ marker truncated at 1400 chars — the '❌ Failure - Main <step>'
+# line itself fell off the tail, so a ci-act detail could not answer "which
+# job/step concluded failed" and a green 'Run tests' step could not be told
+# apart from a post-test-step failure (measured on the duckbrain 2026-10-25
+# evidence: the real failing step 'Run integration tests' was hidden behind
+# the vitest summary while 'Run tests' was green at 233/233). Two rules now:
+#   (1) the ❌ marker line (act names the step ON it) is emitted FIRST, then a
+#       compact 4-line cause window around it;
+#   (2) a log with NO ❌ marker but a failed job (act prints
+#       "exitcode '1': failure" after a step that never printed ❌) names the
+#       last step that STARTED plus the log tail, so the detail stays
+#       attributable instead of being an unanchored context blob.
 act_failure_context() { # <act log>
   local lf="\$1" n
   n=\$(grep -n '❌' "\$lf" 2>/dev/null | head -1 | cut -d: -f1)
   if [ -n "\$n" ]; then
-    printf 'failed-step: %s || cause-window: %s' "\$(sed -n "\${n}p" "\$lf" | cut -c1-200)" "\$(sed -n "\$(( n > 4 ? n - 4 : 1 )),\$(( n + 4 ))p" "\$lf" | tr '\n' '|' | cut -c1-1000)"
+    printf 'failed-step: %s || %s || cause-window: %s' "\$(sed -n "\${n}p" "\$lf" | cut -c1-200)" "\$(act_failed_step_output "\$lf" "\$n")" "\$(sed -n "\$(( n > 4 ? n - 4 : 1 )),\$(( n + 4 ))p" "\$lf" | tr '\n' '|' | cut -c1-1000)"
   else
-    printf 'job-failed-no-marker: last-started-step [%s] tail [%s]' "\$(grep '⭐ Run' "\$lf" 2>/dev/null | tail -1 | cut -c1-160)" "\$(tail -4 "\$lf" 2>/dev/null | tr '\n' '|' | cut -c1-800)"
+    printf 'job-failed-no-marker: last-started-step [%s] || %s || tail [%s]' "\$(grep '⭐ Run' "\$lf" 2>/dev/null | tail -1 | cut -c1-160)" "\$(act_failed_step_output "\$lf" "\$(wc -l < "\$lf")")" "\$(tail -4 "\$lf" 2>/dev/null | tr '\n' '|' | cut -c1-800)"
   fi
 }
 # build_env_failure — is this failure the AGENT's missing C toolchain instead of a

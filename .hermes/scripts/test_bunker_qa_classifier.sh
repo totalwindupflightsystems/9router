@@ -519,5 +519,61 @@ if [ -f "$HARNESS" ]; then
   fi
 fi
 
+echo
+# QA-DEXDAT-CORE-24: ci-act evidence must preserve bounded non-control output
+# from the failed step, not only act's status/cause lines. Drive the helper from
+# the production rendered remote script so heredoc escaping stays covered.
+if [ -f "$HARNESS" ]; then
+  grep -qF 'act_failed_step_output()' "$HARNESS" \
+    && check "QA24 failed-step output helper present" yes yes \
+    || check "QA24 failed-step output helper present" yes no
+  QA24_REPO="$TMPD/qa24-fixture"
+  mkdir -p "$QA24_REPO"
+  printf '%s\n' '{"name":"qa24-fixture","scripts":{"test":"echo qa24"}}' > "$QA24_REPO/package.json"
+  QA24_RENDER="$TMPD/qa24-render.sh"
+  if QA_HEAD_SHA=9749c41c QA_HEAD_PULL=test bash "$HARNESS" __gen-remote-detected "$QA24_REPO" 2>/dev/null > "$QA24_RENDER" \
+      && grep -q '^act_failed_step_output()' "$QA24_RENDER"; then
+    QA24_HELPERS="$TMPD/qa24-helpers.sh"
+    sed -n '/^act_failed_step_output()/,/^# build_env_failure/p' "$QA24_RENDER" \
+      | sed '$d' | sed 's/[\\][$]/$/g' > "$QA24_HELPERS"
+    # The helper body is rendered production code; source it only in this
+    # disposable test process and assert both positive and empty-control arms.
+    if bash -n "$QA24_HELPERS" && . "$QA24_HELPERS"; then
+      printf '%s\n' \
+        '[CI/t] ⭐ Run Main Ruff check' \
+        'ruff: F401 unused import in src/example.py:1' \
+        '[CI/t]   ❌  Failure - Main Ruff check [18ms]' \
+        "[CI/t] exitcode '1': failure" \
+        "Error: Job 't' failed" > "$TMPD/qa24-failed.log"
+      QA24_DETAIL="$(act_failure_context "$TMPD/qa24-failed.log")"
+      case "$QA24_DETAIL" in
+        *'failed-step:'*'captured-output:'*'F401 unused import'*'cause-window:'*)
+          check "QA24 failed act detail includes bounded output and context" yes yes ;;
+        *)
+          check "QA24 failed act detail includes bounded output and context" yes "$QA24_DETAIL" ;;
+      esac
+      printf '%s\n' \
+        '[CI/t] ⭐ Run Main Ruff check' \
+        '[CI/t]   ❌  Failure - Main Ruff check [18ms]' \
+        "[CI/t] exitcode '1': failure" > "$TMPD/qa24-status-only.log"
+      QA24_EMPTY="$(act_failure_context "$TMPD/qa24-status-only.log")"
+      case "$QA24_EMPTY" in
+        *'captured-output: unavailable'*) check "QA24 status-only detail stays explicitly unavailable" yes yes ;;
+        *) check "QA24 status-only detail stays explicitly unavailable" yes "$QA24_EMPTY" ;;
+      esac
+      case "$QA24_DETAIL" in
+        *'captured-output: unavailable'*) check "QA24 non-empty output is not vacuous" yes no ;;
+        *) check "QA24 non-empty output is not vacuous" yes yes ;;
+      esac
+    else
+      check "QA24 rendered helper syntax" yes no
+    fi
+  else
+    check "QA24 production render exposes helper" yes no
+  fi
+else
+  echo "  SKIP QA24 harness not found at $HARNESS"
+fi
+
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
