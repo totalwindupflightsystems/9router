@@ -106,7 +106,7 @@ qa_battery_lock_acquire() {
 # by the detached process, so flock releases automatically with its exit.
 qa_battery_lock_keeper() {
   local agent_id="$1" srv="$2" ssh_port="$3" host_key="$4"
-  local state
+  local state gone_streak=0
   # Allow the detached remote shell to publish qa-run.sh and its process before
   # the first poll; otherwise a launch/startup race could release the lock early.
   sleep "${QA_BATTERY_LOCK_KEEPER_START_GRACE:-5}"
@@ -115,11 +115,17 @@ qa_battery_lock_keeper() {
       ssh -p "$ssh_port" -i "$host_key" -i "$HOME/.bunker/keys/$agent_id" \
         -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes \
         "bunker-$agent_id@$srv" \
-        "if [ -f ~/qa-run.finished ]; then echo FINISHED; elif pgrep -f '[q]a-run\\\\.sh' >/dev/null 2>&1; then echo RUNNING; else echo GONE; fi" \
+        "if [ -f ~/qa-run.finished ]; then echo FINISHED; elif pgrep -f '[q]a-run[.]sh' >/dev/null 2>&1; then echo RUNNING; else echo GONE; fi" \
         2>/dev/null | tail -1 || true)
     case "$state" in
-      FINISHED|GONE) return 0 ;;
-      RUNNING|*) sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
+      FINISHED) return 0 ;;
+      GONE)
+        gone_streak=$((gone_streak + 1))
+        if [ "$gone_streak" -ge "${BUNKER_QA_LOCK_KEEPER_GONE_STREAK:-2}" ]; then
+          return 0
+        fi
+        sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
+      *) gone_streak=0; sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
     esac
   done
 }
