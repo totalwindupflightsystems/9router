@@ -1,0 +1,70 @@
+{
+  "tick_id": "9router-foreman-2026-10-30-20-19-51",
+  "project": "9router",
+  "block_id": "DOC-32",
+  "mode": "wave-recovery-merges",
+  "wave_size": 0,
+  "wave_budget": 12,
+  "recovery_of": {
+    "injected_manifest": ".coding-hermes/waves/9router-foreman-2026-10-28-22-57-14.json",
+    "status": "already_recovered",
+    "recovered_by_tick": "9router-foreman-2026-10-29-10-47-53",
+    "recovered_at": "2026-10-29T06:02:00-05:00",
+    "rows_recovered": ["README-22"],
+    "mode": "verification-only-recovered",
+    "worker_count": 0
+  },
+  "deferred_branch_recovery": {
+    "reason": "The 2026-10-25 documentation wave (manifest 9router-foreman-2026-10-25-17-50-48.json) marked DOC-22-R2 and DOC-32 failed with 'preserve branch evidence for next tick'. Two sibling ticks on 2026-10-30 (18:32:51, 19:07:12) treated only the injected manifest and went idle; this tick recovered the preserved branches.",
+    "rows": [
+      {
+        "task_id": "DOC-22-R2",
+        "worktree": "/home/kara/worktrees/9router-DOC-22-R2",
+        "branch": "wt/DOC-22-R2",
+        "worker_commit": "53ab4a2e99b67f8ee658586e8e53dcb0a00e4e08",
+        "base_before": "1c1e48014a6541e7b536b009c9360effa7a438b2",
+        "stale_base": true,
+        "rebased_onto": "388a2297afb6ffecba027007e79b42c9d20fedc4",
+        "landed_commit": "01dfcbe9",
+        "merge": "ff-only; merged tree == branch tip (git diff empty)",
+        "gates": "guard-20261030T204519: secrets clean (judge scan 22.37MB), tests red on 1 EXTERNAL pass->fail; independent full suite 5117/4989/32/95 twice identical; verify-no-regression: exactly 1 pass->fail = tests/federation/qa-harness-cell-detection.test.js GREEN cell (external, INT-9ROUTER-003)",
+        "verdict": "tier2 PASS, dir .gitreins/history/2026-10-30/20333442 (printed 9c9ac874)",
+        "outcome": "complete"
+      },
+      {
+        "task_id": "DOC-32",
+        "worktree": "/home/kara/worktrees/9router-DOC-32",
+        "branch": "wt/DOC-32",
+        "worker_commit": "481e514023ec748a0936142bf79dee99d9cdba86",
+        "base_before": "1c1e48014a6541e7b536b009c9360effa7a438b2",
+        "stale_base": true,
+        "rebased_onto": "01dfcbe9",
+        "landed_commit": "27859f03",
+        "merge": "ff-only; merged tree == branch tip (git diff empty)",
+        "gates": "independent full suite 5117/4989/32/95 + verify-no-regression: same single external pass->fail; commit is docs-only (1 markdown file)",
+        "verdict": "tier2 criterion PASS, dir .gitreins/history/2026-10-30/9026d3fe (async judge re-ran all checks at 27859f03, byte-identical); overall False = tier1 external red only",
+        "outcome": "complete"
+      }
+    ]
+  },
+  "held_back": [
+    {
+      "item": ".env.example polish (EMPTY_PEEK_DEADLINE_MS doc + stale cited line range 51-68 -> 51-73)",
+      "patch": "/tmp/9r368-polish-patch.diff",
+      "reason": "gitreins 0.17.1 sensitive-path rule blocks staging .env.example (path class, content-independent); no unrecorded guard override applied after the tick's approval interlock. Filed as DOC-33 + HYG-9ROUTER-20."
+    },
+    {
+      "item": ".gitreins/tasks.yaml lifecycle update (DOC-22-R2, DOC-32 records) and docs/dogfood/2026-10-29-qa-9router-releng-3-target-verification.md",
+      "reason": "non-.coding-hermes paths would trigger the guard test gate which is red on the external regression (INT-9ROUTER-003); left uncommitted with this manifest recording ownership. Next tick or the INT-9ROUTER-003 resolution lands them."
+    },
+    {
+      "item": "worktree/branch reaping for wt/DOC-22-R2 and wt/DOC-32",
+      "reason": "tick approval interlock asked for no destructive actions mid-tick; merged branches are reachable from federation so nothing is lost. Reap next tick (git worktree remove + branch -d)."
+    }
+  ],
+  "board_rows_closed": ["DOC-22-R2", "DOC-32", "SUP-CRED-20261020-9R"],
+  "board_rows_filed": ["INT-9ROUTER-003", "DOC-33", "HYG-9ROUTER-20"],
+  "remote_ci": "stale: latest listed run 2026-10-08 (2 success, 1 queued since then); outage owned by CI-9ROUTER-005",
+  "local_gate": "suite 5117 total / 4989 passed / 32 failed / 95 pending x2 (identical pre/post merge-2); verify-no-regression: exactly 1 pass->fail, external (INT-9ROUTER-003)",
+  "finished_at": "2026-10-30T21:25:00-05:00"
+}
