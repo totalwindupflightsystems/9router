@@ -73,6 +73,76 @@ fi
 # QA-HERMES-CANOPY-19). bunker-las-02 remains the verified default.
 # Override with BUNKER_QA_SERVER.
 SERVER="${BUNKER_QA_SERVER:-bunker-mvp}"
+# QA-DEXDAT-CORE-17: controller-side launch/run serialization is keyed by the
+# target server. The lock is held with flock on fd 9; launch hands that fd to a
+# detached keeper until the remote battery finishes, so launch's short-lived
+# controller process cannot release the lock while its battery is still active.
+QA_BATTERY_LOCK_DIR="${BUNKER_QA_LOCK_DIR:-/tmp}"
+QA_BATTERY_LOCK_FD=9
+QA_BATTERY_LOCK_PATH=""
+qa_battery_lock_path() {
+  local srv="${1:-$SERVER}" key
+  key=$(printf '%s' "$srv" | LC_ALL=C tr -c 'A-Za-z0-9_.-' '_')
+  printf '%s/bunker-qa-%s.battery.lock\n' "$QA_BATTERY_LOCK_DIR" "$key"
+}
+qa_battery_lock_log() {
+  printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*"
+}
+qa_battery_lock_acquire() {
+  QA_BATTERY_LOCK_PATH=$(qa_battery_lock_path "$SERVER")
+  mkdir -p "$QA_BATTERY_LOCK_DIR"
+  exec 9>>"$QA_BATTERY_LOCK_PATH"
+  if flock -n "$QA_BATTERY_LOCK_FD"; then
+    qa_battery_lock_log "acquired battery lock on $SERVER ($QA_BATTERY_LOCK_PATH)"
+  else
+    qa_battery_lock_log "waiting for battery lock on $SERVER ($QA_BATTERY_LOCK_PATH)"
+    flock "$QA_BATTERY_LOCK_FD"
+    qa_battery_lock_log "acquired battery lock on $SERVER ($QA_BATTERY_LOCK_PATH)"
+  fi
+}
+# launch() must retain the per-server lock after this controller process exits.
+# The keeper polls the marker/process on the spawned JIT agent and exits only
+# when the detached battery is finished or the agent is gone; fd 9 is inherited
+# by the detached process, so flock releases automatically with its exit.
+qa_battery_lock_keeper() {
+  local agent_id="$1" srv="$2" ssh_port="$3" host_key="$4"
+  local state gone_streak=0
+  # Allow the detached remote shell to publish qa-run.sh and its process before
+  # the first poll; otherwise a launch/startup race could release the lock early.
+  sleep "${QA_BATTERY_LOCK_KEEPER_START_GRACE:-5}"
+  while :; do
+    state=$(timeout "${BUNKER_QA_LOCK_KEEPER_SSH_TIMEOUT:-30}" \
+      ssh -p "$ssh_port" -i "$host_key" -i "$HOME/.bunker/keys/$agent_id" \
+        -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes \
+        "bunker-$agent_id@$srv" \
+        "if [ -f ~/qa-run.finished ]; then echo FINISHED; elif pgrep -f '[q]a-run[.]sh' >/dev/null 2>&1; then echo RUNNING; else echo GONE; fi" \
+        2>/dev/null | tail -1 || true)
+    case "$state" in
+      FINISHED) return 0 ;;
+      GONE)
+        gone_streak=$((gone_streak + 1))
+        if [ "$gone_streak" -ge "${BUNKER_QA_LOCK_KEEPER_GONE_STREAK:-2}" ]; then
+          return 0
+        fi
+        sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
+      *) gone_streak=0; sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
+    esac
+  done
+}
+qa_battery_lock_keep_for_launch() {
+  local agent_id="$1" srv="$2" ssh_port="$3" host_key="$4" keeper_log
+  keeper_log="${QA_BATTERY_LOCK_PATH}.keeper.log"
+  export -f qa_battery_lock_keeper
+  nohup setsid bash -c '
+    qa_battery_lock_keeper "$1" "$2" "$3" "$4"
+  ' _ "$agent_id" "$srv" "$ssh_port" "$host_key" \
+    >"$keeper_log" 2>&1 &
+  local keeper_pid=$!
+  qa_battery_lock_log "battery lock keeper pid=$keeper_pid server=$srv agent=$agent_id"
+  # The keeper now owns the inherited open file description. Closing fd 9 in
+  # this short-lived launch process lets the next launch wait on the keeper.
+  exec 9>&-
+}
 # QA-HIVEMIND-WORK-18(a): the agent SSH port is SERVER-SPECIFIC (bunker-mvp
 # answers on 22; las-fleet agents answer on 2223). The old blanket bare-port
 # default made the post-spawn probe fail on mvp and the
@@ -3670,7 +3740,14 @@ run() {
   local repo="${1:?usage: bunker-qa.sh run <repo-dir> [--keep]}"
   shift
   local keep=0
-  for a in "$@"; do [ "$a" = "--keep" ] && keep=1; done
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --keep) keep=1; shift ;;
+      --server) SERVER="${2:?--server requires a value}"; shift 2 ;;
+      --server=*) SERVER="${1#--server=}"; shift ;;
+      *) shift ;;
+    esac
+  done
 
   local PROJ; PROJ=$(basename "$repo")
   : > "$EVIDENCE"
@@ -3686,6 +3763,7 @@ run() {
   trap 'write_fail_if_empty "battery terminated by SIGTERM (tool timeout) before any cell recorded"; exit 124' TERM
   trap 'write_fail_if_empty "battery interrupted by SIGINT before any cell recorded"; exit 130' INT
   trap 'write_fail_if_empty "battery exited rc=$? before any cell recorded"' EXIT
+  qa_battery_lock_acquire
 
   if [ ! -d "$repo/.git" ]; then
     local git_top
@@ -3835,11 +3913,14 @@ launch() {
   shift
   local keep=0
   # DF-GITREINS-POC-99: parse --evidence so launch writes to the caller's path
+  # QA-DEXDAT-CORE-17: parse --server so the battery lock keys on the target server
   while [ $# -gt 0 ]; do
     case "$1" in
       --keep) keep=1; shift ;;
       --evidence) EVIDENCE="${2:?--evidence needs a value}"; shift 2 ;;
       --evidence=*) EVIDENCE="${1#--evidence=}"; shift ;;
+      --server) SERVER="${2:?--server requires a value}"; shift 2 ;;
+      --server=*) SERVER="${1#--server=}"; shift ;;
       *) shift ;;
     esac
   done
@@ -3867,6 +3948,7 @@ launch() {
   trap 'write_fail_if_empty "launch terminated by SIGTERM (tool timeout) before the launch cell was recorded"; exit 124' TERM
   trap 'write_fail_if_empty "launch interrupted by SIGINT before the launch cell was recorded"; exit 130' INT
   trap 'write_fail_if_empty "launch exited rc=$? before the launch cell was recorded"' EXIT
+  qa_battery_lock_acquire
 
   if [ ! -d "$repo/.git" ]; then
     local git_top
@@ -4033,8 +4115,9 @@ launch() {
   printf '{"project":"%s","cell":"repo-head","status":"OK","detail":"tested HEAD=%s at launch=%s (pull=%s)","ts":"%s"}\n' \
     "$PROJ" "$QA_HEAD_SHA" "$launched" "$(printf '%s' "$QA_HEAD_PULL" | tr '\n' ' ' | cut -c1-260)" "$QA_HEAD_TS" >> "$EVIDENCE"
   printf '{"project":"%s","cell":"launch","status":"OK","detail":"agent=%s server=%s ttl=%s script_bytes=%s — battery started detached (qa-run.sh); phase B: bunker-qa.sh collect --evidence %s","ts":"%s"}\n' \
-    "$PROJ" "$agent" "$SERVER" "$TTL" "${script_bytes:-unknown}" "$EVIDENCE" "$launched" >> "$EVIDENCE"
-  log "QA launch complete — no cells waited on locally (phase B: collect --evidence $EVIDENCE)"
+    "$PROJ" "$agent" "$SERVER" "$TTL" "${script_bytes:-unknown}" "${EVIDENCE}" "$launched" >> "$EVIDENCE"
+  qa_battery_lock_keep_for_launch "$agent" "$SERVER" "$(server_ssh_port "$SERVER")" "$BUNKER_QA_HOST_KEY"
+  log "QA launch complete — no cells waited on locally (phase B: bunker-qa.sh collect --evidence $EVIDENCE)"
   echo "LAUNCHED agent=$agent evidence=$EVIDENCE"
 }
 
