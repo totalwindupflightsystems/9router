@@ -106,9 +106,10 @@ qa_battery_lock_acquire() {
 # by the detached process, so flock releases automatically with its exit.
 qa_battery_lock_keeper() {
   local agent_id="$1" srv="$2" ssh_port="$3" host_key="$4"
-  local state gone_streak=0
+  local state seen_running=0 gone_streak=0 start_deadline
   # Allow the detached remote shell to publish qa-run.sh and its process before
   # the first poll; otherwise a launch/startup race could release the lock early.
+  start_deadline=$(( $(date +%s) + ${BUNKER_QA_LOCK_KEEPER_START_TIMEOUT:-600} ))
   sleep "${QA_BATTERY_LOCK_KEEPER_START_GRACE:-5}"
   while :; do
     state=$(timeout "${BUNKER_QA_LOCK_KEEPER_SSH_TIMEOUT:-30}" \
@@ -119,13 +120,17 @@ qa_battery_lock_keeper() {
         2>/dev/null | tail -1 || true)
     case "$state" in
       FINISHED) return 0 ;;
-      GONE)
-        gone_streak=$((gone_streak + 1))
-        if [ "$gone_streak" -ge "${BUNKER_QA_LOCK_KEEPER_GONE_STREAK:-2}" ]; then
+      RUNNING) seen_running=1; gone_streak=0 ;;
+      *)
+        if [ "$seen_running" -eq 1 ]; then
+          gone_streak=$((gone_streak + 1))
+          if [ "$gone_streak" -ge "${BUNKER_QA_LOCK_KEEPER_GONE_STREAK:-3}" ]; then
+            return 0
+          fi
+        elif [ "$(date +%s)" -ge "$start_deadline" ]; then
+          qa_battery_lock_log "keeper: battery never observed RUNNING within ${BUNKER_QA_LOCK_KEEPER_START_TIMEOUT:-600}s start window (agent $agent_id) — releasing lock as failed-start escape"
           return 0
-        fi
-        sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
-      *) gone_streak=0; sleep "${BUNKER_QA_LOCK_KEEPER_POLL:-15}" ;;
+        fi ;;
     esac
   done
 }
