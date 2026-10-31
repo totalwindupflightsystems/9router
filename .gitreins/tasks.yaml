@@ -27,14 +27,6 @@ tasks:
   status: complete
   created_at: '2026-10-24T20:49:52.951569+00:00'
   completed_at: '2026-10-24T21:11:23.405178+00:00'
-- id: DOC-32
-  title: Re-evaluate documentation audit findings
-  criteria:
-  - DOC-32 remains open pending DOC-30 and DOC-31; verify the block state only, no
-    implementation.
-  status: complete
-  created_at: '2026-10-25T16:54:51.955995+00:00'
-  completed_at: '2026-10-25T16:54:52.286843+00:00'
 - id: DOC-21-R2-MERGED
   title: Repair GitBook source install and health check on merged tree
   criteria:
@@ -87,3 +79,22 @@ tasks:
   status: complete
   created_at: '2026-10-28T23:15:57.754777+00:00'
   completed_at: '2026-10-28T23:21:07.024271+00:00'
+- id: DOC-22-R2
+  title: Document runtime timeout environment variables
+  criteria:
+  - 'PASS: the chosen authoritative operator/config reference documents STREAM_STALL_TIMEOUT_MS,
+    STREAM_FIRST_CHUNK_TIMEOUT_MS, PROTOCOL_PEEK_TIMEOUT_MS, FETCH_CONNECT_TIMEOUT_MS,
+    and GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS with units, defaults, and scope. Reviewer
+    reruns the source scan in the row reasoning and finds each variable in the reference.'
+  status: complete
+  created_at: '2026-10-30T20:42:09.400893+00:00'
+  completed_at: '2026-10-30T21:00:57.792951+00:00'
+- id: DOC-32
+  title: Re-evaluate the documentation audit findings after DOC-30 and DOC-31
+  criteria:
+  - Re-run the source-to-doc route and doctrine checks after DOC-30 and DOC-31 are
+    completed, record exact commands and outputs in a fresh audit artifact, and close
+    only if both findings are resolved or re-filed with current evidence.
+  status: complete
+  created_at: '2026-10-30T21:02:42.001523+00:00'
+  completed_at: '2026-10-30T21:03:09.673123+00:00'
