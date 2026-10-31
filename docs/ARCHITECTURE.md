@@ -684,7 +684,7 @@ Related (same lifecycle surface, read directly from the environment):
 The gateway takes its configuration from `.env`, the process environment (compose
 `environment:`, a systemd `Environment=` line) or the CLI launcher. `src/`,
 `open-sse/` and `custom-server.js` touch ~100 distinct `process.env` keys;
-**31 of them are operator-relevant** — keys an operator can set to change gateway
+**35 of them are operator-relevant** — keys an operator can set to change gateway
 behaviour. They are tabled below by subsystem, one row per key, with the reading site
 so a value can be traced without searching the tree. Keys that are platform noise,
 wrapper/process-internal, owned by another section's own matrix, or provider-executor
@@ -770,8 +770,39 @@ and config is re-read at most every 5 s (`src/lib/db/repos/requestDetailsRepo.js
 |---|---|---|
 | `DEBUG_MITM` | unset | Truthy logs every SSE line and binary frame written by the MITM proxy handlers. Per-chunk and chatty — use briefly. `src/mitm/handlers/base.js:108` |
 
+### Browser pool and Obscura engine
+
+The browser pool (`open-sse/services/browserPool.js`) keeps one stealth browser
+warm for web-cookie providers whose anti-bot challenges require a real browser
+(ChatGPT web's Cloudflare, Claude web's Turnstile, Meta AI's token page). It
+launches lazily — only when an executor explicitly asks for a context — and
+shuts itself down after 5 minutes idle, when all contexts are evicted, or when
+the last context closes (`open-sse/services/browserPool.js:101,135,427`).
+Engine priority for headless launches: Obscura (a ~30 MB Rust browser speaking
+the Chrome DevTools Protocol, driven via Playwright `connectOverCDP`,
+`open-sse/services/obscura.js`) → cloakbrowser → plain Playwright Chromium.
+
+| Variable | Default | Effect (source) |
+|---|---|---|
+| `NINEROUTER_BROWSER_POOL` | unset (enabled) | Master switch. `off`, `0`, or `false` disables the browser pool **and** the Obscura engine entirely — `isPoolEnabled()` and `isObscuraUsable()` share the same test, so one flag governs both. Unset, or any other value, leaves the pool enabled. `open-sse/services/browserPool.js:34-38`, `open-sse/services/obscura.js:22-26` |
+| `OBSCURA_CDP_ENDPOINT` | unset (spawn locally) | External mode: points at an already-running Obscura server. 9router then neither spawns nor kills anything — the process is not owned by this module; callers get fresh CDP connections and closing one leaves the external server running. `open-sse/services/obscura.js:86-90` |
+| `OBSCURA_BIN` | unset (PATH lookup) | Overrides binary discovery. When set, its value is used verbatim as the `obscura` binary; when unset, every `PATH` entry is searched for an executable named `obscura`. No binary found → Obscura unavailable and the pool falls back to cloakbrowser/plain Chromium. `open-sse/services/obscura.js:42-58` |
+| `OBSCURA_PORT` | unset (free port) | Port for the spawned `obscura serve --port <port> --host 127.0.0.1`. Unset or non-numeric → an ephemeral loopback port is allocated (`Number(...) || findFreePort()`). Ignored in external mode. `open-sse/services/obscura.js:93-94` |
+
+Spawned-vs-external lifecycle: with no `OBSCURA_CDP_ENDPOINT`, one shared
+`obscura serve` child is spawned lazily on first use and lives for the gateway
+process's lifetime. Readiness is gated on `GET /json/version` with a 30 s cap,
+bailing early if the child exits or fails to spawn; a child that never becomes
+ready is SIGKILLed (`open-sse/services/obscura.js:60-78,99-113`). The shared
+server is deliberately not stopped when a CDP connection closes or the pool
+shuts down (`open-sse/services/browserPool.js:469-472`) — it is reused across
+acquires and only SIGKILLed via `killSharedObscuraServer()`
+(`open-sse/services/obscura.js:141-151`). In external mode none of the spawn,
+port, readiness, or kill logic runs: the configured endpoint is used as-is.
+
 Row count: 5 auth + 4 access + 1 storage + 4 logging/capture + 5 observability +
-4 provider + 5 background refresh + 2 onboarding + 1 MITM = **31**.
+4 provider + 5 background refresh + 2 onboarding + 1 MITM + 4 browser pool =
+**35**.
 
 ### Keys outside this matrix
 
