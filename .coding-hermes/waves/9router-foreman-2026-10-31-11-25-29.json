@@ -1,0 +1,29 @@
+{
+  "tick_id": "9router-foreman-2026-10-31-11-25-29",
+  "block_id": "DOC-33",
+  "mode": "serial-fallback-closed",
+  "wave_budget": 3,
+  "wave_size": 1,
+  "rows": [
+    {
+      "task_id": "DOC-33",
+      "depends_on": [],
+      "independence": "singleton ready row in block; no peer row",
+      "worktree": "/home/kara/worktrees/9router-DOC-33",
+      "branch": "wt/DOC-33",
+      "base_sha": "a870ec3574b91b8d4cd6cc35152672e26930e906",
+      "brief": "/tmp/9router-DOC-33-brief.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "ownership": "foreman-9router-2026-10-31-11-25-29",
+      "gitreins_task": "DOC-33",
+      "status": "landed_pending_judge",
+      "wave": "none:serial",
+      "commit": "390faeb715891979cd478729327260ba22f66c6a",
+      "judge": "pending:gitreins-verdict"
+    }
+  ],
+  "finished_at": "2026-10-31T12:20:00-05:00",
+  "verified_tree_sha": "390faeb715891979cd478729327260ba22f66c6a",
+  "closeout_commit_sha": "pending:board-closeout"
+}

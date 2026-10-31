@@ -98,3 +98,13 @@ tasks:
   status: complete
   created_at: '2026-10-30T21:02:42.001523+00:00'
   completed_at: '2026-10-30T21:03:09.673123+00:00'
+- id: DOC-33
+  title: Document EMPTY_PEEK_DEADLINE_MS timeout reference
+  criteria:
+  - 'Acceptance: .env.example documents EMPTY_PEEK_DEADLINE_MS=45000 with unit, default,
+    and scope; cites open-sse/config/runtimeConfig.js:51-73; grep -n ''envMs('' open-sse/config/runtimeConfig.js
+    finds every documented knob; include ch:trace row=DOC-33 and preserve the original
+    acceptance contract.'
+  status: complete
+  created_at: '2026-10-31T11:34:24.222252+00:00'
+  completed_at: '2026-10-31T11:51:27.485237+00:00'
