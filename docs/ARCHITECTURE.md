@@ -684,7 +684,7 @@ Related (same lifecycle surface, read directly from the environment):
 The gateway takes its configuration from `.env`, the process environment (compose
 `environment:`, a systemd `Environment=` line) or the CLI launcher. `src/`,
 `open-sse/` and `custom-server.js` touch ~100 distinct `process.env` keys;
-**31 of them are operator-relevant** — keys an operator can set to change gateway
+**32 of them are operator-relevant** — keys an operator can set to change gateway
 behaviour. They are tabled below by subsystem, one row per key, with the reading site
 so a value can be traced without searching the tree. Keys that are platform noise,
 wrapper/process-internal, owned by another section's own matrix, or provider-executor
@@ -746,6 +746,7 @@ and config is re-read at most every 5 s (`src/lib/db/repos/requestDetailsRepo.js
 | `KIRO_TOOL_CALL_REPAIR` | enabled (any value except `"false"`) | `"false"` turns off the Kiro executor's streaming tool-call repair/integrity gate; a connection's own `kiroToolCallRepair: false` disables it too. `open-sse/executors/kiro.js:374` |
 | `MODEL_CATALOG_SYNC` | enabled (unset) | `"off"` (case-insensitive) skips the recurring models.dev catalog sync (60 s startup delay, 24 h interval, 30 min retry). `src/lib/modelCatalog/sync.js:258` |
 | `VIDEO_FETCH_TIMEOUT_MS` | `120000` | Per-round-trip deadline for upstream video job create/poll HTTP calls; it does not bound upstream rendering. See "Video proxy fetch timeout" above. `open-sse/handlers/videoCore.js:9` |
+| `MINIMAX_DESKTOP_DATA_DIR` | `~/.minimax` (`DEFAULT_MCODE_DATA_DIR`) | Data directory of the MiniMax Code desktop app for the auth-lease integration (`mcode-lease` connections ride the desktop app's sign-in — the broker owns token refresh — instead of holding a refresh token). Resolution order: per-connection `providerSpecificData.mcodeDataDir` → this variable → the default install location. Each candidate is run through `path.resolve` and the endpoint resolver rejects non-absolute paths (`AuthLeaseError INVALID_REQUEST`), so set an absolute path — a relative value is silently anchored at the gateway's working directory. The directory selects which desktop broker state the router uses: the capability token is read from `<dir>/run/mcode-auth-lease-v1.cap` and requests go to the unix socket `<dir>/run/mcode-auth-lease-v1.sock`; on Windows the named pipe is `\\.\pipe\mcode-auth-lease-<sha256[:16]>` computed over the lowercased, win32-normalized dir, so changing the variable also changes the pipe name. `open-sse/services/minimaxCodeLease.js:63` |
 
 ### Background token refresh
 
@@ -771,7 +772,7 @@ and config is re-read at most every 5 s (`src/lib/db/repos/requestDetailsRepo.js
 | `DEBUG_MITM` | unset | Truthy logs every SSE line and binary frame written by the MITM proxy handlers. Per-chunk and chatty — use briefly. `src/mitm/handlers/base.js:108` |
 
 Row count: 5 auth + 4 access + 1 storage + 4 logging/capture + 5 observability +
-4 provider + 5 background refresh + 2 onboarding + 1 MITM = **31**.
+5 provider + 5 background refresh + 2 onboarding + 1 MITM = **32**.
 
 ### Keys outside this matrix
 
