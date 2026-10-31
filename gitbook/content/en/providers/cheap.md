@@ -9,7 +9,7 @@ When subscription quota runs out, pay pennies instead of dollars. ~90% cheaper t
 Cheap tier providers are your **backup** when subscription quota exhausted:
 
 - 💰 **GLM-4.7** - $0.6/$2.2 per 1M tokens (daily reset)
-- 💰 **MiniMax M2.7** - $0.50/$2.00 per 1M tokens (5h reset)
+- 💰 **MiniMax M2.1** - $0.2/$1.0 per 1M tokens (5h reset)
 - 💰 **Kimi K2** - $9/month flat (10M tokens)
 
 **Strategy:** Use after subscription quota out, before free tier. Massive cost savings vs ChatGPT API ($20/1M).
@@ -89,22 +89,18 @@ Plan your heavy tasks around reset time!
 
 ---
 
-## MiniMax M2.7 (5-Hour Reset)
+## MiniMax M2.1 (5-Hour Reset)
 
 ### Pricing
 
-Current source pricing (`open-sse/providers/pricing.js`) — the same rates apply to all M2.x models (M2.7, M2.5, M2.1):
-
 | Tier | Input | Output | Reset |
 |------|-------|--------|-------|
-| Standard | $0.50/1M | $2.00/1M | 5-hour rolling |
-
-> **Historical note:** Older revisions of this page quoted $0.20/$1.00 per 1M tokens for MiniMax M2.1. Those figures are stale and no longer match the source pricing; the current rate for every M2.x model is $0.50/$2.00 per 1M. MiniMax M3 is priced separately at $0.30/$1.20 per 1M.
+| Standard | $0.20/1M | $1.00/1M | 5-hour rolling |
 
 **Cost Example (10M tokens):**
-- Input: 10M × $0.50 = $5
-- Output: 10M × $2.00 = $20
-- **Total: $5-20** - Cheapest per-token option!
+- Input: 10M × $0.20 = $2
+- Output: 10M × $1.00 = $10
+- **Total: $2-10** - Cheapest option!
 
 ### Setup
 
@@ -134,23 +130,18 @@ API Key: your-minimax-api-key
 **Step 4: Use in CLI**
 
 ```
-Model: minimax/MiniMax-M2.7
+Model: minimax/MiniMax-M2.1
 ```
 
 ### Available Models
 
-Current registry (`open-sse/providers/registry/minimax.js`) — `MiniMax-M2.7` is the default model:
-
 | Model ID | Description | Context | Best For |
 |----------|-------------|---------|----------|
-| `minimax/MiniMax-M2.7` | MiniMax M2.7 (default) | 1M tokens | Long context, coding |
-| `minimax/MiniMax-M2.5` | MiniMax M2.5 | 1M tokens | Long context, coding |
 | `minimax/MiniMax-M2.1` | MiniMax M2.1 | 1M tokens | Long context, coding |
-| `minimax/MiniMax-M3` | MiniMax M3 | 1M tokens | Long context, coding ($0.30/$1.20 per 1M) |
 
 ### Pro Tips
 
-- **Cheapest per-token option** - $0.50/1M input (M2.x; still far cheaper than ChatGPT)
+- **Cheapest option** - $0.20/1M input (90% cheaper than ChatGPT)
 - **5-hour rolling** - Quota resets every 5 hours
 - **1M context** - Massive context window
 - **Best for long files** - Handle entire codebases
@@ -249,7 +240,7 @@ Total: 10M tokens = $9 flat
 | Provider | Input/1M | Output/1M | Reset | 10M Cost | Best For |
 |----------|----------|-----------|-------|----------|----------|
 | **GLM-4.7** | $0.60 | $2.20 | Daily 10AM | $6-22 | Daily quota users |
-| **MiniMax M2.7** | $0.50 | $2.00 | 5-hour | $5-20 | **Cheapest per token!** |
+| **MiniMax M2.1** | $0.20 | $1.00 | 5-hour | $2-10 | **Cheapest!** |
 | **Kimi K2** | $0.90 | $0.90 | Monthly | **$9 flat** | Consistent usage |
 | ChatGPT API | $20.00 | $20.00 | None | $200 | ❌ Expensive |
 
@@ -275,10 +266,10 @@ Dashboard → Combos → Create New
 
 Name: cheap-backup
 Models:
-  1. cc/claude-opus-4-5 (Subscription primary)
+  1. cc/claude-opus-5-5 (Subscription primary)
   2. glm/glm-4.7 (Cheap backup, daily reset)
-  3. minimax/MiniMax-M2.7 (Cheapest per-token fallback)
-  4. if/kimi-k2-thinking (FREE emergency)
+  3. minimax/MiniMax-M2.1 (Cheapest fallback)
+  4. if/kimi-k2 (FREE emergency)
 
 Use in CLI: cheap-backup
 ```
@@ -314,9 +305,9 @@ Set monthly budget: $20
 Allocation:
 - $9 Kimi K2 (10M tokens flat)
 - $6 GLM daily quota (10M tokens)
-- $5 MiniMax overflow (10M input tokens)
+- $5 MiniMax overflow (25M tokens)
 
-Total: 30M tokens for $20
+Total: 45M tokens for $20
 vs 1M tokens for $20 on ChatGPT API!
 ```
 
@@ -327,15 +318,15 @@ Priority:
 1. Gemini CLI (180K/month FREE)
 2. Claude Code (subscription you already pay)
 3. GLM-4.7 (cheap backup, $0.6/1M)
-4. MiniMax M2.7 (cheapest per token, $0.50/1M input)
+4. MiniMax M2.1 (cheapest, $0.2/1M)
 5. iFlow (FREE emergency)
 
 Monthly cost example (100M tokens):
 - 60M via Gemini CLI: $0 (free)
 - 30M via Claude Code: $0 (subscription)
 - 8M via GLM: $4.80
-- 2M via MiniMax: $1.00
-Total: $5.80/month!
+- 2M via MiniMax: $0.40
+Total: $5.20/month!
 ```
 
 ---
@@ -348,9 +339,9 @@ Total: $5.80/month!
 Breakdown:
 - 60M via subscription (Claude/Codex): $0 extra
 - 30M via GLM-4.7: $18
-- 10M via MiniMax M2.7: $5
+- 10M via MiniMax M2.1: $2
 
-Total: $23/month
+Total: $20/month
 vs $2000 on ChatGPT API!
 
 Savings: 99% cheaper!
@@ -361,12 +352,12 @@ Savings: 99% cheaper!
 ```
 Strategy:
 - $9 Kimi K2 (10M tokens)
-- $1 MiniMax overflow (2M input tokens)
+- $1 MiniMax overflow (5M tokens)
 
-Total: 12M tokens for $10
+Total: 15M tokens for $10
 vs 0.5M tokens for $10 on ChatGPT API!
 
-24× more tokens!
+30× more tokens!
 ```
 
 ### Example 3: Freelancer (Variable Usage)
@@ -380,10 +371,10 @@ Total: $3
 Heavy month (150M tokens):
 - 60M via subscription: $0
 - 60M via GLM: $36
-- 30M via MiniMax: $15
-Total: $51
+- 30M via MiniMax: $6
+Total: $42
 
-Average: $27/month
+Average: $22.50/month
 vs $3400 on ChatGPT API!
 ```
 
@@ -415,10 +406,10 @@ Coding Plan: 3× quota (same price!)
 
 ```
 Combo:
-1. gc/gemini-3-flash (FREE primary)
+1. gc/gemini-3-flash-preview (FREE primary)
 2. glm/glm-4.7 (cheap backup)
-3. minimax/MiniMax-M2.7 (cheapest per token)
-4. if/kimi-k2-thinking (FREE emergency)
+3. minimax/MiniMax-M2.1 (cheapest)
+4. if/kimi-k2 (FREE emergency)
 
 Result: Minimize costs, maximize uptime
 ```
@@ -459,7 +450,7 @@ Monthly: $30 limit
 **Solution:**
 - Check usage stats in Dashboard
 - Set budget alerts
-- Switch to MiniMax ($0.50/1M input — cheapest per token)
+- Switch to MiniMax ($0.2/1M cheapest)
 - Use free tier for non-critical tasks
 
 ---

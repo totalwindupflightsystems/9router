@@ -175,10 +175,8 @@ Use in CLI: premium-coding
 **GLM (`glm/`)** - $0.6/$2.2 per 1M:
 - `glm/glm-4.7` - GLM 4.7 (daily reset 10AM)
 
-**MiniMax (`minimax/`)** - $0.50/$2.00 per 1M (all M2.x models):
-- `minimax/MiniMax-M2.7` - MiniMax M2.7 (default, 5h reset)
-- `minimax/MiniMax-M2.5` - MiniMax M2.5
-- `minimax/MiniMax-M2.1` - MiniMax M2.1
+**MiniMax (`minimax/`)** - $0.20/$1.00 per 1M:
+- `minimax/MiniMax-M2.1` - MiniMax M2.1 (5h reset)
 
 **Kimi (`kimi/`)** - $9/month (10M tokens):
 - `kimi/kimi-latest` - Kimi Latest
@@ -205,14 +203,14 @@ Use in CLI: premium-coding
 1. Use Gemini CLI free tier (180K/month) for quick tasks
 2. Use Claude Code subscription quota fully (you already pay)
 3. Fallback to GLM ($0.6/1M) when quota out
-4. Emergency: MiniMax M2.7 ($0.50/1M input) or iFlow (free)
+4. Emergency: MiniMax M2.1 ($0.20/1M) or iFlow (free)
 
 Real example (100M tokens/month):
   60M via Gemini CLI: $0 (free tier)
   30M via Claude Code: $0 (subscription you already have)
   8M via GLM: $4.80
-  2M via MiniMax: $1.00
-  Total: $5.80/month + existing subscriptions
+  2M via MiniMax: $0.40
+  Total: $5.20/month + existing subscriptions
 ```
 
 ### Quota Reset Strategy
