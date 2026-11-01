@@ -160,3 +160,12 @@ tasks:
   status: complete
   created_at: '2026-11-01T12:43:41.438801+00:00'
   completed_at: '2026-11-01T12:49:03.510689+00:00'
+- id: INT-9ROUTER-003
+  title: Resolve external QA harness render regression
+  criteria:
+  - Verify the current bunker-qa.sh render and either land a justified 9router consumer-contract
+    update owned by this repository or preserve a named external-owner blocker with
+    fresh evidence; do not edit the external fleet script.
+  status: complete
+  created_at: '2026-11-01T19:14:42.892209+00:00'
+  completed_at: '2026-11-01T19:29:08.107161+00:00'
