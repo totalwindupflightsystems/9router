@@ -24,5 +24,6 @@
     "branch_reaped": true,
     "tier1": "DEGRADED_PASS: gitreins guard skipped tests because no files were staged; independent npm test regression gate passed with 5014 total, 4885 passed, 33 failed, 95 pending, and verify-no-regression success.",
     "remote_ci": "blocked/stale: latest listed run is 2026-10-08; no current-head run exists"
-  }
+  },
+  "finished_at": "2026-10-29T06:02:00-05:00"
 }

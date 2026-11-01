@@ -108,3 +108,30 @@ tasks:
   status: complete
   created_at: '2026-10-31T11:34:24.222252+00:00'
   completed_at: '2026-10-31T11:51:27.485237+00:00'
+- id: DOC-34
+  title: Document browser-pool and Obscura runtime controls
+  criteria:
+  - 'Acceptance: a tracked operator-facing reference names NINEROUTER_BROWSER_POOL,
+    OBSCURA_CDP_ENDPOINT, OBSCURA_BIN, and OBSCURA_PORT with defaults, disable behavior,
+    and external-vs-spawned lifecycle; reviewer reruns the source grep from the reasoning.'
+  status: complete
+  created_at: '2026-10-31T19:00:08.768282+00:00'
+  completed_at: '2026-10-31T19:25:01.903867+00:00'
+- id: DOC-35
+  title: Document MINIMAX_DESKTOP_DATA_DIR
+  criteria:
+  - 'Acceptance: the MiniMax/provider reference documents MINIMAX_DESKTOP_DATA_DIR,
+    absolute-path behavior, precedence, and selected capability/pipe state; reviewer
+    reruns the source command from the reasoning.'
+  status: complete
+  created_at: '2026-10-31T19:00:19.644103+00:00'
+  completed_at: '2026-10-31T19:28:59.734180+00:00'
+- id: DOC-36
+  title: Refresh GitBook MiniMax model and pricing reference
+  criteria:
+  - 'Acceptance: the two named GitBook pages identify current supported/default MiniMax
+    models and source pricing, with no unqualified stale M2.1 price claim; reviewer
+    reruns the registry/pricing grep from the reasoning.'
+  status: complete
+  created_at: '2026-10-31T19:00:19.949849+00:00'
+  completed_at: '2026-10-31T19:32:09.861924+00:00'

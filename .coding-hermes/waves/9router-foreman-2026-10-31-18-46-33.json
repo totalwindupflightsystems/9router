@@ -1,0 +1,50 @@
+{
+  "tick_id": "9router-foreman-2026-10-31-18-46-33",
+  "block_id": "DOC-36",
+  "mode": "wave",
+  "wave_size": 3,
+  "slots": 6,
+  "wave_budget": 12,
+  "rows": [
+    {
+      "task_id": "DOC-34",
+      "worktree": "/home/kara/worktrees/9router-DOC-34",
+      "branch": "wt/DOC-34",
+      "base_sha": "af245102",
+      "brief": "/tmp/brief-DOC-34.md",
+      "outcome": "complete",
+      "commit": "3cd59110"
+    },
+    {
+      "task_id": "DOC-35",
+      "worktree": "/home/kara/worktrees/9router-DOC-35",
+      "branch": "wt/DOC-35",
+      "base_sha": "af245102",
+      "brief": "/tmp/brief-DOC-35.md",
+      "outcome": "complete",
+      "commit": "1b820291"
+    },
+    {
+      "task_id": "DOC-36",
+      "worktree": "/home/kara/worktrees/9router-DOC-36",
+      "branch": "wt/DOC-36",
+      "base_sha": "af245102",
+      "brief": "/tmp/brief-DOC-36.md",
+      "outcome": "complete",
+      "commit": "dcee7aad"
+    }
+  ],
+  "created_at": "2026-10-31T18:50:00-05:00",
+  "notes": "3 independent P4 documentation tasks from the DOC-36 block. DOC-33 judge recovery dispatched async (job-6668b3dd). All three are doc-only, different files/topics, no depends_on edges.",
+  "finished_at": "2026-11-01T12:15:00-05:00",
+  "recovery": {
+    "finished_at": "2026-11-01T12:15:00-05:00",
+    "recovered_by_tick": "9router-foreman-2026-11-01-12-09-18",
+    "current_integration": "federation@36fcce0d",
+    "all_commits_reachable": true,
+    "worktrees_reaped": true,
+    "branches_reaped": true,
+    "board_truth": "DOC-34/35/36 all status=complete with matching commit_hash; prior tick closed the wave in 36fcce0d but left this manifest open",
+    "remote_parity": "0 unpushed (origin/federation == HEAD at recovery time)"
+  }
+}
