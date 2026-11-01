@@ -1,5 +1,12 @@
 guards:
   secrets: true
+  # GitReins 0.17.1 classifies every .env.* path as a credential store before
+  # inspecting contents. This tracked copyable template contains placeholders
+  # only; the exception is exact so .env and every other sensitive path remain
+  # blocked. The disposable probe in scripts/ verifies both outcomes.
+  sensitive_paths:
+    allow:
+      - ".env.example"
   lint: false
   tests: true
   # 180s (gitreins default) false-blocks commits under fleet load: the full
