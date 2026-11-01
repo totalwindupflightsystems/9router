@@ -135,3 +135,28 @@ tasks:
   status: complete
   created_at: '2026-10-31T19:00:19.949849+00:00'
   completed_at: '2026-10-31T19:32:09.861924+00:00'
+- id: HYG-9ROUTER-20
+  title: Resolve .env.example sensitive-path policy
+  criteria:
+  - 'Acceptance: either (a) .gitreins/config.yaml carries an explicit scoped allowlist/exception
+    for .env.example with a recorded reason and a fixture proves staging it passes
+    the secrets gate, or (b) repo docs document the recorded-reason override workflow
+    for .env.example edits and a real .env.example edit lands with the guard green
+    end-to-end. The closeout names which option was chosen and how the 53ab4a2e precedent
+    was explained. Also require ch:trace row=HYG-9ROUTER-20 in the changed evidence
+    surface.'
+  status: complete
+  created_at: '2026-11-01T12:21:34.153706+00:00'
+  completed_at: '2026-11-01T12:37:51.531201+00:00'
+- id: HYG-9ROUTER-20-R2
+  title: Repair HYG-9ROUTER-20 closeout evidence
+  criteria:
+  - 'Acceptance: update the committed policy document to explicitly state that option
+    (a), the exact .env.example allowlist, was chosen; remove the false claim that
+    tests/node_modules is absent; record the exact positive/negative policy probe
+    and staged guard result, distinguish the pre-existing INT-9ROUTER-003 full-suite
+    regression, and include ch:trace row=HYG-9ROUTER-20-R2. Do not edit the external
+    bunker-qa.sh script.'
+  status: complete
+  created_at: '2026-11-01T12:43:41.438801+00:00'
+  completed_at: '2026-11-01T12:49:03.510689+00:00'

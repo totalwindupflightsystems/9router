@@ -1,0 +1,54 @@
+{
+  "tick_id": "9router-foreman-2026-11-01-12-09-18",
+  "project": "9router",
+  "block_id": "HYG-9ROUTER-20",
+  "mode": "serial-fallback-fixup",
+  "wave_budget": 8,
+  "slots": 4,
+  "slots_reason": "16 CPUs, loadavg 11.08 -> 4 theoretical slots; selected block has one ready row, so serial fallback",
+  "base_sha": "ba524361781c13f0685c2a533e4d110412044ad7",
+  "rows": [
+    {
+      "task_id": "HYG-9ROUTER-20",
+      "worktree": "/home/kara/worktrees/9router-HYG-9ROUTER-20",
+      "branch": "wt/HYG-9ROUTER-20",
+      "base_sha": "ba524361781c13f0685c2a533e4d110412044ad7",
+      "brief": "/tmp/9router-foreman-2026-11-01-12-09-18-HYG-9ROUTER-20-brief.txt",
+      "model": "gpt-5.6-terra",
+      "provider": "openai-codex",
+      "depends_on_proof": "only ready row in HYG-9ROUTER-20 block; no wave peers",
+      "outcome": "complete",
+      "commit": "0cc54c04ed653c8eefe6ad4d2366d5288b4f56a9",
+      "verification": "worker 0cc54c04 merged; focused positive/negative policy probe PASS; merged-tree guard secrets PASS, tests red only INT-9ROUTER-003; superseded by evidence fix 214906c0"
+    },
+    {
+      "task_id": "HYG-9ROUTER-20-R2",
+      "worktree": "/home/kara/worktrees/9router-HYG-9ROUTER-20-R2",
+      "branch": "wt/HYG-9ROUTER-20-R2",
+      "base_sha": "0cc54c04ed653c8eefe6ad4d2366d5288b4f56a9",
+      "brief": "/tmp/9router-foreman-2026-11-01-12-09-18-HYG-9ROUTER-20-R2-brief.txt",
+      "model": "gpt-5.6-terra",
+      "provider": "openai-codex",
+      "outcome": "complete",
+      "commit": "214906c0351ce42452790bea107ef88fe45c0f1e",
+      "verification": "fresh fixup worktree; policy probe PASS; Tier 2 COMPLETE verdict d956b1cc; merged and published"
+    }
+  ],
+  "created_at": "2026-11-01T12:20:00-05:00",
+  "wave_size": 1,
+  "finished_at": "2026-11-01T12:55:00-05:00",
+  "recovery": {
+    "recovered_by_tick": "9router-foreman-2026-11-01-12-09-18",
+    "status": "complete",
+    "implementation_commit": "0cc54c04ed653c8eefe6ad4d2366d5288b4f56a9",
+    "evidence_fix_commit": "214906c0351ce42452790bea107ef88fe45c0f1e",
+    "tier2_verdict": "d956b1cc",
+    "prior_verdict": "b042810f INCOMPLETE; preserved, fixed by R2",
+    "canonical_head": "214906c0351ce42452790bea107ef88fe45c0f1e",
+    "remote_parity": "origin/federation == HEAD; 0 unpushed",
+    "board_row": "HYG-9ROUTER-20 complete with evidence run d956b1cc and commit 214906c0351ce42452790bea107ef88fe45c0f1e",
+    "blocker": "Tier1 full-suite red only on pre-existing external INT-9ROUTER-003; no product files in failing path and external bunker-qa.sh untouched",
+    "worktrees_reaped": "true",
+    "branches_reaped": "true"
+  }
+}
