@@ -70,8 +70,14 @@ x-federation-common: &federation-common
   # via env_file below so nothing secret lands in git. They MUST be identical
   # on every federation instance (see docs/FEDERATION.md §3). Get started:
   #   cp .env.example .env   (then edit the placeholder values; .env is gitignored)
+  # `.env` is intentionally OPTIONAL at config time (required: false) so a
+  # fresh clone validates with `docker compose -f docker-compose.federation.yml
+  # config`; without it each container falls back to insecure image defaults.
+  # Requires Docker Compose v2.24+ for the optional env_file syntax (same form
+  # as docker-compose.yml).
   env_file:
-    - .env
+    - path: .env
+      required: false
   environment: &federation-env
     NODE_ENV: production
     HOSTNAME: "0.0.0.0"
