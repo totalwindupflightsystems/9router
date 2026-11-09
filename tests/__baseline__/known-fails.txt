@@ -165,3 +165,18 @@ tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default execu
 # advance (comboDecision left as-is for request-scoped faults). Doctrine divergence
 # recorded on the board at backport v0.5.112; revisit only if Bane overrules it.
 tests/unit/codebuddy-block-backoff.test.js :: CodeBuddy Intl block backoff (#5024) advances past a malformed CodeBuddy request without cooling the account
+
+# ── 2026-11-09 backport sweep (upstream v0.5.116, 29 commits) ──────────────
+# NOT upstream-introduced and NOT a product regression: HOST-side harness drift.
+# tests/federation/qa-harness-cell-detection.test.js pins the bunker-qa.sh
+# verdict format ("harness 2026-09-24 format": trailing "(act leg rc=N: …)"
+# clause; chaos-disconnect decision-chain shape). The harness lives OUTSIDE the
+# repo at ~/.hermes/scripts/bunker-qa.sh and was rewritten there on 2026-11-05
+# 22:01 (new "act_result=…" verdict clauses + jq=MISSING context notes) by
+# another lane — after the baseline was frozen. Repo-side inputs of these 3
+# tests (the test file, the workflows fixtures) are byte-identical before and
+# after this merge, so the failures exist at pre-merge HEAD too. Fix belongs to
+# the QA-harness lane (update the pinned needles), tracked on the board.
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) ci-pass runs only workflows that can fire on a branch push (QA-9ROUTER-19) NEGATIVE CONTROL: a triggerable CI path that genuinely fails still grades FAIL
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) ci-pass runs only workflows that can fire on a branch push (QA-9ROUTER-19) NEGATIVE CONTROL: a passing native suite does not hide a real act failure
+tests/federation/qa-harness-cell-detection.test.js :: QA-battery cell detection (QA-9ROUTER-21/22/26) a missing-test-deps rc is INFRA, never a product result defines the predicate and places it before the OK fallback

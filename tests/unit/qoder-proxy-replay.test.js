@@ -81,7 +81,15 @@ describe("Qoder signed inference transport", () => {
     expect(result.response.ok).toBe(true);
     await result.response.text();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(!!fetchMock.mock.calls[0][1].dispatcher).toBe(useProxy);
+    // Upstream's DPI hardening (9router 736be957/963787f7, backported): the
+    // direct path now ALWAYS carries a dispatcher (the shared direct Agent) —
+    // the default global agent's ClientHello gets RST-ed by DPI-shaped
+    // networks. What proxy=false changes is the KIND: the direct Agent, never
+    // the proxy's ProxyAgent.
+    const { ProxyAgent } = await import("undici");
+    const dispatcher = fetchMock.mock.calls[0][1].dispatcher;
+    expect(dispatcher).toBeDefined();
+    expect(dispatcher instanceof ProxyAgent).toBe(useProxy);
   });
 
   it("preserves caller cancellation without replaying the request", async () => {

@@ -57,7 +57,7 @@ const {
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-const READY_LINE = "Router is now running in system tray";
+const READY_LINE = /Router is now running in system tray|No tray icon — the server keeps running/;
 const UNIT_TIMEOUT = 20000;
 const SPAWN_TIMEOUT = 60000;
 
@@ -422,7 +422,10 @@ function waitForExit(proc, timeoutMs) {
 async function waitForOutput(captured, needle, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (`${captured.stdout}${captured.stderr}`.includes(needle)) return true;
+    const combined = `${captured.stdout}${captured.stderr}`;
+    // needle may be a string (substring) or a RegExp — upstream's honest tray
+    // (8650b046) made the ready marker branch-dependent (see READY_LINE).
+    if (needle instanceof RegExp ? needle.test(combined) : combined.includes(needle)) return true;
     await delay(100);
   }
   return false;
@@ -468,7 +471,7 @@ describe("DF-9ROUTER-18 CLI launcher — startup failures propagate", () => {
       expect(captured.stderr).toMatch(/EADDRINUSE/);
       expect(captured.stderr).toMatch(new RegExp(`Port ${port}`));
       expect(captured.stderr).toMatch(/already in use/);
-      expect(captured.stdout).not.toMatch(new RegExp(READY_LINE));
+      expect(captured.stdout).not.toMatch(READY_LINE);
       expect(captured.stdout).not.toMatch(/🚀/); // banner only prints once we spawn
       // The pre-flight refusal happened BEFORE any child process was created.
       expect(fs.existsSync(cli.startedMarker)).toBe(false);
@@ -494,7 +497,7 @@ describe("DF-9ROUTER-18 CLI launcher — startup failures propagate", () => {
       expect(exit.code).not.toBe(0);
       expect(captured.stderr).toMatch(/Server failed to start/);
       expect(captured.stderr).toMatch(/exit code 1/);
-      expect(captured.stdout).not.toMatch(new RegExp(READY_LINE));
+      expect(captured.stdout).not.toMatch(READY_LINE);
       // The child really was spawned (this is the post-spawn path, not pre-flight).
       expect(fs.existsSync(cli.startedMarker)).toBe(true);
       expect(fs.existsSync(cli.boundMarker)).toBe(false);

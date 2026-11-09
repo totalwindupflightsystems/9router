@@ -48,10 +48,15 @@ let savedEnv;
 let originalFetch;
 
 function makeInnerStub() {
-  // Stands in for the real (native) fetch: the proxy attempt fails like a dead
-  // proxy does, the direct fallback succeeds. Counts live on the mock.
-  return vi.fn(async (_url, options = {}) => {
-    if (options.dispatcher) throw new Error("fetch failed");
+  // Stands in for the real transport: the proxy attempt fails like a dead
+  // proxy does, the direct fallback succeeds. Since upstream's DPI hardening
+  // the direct path also carries a dispatcher (from our own undici pool), so
+  // attempts can no longer be told apart by the presence of options.dispatcher
+  // — odd attempts are the proxy call, even attempts the direct fallback.
+  let attempts = 0;
+  return vi.fn(async (_url, _options = {}) => {
+    attempts += 1;
+    if (attempts % 2 === 1) throw new Error("fetch failed");
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -60,8 +65,7 @@ function makeInnerStub() {
 }
 
 const innerCallCount = (stub) => stub.mock.calls.length;
-const directCallCount = (stub) =>
-  stub.mock.calls.filter(([, options]) => !(options && options.dispatcher)).length;
+const directCallCount = (stub) => Math.floor(stub.mock.calls.length / 2);
 
 function proxyFallbackWarnCount(warnSpy) {
   return warnSpy.mock.calls.filter((args) => String(args[0]).includes("[ProxyFetch] Proxy failed")).length;

@@ -73,7 +73,7 @@ const {
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-const READY_LINE = "Router is now running in system tray";
+const READY_LINE = /Router is now running in system tray|No tray icon — the server keeps running/;
 const SPAWN_TIMEOUT = 60000;
 
 // Spawn-E2E shared state: fixture roots and the heartbeat interval that keeps
@@ -298,7 +298,10 @@ function waitForExit(proc, timeoutMs) {
 async function waitForOutput(captured, needle, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (`${captured.stdout}${captured.stderr}`.includes(needle)) return true;
+    const combined = `${captured.stdout}${captured.stderr}`;
+    // needle may be a string (substring) or a RegExp — upstream's honest tray
+    // (8650b046) made the ready marker branch-dependent (see READY_LINE).
+    if (needle instanceof RegExp ? needle.test(combined) : combined.includes(needle)) return true;
     await delay(100);
   }
   return false;
@@ -664,7 +667,7 @@ describe("DF-9ROUTER-28 CLI launcher — the resolved port drives everything", (
       expect(spawned.captured.stderr).toMatch(/EADDRINUSE/);
       expect(spawned.captured.stderr).toMatch(/PORT=<other port>/);
       expect(spawned.output()).not.toMatch(/20128/);
-      expect(spawned.captured.stdout).not.toMatch(new RegExp(READY_LINE));
+      expect(spawned.captured.stdout).not.toMatch(READY_LINE);
       expect(fs.existsSync(cli.startedMarker)).toBe(false);
     },
     SPAWN_TIMEOUT,
