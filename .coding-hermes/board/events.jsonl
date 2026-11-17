@@ -1216,3 +1216,4 @@
 {"id":1211,"event_type":"task_created","tick_number":null,"ts":null,"detail":"{\"id\":\"DOC-037\",\"status\":\"pending\"}","timestamp":"2026-11-16T17:49:59.381549+00:00","task_id":"DOC-037","actor":"foreman"}
 {"id":1212,"event_type":"task_created","tick_number":null,"ts":null,"detail":"{\"id\":\"DOC-038\",\"status\":\"pending\"}","timestamp":"2026-11-16T17:50:56.226785+00:00","task_id":"DOC-038","actor":"foreman"}
 {"id":1213,"event_type":"audit","tick_number":null,"ts":null,"detail":"{\"doc_writer_run\":\"2026-11-16\",\"injected\":[\"DOC-037\",\"DOC-038\"]}","timestamp":"2026-11-16T17:51:33.329391+00:00","task_id":"","actor":"doc-writer"}
+{"id":1214,"event_type":"task_completed","tick_number":null,"ts":null,"detail":"{\"status\":\"complete\"}","timestamp":"2026-11-16T20:05:51.825589+00:00","task_id":"DEPS-006","actor":"foreman"}

@@ -180,3 +180,10 @@ tasks:
   status: complete
   created_at: '2026-11-04T07:55:35.953387+00:00'
   completed_at: '2026-11-04T07:58:43.235890+00:00'
+- id: DEPS-006
+  title: 'Release-blocking prod advisory: node-forge >=1.4.3'
+  criteria:
+  - npm audit gives 0 high/critical; lockfile node-forge >=1.4.3; guard passes
+  status: complete
+  created_at: '2026-11-16T19:44:11.646857+00:00'
+  completed_at: '2026-11-16T19:57:02.513287+00:00'
