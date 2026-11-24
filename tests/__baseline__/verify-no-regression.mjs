@@ -1,5 +1,5 @@
-// Gate: so kết quả test hiện tại với baseline known-fails.
-// PASS nếu KHÔNG có test nào pass(baseline) → fail(now). Test mới được phép.
+// Gate: compare current test results against the known-fails baseline.
+// PASS if NO test goes pass(baseline) → fail(now). New tests are allowed.
 // Usage: node tests/__baseline__/verify-no-regression.mjs [<current-results.json>]
 //   No argument: run `npx vitest run --reporter=json` inside tests/ ourselves,
 //   evaluate the produced JSON, delete the tmpfile, and propagate the verdict
@@ -94,7 +94,7 @@ const nowFails = r.testResults.flatMap(f =>
     .map(a => normalizeTestFile(f.name) + " :: " + a.fullName)
 );
 
-// Regression = fail bây giờ NHƯNG không có trong baseline known-fails
+// Regression = fails now BUT is not in the known-fails baseline
 const regressions = nowFails.filter(f => !knownFails.has(f));
 
 if (regressions.length) {

@@ -32,9 +32,12 @@ export async function getCustomModels() {
 
 // Atomic upsert inside transaction to prevent duplicate races.
 // Re-adding an existing model updates caps/name/transport without resetting omitted fields.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, transport }) {
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, transport, upstreamModelId }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
+  const cleanUpstream = typeof upstreamModelId === "string" && upstreamModelId.trim()
+    ? upstreamModelId.trim()
+    : null;
   let added = false;
   db.transaction(() => {
     // Upstream parity (v0.5.69): re-adding an existing model now UPDATES
@@ -43,11 +46,25 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
     const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
     if (row) {
       const prev = parseJson(row.value) || {};
-      const next = { ...prev, ...(name ? { name } : {}), ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) };
+      const next = {
+        ...prev,
+        ...(name ? { name } : {}),
+        ...(caps ? { caps } : {}),
+        ...(transport ? { transport } : {}),
+        ...(cleanUpstream ? { upstreamModelId: cleanUpstream } : {}),
+      };
       db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
       return;
     }
-    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) });
+    const value = stringifyJson({
+      providerAlias,
+      id,
+      type,
+      name: name || id,
+      ...(caps ? { caps } : {}),
+      ...(transport ? { transport } : {}),
+      ...(cleanUpstream ? { upstreamModelId: cleanUpstream } : {}),
+    });
     const s = stampInsert(db);
     db.run(`INSERT INTO kv(scope, key, value${s.cols}) VALUES('customModels', ?, ?${s.placeholders})`, [k, value, ...s.params]);
     added = true;
